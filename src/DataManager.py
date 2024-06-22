@@ -1,4 +1,5 @@
 from src.DataFetchers import DataFetcher, BitmexDataFetcher, CoinbaseDataFetcher
+import configparser
 
 
 class DataManager:

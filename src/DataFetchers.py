@@ -6,26 +6,18 @@ import time
 import pandas as pd
 import ccxt
 from src.OHLCData import OHLCData
-
-import warnings
-
-warnings.filterwarnings(
-    "ignore", message="JSON format is not registered with bravado-core!"
-)
-warnings.filterwarnings(
-    "ignore", message="guid format is not registered with bravado-core!"
-)
-warnings.filterwarnings("ignore", category=UserWarning, module="swagger_spec_validator")
+import src.Warnings_to_ignore
 
 
 bitmex_api_key = "Hi7WUgzxyzCRY_1BJ0e7meab"
 bitmex_api_secret = "A64KwkbRqURgFAmarfF758ceAVtFoIJWZIXe5lpRIeld1FxD"
 
-#  coinbase_API_key = "cTgYvXpaksr5fFgr"
-#  coinbase_API_secret = "Css2cMN9kTjPNh2XvuHLM9HrdVcX3ty5"
-
 coinbase_API_key = "organizations/3a515644-f82d-412e-956e-38ee985c06d4/apiKeys/4b4bca01-ec6c-49b5-ad98-c427a6a80a78"
-coinbase_API_secret = "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEILioy4fqfPSC8p2Z2OhdxJo+rw3X5yNON+dutYXPNMgBoAoGCCqGSM49\nAwEHoUQDQgAEGFpwjI3Bs7ePdVjsOOsQs77dZZc1acrlgFkX69KJFslavy/6qlQM\nFRTUDrQeeyF1Xyjc1VhVLdOJUjlsosvXFA==\n-----END EC PRIVATE KEY-----\n"
+coinbase_API_secret = (
+    "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEILioy4fqfPSC8p2Z2OhdxJo+rw3X5yNON+dutYXPNMgBoAoGCCqG"
+    "SM49\nAwEHoUQDQgAEGFpwjI3Bs7ePdVjsOOsQs77dZZc1acrlgFkX69KJFslavy/6qlQM\nFRTUDrQeeyF1Xyjc1VhV"
+    "LdOJUjlsosvXFA==\n-----END EC PRIVATE KEY-----\n"
+)
 
 
 class DataFetcher:
@@ -55,7 +47,6 @@ class DataFetcher:
         pass
 
     def fetch_all_initial_live_prices(self, count=10):
-        # print("fetch_initial_live_prices")
         for currency in self.currencies.keys():
             self.fetch_initial_live_prices(currency, count)
             time.sleep(0.1)
@@ -65,8 +56,6 @@ class DataFetcher:
         pass
 
     def update_all_historical_prices(self):
-        # print("fetch_all_historical_prices")
-        # print(self.currencies.keys())
         for currency in self.currencies.keys():
             self.update_historical_prices(currency)
 
@@ -162,6 +151,7 @@ class BitmexDataFetcher(DataFetcher):
             binSize="1d",
             count=60,
             reverse=True,
+            partial=True,
             columns="timestamp, symbol, open, high, low, close, volume",
         ).result()
         items = reversed(historical_data[0])
@@ -177,12 +167,10 @@ class BitmexDataFetcher(DataFetcher):
 
 class CoinbaseDataFetcher(DataFetcher):
     def __init__(self):
-        # self.client = Client(coinbase_API_key, coinbase_API_secret)
         self.client = ccxt.coinbase(
             {
                 "apiKey": coinbase_API_key,
                 "secret": coinbase_API_secret,
-                #  "password": "your_passphrase",
             }
         )
 
@@ -200,21 +188,37 @@ class CoinbaseDataFetcher(DataFetcher):
         pass
 
     def fetch_live_price(self, currency):
-        pass
+        symbol = self.currencies[currency]
+        ticker = self.client.fetch_ticker(symbol)
+        timestamp_ms = ticker["timestamp"]
+        timestamp_s = timestamp_ms / 1000
+        datetime_obj = datetime.fromtimestamp(timestamp_s)
+        # print("coinbase", datetime_obj, ticker["datetime"])
+
+        current_price = ticker["last"]
+        self.live_data[currency].datetime.append(datetime_obj)
+        self.live_data[currency].high.append(current_price)
+        self.live_data[currency].low.append(current_price)
+        self.live_data[currency].close.append(current_price)
+        self.live_data[currency].open.append(current_price)
 
     def update_historical_prices(self, currency):
         symbol = self.currencies[currency]
         timeframe = "1d"  # Daily data
-        since = self.client.parse8601(
-            (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # since = self.client.parse8601(
+        #     (datetime.today() - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # )
+        since = (datetime.today() - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        since = 1714521600 * 1000
+        data = self.client.fetch_ohlcv(
+            symbol, timeframe, since, params={"until": 1719014400 * 1000}
         )
-        data = self.client.fetch_ohlcv(symbol, timeframe, since)
-        # print(data)
+        #  print(data)
         df = pd.DataFrame(
             data, columns=["timestamp", "open", "high", "low", "close", "volume"]
         )
-        df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms")
-
+        df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+        # print(df)
         if currency not in self.historical_data.keys():
             self.initialize_ohlc_data(currency)
 
