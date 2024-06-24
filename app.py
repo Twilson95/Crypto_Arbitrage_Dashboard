@@ -51,7 +51,9 @@ def update_historic_price_chart(currency, exchange, selected_indicators):
 
     indicators = technical_indicators.apply_indicators(prices, selected_indicators)
 
-    return price_chart.create_chart(prices, indicators, title="Historic Price")
+    return price_chart.create_chart(
+        prices, indicators, title="Historic Price", mark_limit=60
+    )
 
 
 @app.callback(

@@ -149,7 +149,7 @@ class BitmexDataFetcher(DataFetcher):
         historical_data = self.client.Trade.Trade_getBucketed(
             symbol=bitmex_symbol,
             binSize="1d",
-            count=60,
+            count=100,
             reverse=True,
             partial=True,
             columns="timestamp, symbol, open, high, low, close, volume",
@@ -157,7 +157,9 @@ class BitmexDataFetcher(DataFetcher):
         items = reversed(historical_data[0])
         # print("history prices: ", items)
         for item in items:  # Insert oldest first
-            self.historical_data[currency].datetime.append(item["timestamp"])
+            self.historical_data[currency].datetime.append(
+                item["timestamp"] - timedelta(days=1)
+            )
             self.historical_data[currency].open.append(item["open"])
             self.historical_data[currency].high.append(item["high"])
             self.historical_data[currency].low.append(item["low"])
@@ -185,7 +187,52 @@ class CoinbaseDataFetcher(DataFetcher):
         super().__init__()
 
     def fetch_initial_live_prices(self, currency, count):
-        pass
+        symbol = self.currencies[currency]
+        since = int((datetime.now() - timedelta(seconds=1000)).timestamp() * 1000)
+        trades_df = self.fetch_trades_within_timeframe(symbol, since)
+        # Bucket trades into 10-second intervals and aggregate into OHLCV
+        ohlcv_df = self.bucket_trades_into_intervals(
+            trades_df, interval="10s"
+        ).reset_index()
+
+        if currency not in self.historical_data.keys():
+            self.initialize_ohlc_data(currency)
+
+        self.historical_data[currency].update_from_dataframe(ohlcv_df)
+
+    def fetch_trades_within_timeframe(self, symbol, since):
+        until = self.client.parse8601(datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"))
+        trades = self.client.fetch_trades(symbol, since=since, params={"until": until})
+        data = [
+            {
+                "timestamp": trade["timestamp"],
+                "price": trade["price"],
+                "amount": trade["amount"],
+            }
+            for trade in trades
+        ]
+        df = pd.DataFrame(data)
+        df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+        return df
+
+    @staticmethod
+    def bucket_trades_into_intervals(df, interval="10S"):
+
+        # Resample trades into intervals and aggregate into OHLCV
+        ohlcv = df.resample(interval, on="datetime").agg(
+            {"price": ["first", "max", "min", "last"], "amount": "sum"}
+        )
+        # Rename columns
+        ohlcv.columns = ["open", "high", "low", "close", "volume"]
+
+        # Forward-fill missing data
+        ohlcv["open"].fillna(method="ffill", inplace=True)
+        ohlcv["high"].fillna(method="ffill", inplace=True)
+        ohlcv["low"].fillna(method="ffill", inplace=True)
+        ohlcv["close"].fillna(method="ffill", inplace=True)
+        ohlcv["volume"].fillna(0, inplace=True)  # Volume should be zero if no trades
+
+        return ohlcv
 
     def fetch_live_price(self, currency):
         symbol = self.currencies[currency]
@@ -205,13 +252,13 @@ class CoinbaseDataFetcher(DataFetcher):
     def update_historical_prices(self, currency):
         symbol = self.currencies[currency]
         timeframe = "1d"  # Daily data
-        # since = self.client.parse8601(
-        #     (datetime.today() - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        # )
-        since = (datetime.today() - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        since = 1714521600 * 1000
+        since = self.client.parse8601(
+            (datetime.today() - timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        )
         data = self.client.fetch_ohlcv(
-            symbol, timeframe, since, params={"until": 1719014400 * 1000}
+            symbol,
+            timeframe,
+            since,  # params={"until": 1719014400 * 1000}
         )
         #  print(data)
         df = pd.DataFrame(
