@@ -226,11 +226,11 @@ class CoinbaseDataFetcher(DataFetcher):
         ohlcv.columns = ["open", "high", "low", "close", "volume"]
 
         # Forward-fill missing data
-        ohlcv["open"].fillna(method="ffill", inplace=True)
-        ohlcv["high"].fillna(method="ffill", inplace=True)
-        ohlcv["low"].fillna(method="ffill", inplace=True)
-        ohlcv["close"].fillna(method="ffill", inplace=True)
-        ohlcv["volume"].fillna(0, inplace=True)  # Volume should be zero if no trades
+        ohlcv["open"] = ohlcv["open"].ffill()
+        ohlcv["high"] = ohlcv["high"].ffill()
+        ohlcv["low"] = ohlcv["low"].ffill()
+        ohlcv["close"] = ohlcv["close"].ffill()
+        ohlcv["volume"] = ohlcv["volume"].fillna(0)
 
         return ohlcv
 
@@ -240,7 +240,6 @@ class CoinbaseDataFetcher(DataFetcher):
         timestamp_ms = ticker["timestamp"]
         timestamp_s = timestamp_ms / 1000
         datetime_obj = datetime.fromtimestamp(timestamp_s)
-        # print("coinbase", datetime_obj, ticker["datetime"])
 
         current_price = ticker["last"]
         self.live_data[currency].datetime.append(datetime_obj)
@@ -260,12 +259,12 @@ class CoinbaseDataFetcher(DataFetcher):
             timeframe,
             since,  # params={"until": 1719014400 * 1000}
         )
-        #  print(data)
+
         df = pd.DataFrame(
             data, columns=["timestamp", "open", "high", "low", "close", "volume"]
         )
         df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
-        # print(df)
+
         if currency not in self.historical_data.keys():
             self.initialize_ohlc_data(currency)
 
