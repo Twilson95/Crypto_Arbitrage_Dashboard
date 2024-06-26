@@ -18,6 +18,8 @@ technical_indicators = TechnicalIndicators()
 app_layout = AppLayout(filter_component, technical_indicators)
 app.layout = app_layout.generate_layout()
 data_manager = DataManager()
+print("data enabled")
+
 price_chart = PriceChart()
 # news_chart = NewsChart()
 
@@ -86,4 +88,4 @@ def update_live_price_chart(currency, exchange, n_intervals, indicator):
 
 
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    app.run_server(debug=True, use_reloader=False)
