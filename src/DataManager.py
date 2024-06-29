@@ -3,9 +3,10 @@ import configparser
 
 
 class DataManager:
-    def __init__(self):
+    def __init__(self, config):
         self.bitmex_data_fetcher = BitmexDataFetcher()
         self.coinbase_data_fetcher = CoinbaseDataFetcher()
+        self.config = config
 
     def select_data_fetcher(self, exchange):
         if exchange == "bitmex":

@@ -1,4 +1,4 @@
-from dash import Dash, html, dcc
+from dash import Dash, html, dcc, dash_table
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output
 
@@ -6,22 +6,28 @@ from src.AppLayout import AppLayout
 from src.FilterComponents import FilterComponent
 from src.TechnicalIndicators import TechnicalIndicators
 from src.PriceChart import PriceChart
-
-# from src.NewsChart import NewsChart
+from src.NewsFetcher import NewsFetcher
+from src.NewsChart import NewsChart
 from src.DataManager import DataManager
+
+import configparser
 
 app = Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
 app.title = "Crypto Dashboard"
+
+config = configparser.ConfigParser()
+config.read("./src/Config.ini")
 
 filter_component = FilterComponent()
 technical_indicators = TechnicalIndicators()
 app_layout = AppLayout(filter_component, technical_indicators)
 app.layout = app_layout.generate_layout()
-data_manager = DataManager()
+data_manager = DataManager(config)
+news_fetcher = NewsFetcher(config)
 print("data enabled")
 
 price_chart = PriceChart()
-# news_chart = NewsChart()
+news_chart = NewsChart()
 
 
 @app.callback(
@@ -79,12 +85,16 @@ def update_live_price_chart(currency, exchange, n_intervals, indicator):
     return price_chart.create_chart(prices, mark_limit=20, title="Live Price")
 
 
-# @app.callback(Output("news-chart", "figure"), [Input("currency-selector", "value")])
-# def update_news_chart(currency):
-#     if currency:
-#         news = news_chart.get_news(currency)
-#         return news_chart.create_chart(news)
-#     return {}
+@app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
+def update_news_chart(currency):
+    if not currency:
+        return {}
+
+    news = news_fetcher.get_news_data(currency)
+    if not news:
+        return {}
+
+    return news_chart.create_table(news)
 
 
 if __name__ == "__main__":
