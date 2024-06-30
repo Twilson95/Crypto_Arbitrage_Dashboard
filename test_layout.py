@@ -9,10 +9,15 @@ from src.PriceChart import PriceChart
 from src.NewsFetcher import NewsFetcher
 from src.NewsChart import NewsChart
 from src.DataManager import DataManager
+from dummy_data import news, live_data, historical_data
 
 import configparser
 
-app = Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
+app = Dash(
+    __name__,
+    external_stylesheets=[dbc.themes.SLATE],
+    # external_stylesheets=[dbc.themes.BOOTSTRAP],
+)
 app.title = "Crypto Dashboard"
 
 config = configparser.ConfigParser()
@@ -22,21 +27,11 @@ filter_component = FilterComponent()
 technical_indicators = TechnicalIndicators()
 app_layout = AppLayout(filter_component, technical_indicators)
 app.layout = app_layout.generate_layout()
-data_manager = DataManager(config)
-news_fetcher = NewsFetcher(config)
+
 print("data enabled")
 
 price_chart = PriceChart()
 news_chart = NewsChart()
-
-
-@app.callback(
-    [
-        Input("interval-component", "n_intervals"),
-    ]
-)
-def fetch_all_live_prices(n_intervals):
-    data_manager.fetch_all_live_prices()
 
 
 @app.callback(
@@ -49,18 +44,10 @@ def fetch_all_live_prices(n_intervals):
     ],
 )
 def update_historic_price_chart(currency, exchange, selected_indicators):
-    # print("history price update", exchange)
-    if not (currency and exchange):
-        return {}
-
-    prices = data_manager.get_historical_prices(exchange, currency)
-    if not prices:
-        return {}
-
-    indicators = technical_indicators.apply_indicators(prices, selected_indicators)
+    indicators = None
 
     return price_chart.create_chart(
-        prices, indicators, title="Historic Price", mark_limit=60
+        historical_data, indicators, title="Historic Price", mark_limit=60
     )
 
 
@@ -74,28 +61,14 @@ def update_historic_price_chart(currency, exchange, selected_indicators):
     ],
 )
 def update_live_price_chart(currency, exchange, n_intervals, indicator):
-    # print("live chart update", exchange)
-    if not (currency or exchange):
-        return {}
 
-    prices = data_manager.get_live_prices(exchange, currency)
-    print(prices)
-    if not prices:
-        return {}
-
-    return price_chart.create_chart(prices, mark_limit=20, title="Live Price")
+    return price_chart.create_chart(live_data, mark_limit=20, title="Live Price")
 
 
 @app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
 def update_news_chart(currency):
-    if not currency:
-        return {}
 
-    news = news_fetcher.get_news_data(currency)
-    if not news:
-        return {}
-
-    return news_chart.create_table(news)
+    return news_chart.create_table_layout(news)
 
 
 if __name__ == "__main__":
