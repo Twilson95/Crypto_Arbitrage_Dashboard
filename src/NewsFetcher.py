@@ -10,9 +10,15 @@ class NewsFetcher:
         self.client = NewsApiClient(self.api_key)
         self.sentiment_allocator = SentimentAllocator()
         self.fetch_news_sources()
-        # self.fetch_all_latest_news()
-        self.fetch_latest_news("bitcoin")
-        # self.add_sentiment_analysis()
+        self.currencies = {
+            "bitcoin": "bitcoin",
+            "ethereum": "ethereum",
+            "solana": "solana",
+            "dogecoin": "dogecoin",
+            "cardano": "cardano",
+            "ripple": "ripple",
+        }
+        self.fetch_all_latest_news()
 
     def fetch_news_sources(self):
         # /v2/top-headlines/sources
@@ -21,15 +27,13 @@ class NewsFetcher:
             language="en",
             # country="us",
         )
-        # print(sources)
 
     def fetch_all_latest_news(self):
-        currencies = self.news_data.keys()
+        currencies = self.currencies.keys()
         for currency in currencies:
             self.fetch_latest_news(currency)
 
     def fetch_latest_news(self, currency):
-        currency = "bitcoin"
         self.news_data[currency] = []
 
         # /v2/top-headlines
@@ -40,8 +44,10 @@ class NewsFetcher:
             language="en",
             # country="us",
         )
-        # print("top_headlines", top_headlines[0])
+
         for headline in top_headlines["articles"]:
+            # print(headline)
+            headline["sentiment"] = self.get_sentiment(headline)
             self.news_data[currency].append(headline)
 
         # /v2/everything
@@ -56,6 +62,15 @@ class NewsFetcher:
         #     page=2,
         # )
         # print("all_articles", all_articles)
+
+    def get_sentiment(self, headline):
+        text = headline.get("description") or headline.get("title")
+
+        if text is None:
+            return None
+
+        sentiment = self.sentiment_allocator.generate_sentiment(text)
+        return sentiment
 
     def get_news_data(self, currency):
         return self.news_data[currency]

@@ -6,6 +6,22 @@ from src.layout_styles import style_table, style_cell
 
 
 class NewsChart:
+    def __init__(self):
+        self.url_style = {
+            "if": {"column_id": "URL"},
+            "textDecoration": "underline",
+            "color": "#0074D9",
+        }
+        self.sentiment_pos_style = {
+            "if": {"filter_query": "{Sentiment} = 'positive'"},
+            "backgroundColor": "#d4edda",
+            "color": "white",
+        }
+        self.sentiment_neg_style = {
+            "if": {"filter_query": "{Sentiment} = 'negative'"},
+            "backgroundColor": "#f8d7da",
+            "color": "white",
+        }
 
     def create_table(self, news_data):
         table_data = self.convert_news_data(news_data)
@@ -23,12 +39,12 @@ class NewsChart:
                     "Description": article["description"],
                     "URL": f"[Click Here]({article['url']})",
                     "Published": article["publishedAt"][:10],
+                    "Sentiment": article["sentiment"],
                 }
             )
         return table_data
 
-    @staticmethod
-    def create_table_layout(table_data):
+    def create_table_layout(self, table_data):
         columns = [
             {"name": "Source", "id": "Source"},
             # {"name": "Author", "id": "Author"},
@@ -58,10 +74,8 @@ class NewsChart:
             style_header={"backgroundColor": "rgb(30, 30, 30)", "color": "white"},
             style_data={"backgroundColor": "rgb(50, 50, 50)", "color": "white"},
             style_data_conditional=[
-                {
-                    "if": {"column_id": "URL"},
-                    "textDecoration": "underline",
-                    "color": "#0074D9",
-                }
+                self.url_style,
+                self.sentiment_pos_style,
+                self.sentiment_neg_style,
             ],
         )
