@@ -1,6 +1,6 @@
-from dash import Dash, html, dcc, dash_table
+from dash import html, dcc
 import dash_bootstrap_components as dbc
-from src.layout_styles import (
+from src.layout.layout_styles import (
     container_style,
     header_style,
     filter_container_style,

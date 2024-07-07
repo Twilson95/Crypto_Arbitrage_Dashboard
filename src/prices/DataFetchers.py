@@ -1,13 +1,11 @@
 from abc import abstractmethod
 from bitmex import bitmex
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from dateutil.tz import tzutc
 import time
 import pandas as pd
 import ccxt
-from src.OHLCData import OHLCData
-import src.Warnings_to_ignore
-
+from src.prices.OHLCData import OHLCData
 
 bitmex_api_key = "Hi7WUgzxyzCRY_1BJ0e7meab"
 bitmex_api_secret = "A64KwkbRqURgFAmarfF758ceAVtFoIJWZIXe5lpRIeld1FxD"

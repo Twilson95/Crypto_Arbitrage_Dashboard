@@ -1,8 +1,5 @@
-import requests
-import plotly.graph_objs as go
-from dash import Dash, html, dcc, dash_table
-import dash_bootstrap_components as dbc
-from src.layout_styles import style_table, style_cell
+from dash import dash_table
+from src.layout.layout_styles import style_table, style_cell
 
 
 class NewsChart:

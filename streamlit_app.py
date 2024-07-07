@@ -1,12 +1,12 @@
 import streamlit as st
 import configparser
 import pandas as pd
-from src.FilterComponents import FilterComponent
-from src.TechnicalIndicators import TechnicalIndicators
-from src.PriceChart import PriceChart
-from src.NewsFetcher import NewsFetcher
-from src.NewsChart import NewsChart
-from src.DataManager import DataManager
+from src.layout.FilterComponents import FilterComponent
+from src.prices.TechnicalIndicators import TechnicalIndicators
+from src.prices.PriceChart import PriceChart
+from src.news.NewsFetcher import NewsFetcher
+from src.news.NewsChart import NewsChart
+from src.prices.DataManager import DataManager
 
 st.set_page_config(page_title="Crypto Dashboard", layout="wide")
 

@@ -1,5 +1,4 @@
-from src.DataFetchers import DataFetcher, BitmexDataFetcher, CoinbaseDataFetcher
-import configparser
+from src.prices.DataFetchers import BitmexDataFetcher, CoinbaseDataFetcher
 
 
 class DataManager:

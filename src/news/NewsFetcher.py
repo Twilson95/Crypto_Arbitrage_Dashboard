@@ -1,6 +1,5 @@
 from newsapi import NewsApiClient
-from datetime import datetime
-from src.SentimentAllocator import SentimentAllocator
+from src.news.SentimentAllocator import SentimentAllocator
 
 
 class NewsFetcher:
