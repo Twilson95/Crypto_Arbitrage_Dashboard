@@ -12,20 +12,30 @@ from src.prices.DataManager import DataManager
 from src.news.NewsFetcher import NewsFetcher
 from src.news.NewsChart import NewsChart
 
+from time import time
+import asyncio
+
+import src.Warnings_to_ignore
 import configparser
 
 app = Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
 app.title = "Crypto Dashboard"
 
-config = configparser.ConfigParser()
-config.read("./src/config/Config.ini")
+exchange_config = configparser.ConfigParser()
+exchange_config.read("./src/config/exchange_api_keys.ini")
+
+news_config = configparser.ConfigParser()
+news_config.read("./src/config/news_api_keys.ini")
 
 filter_component = FilterComponent()
 technical_indicators = TechnicalIndicators()
 app_layout = AppLayout(filter_component, technical_indicators)
 app.layout = app_layout.generate_layout()
-data_manager = DataManager(config)
-news_fetcher = NewsFetcher(config)
+start_time = time()
+data_manager = DataManager(exchange_config)
+end_time = time()
+print(f"finished querying data: {end_time-start_time}")
+news_fetcher = NewsFetcher(news_config)
 print("data enabled")
 
 price_chart = PriceChart()
