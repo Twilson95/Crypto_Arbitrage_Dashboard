@@ -37,6 +37,10 @@ news_chart = NewsChart()
 )
 def fetch_all_live_prices(n_intervals):
     data_manager.fetch_all_live_prices()
+    # get_current_prices()
+    # identify_arbitrage()
+    # display_arbitrage()
+    # trade_arbitrage()
 
 
 @app.callback(
@@ -79,7 +83,7 @@ def update_live_price_chart(currency, exchange, n_intervals, indicator):
         return {}
 
     prices = data_manager.get_live_prices(exchange, currency)
-    print(prices)
+    # print(prices)
     if not prices:
         return {}
 

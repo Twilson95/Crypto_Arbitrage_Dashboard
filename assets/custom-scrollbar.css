@@ -1,19 +1,19 @@
 /* Custom scrollbars for WebKit browsers (Chrome, Safari) */
 ::-webkit-scrollbar {
     width: 6px; /* Width of the entire scrollbar */
-    height: 12px; /* Height of the entire scrollbar */
+    height: 6px; /* Height of the entire scrollbar */
 }
 
 ::-webkit-scrollbar-track {
-    background: #f1f1f1; /* Color of the scrollbar track */
+    background: transparent; /* Set the scrollbar track background to transparent */
 }
 
 ::-webkit-scrollbar-thumb {
-    background-color: #888; /* Color of the scrollbar handle */
-    border-radius: 6px; /* Roundness of the scrollbar handle */
-    border: 3px solid #f1f1f1; /* Padding around scrollbar handle */
+    background-color: #4974a5; /* Color of the scrollbar handle */
+    border-radius: 1px; /* Roundness of the scrollbar handle */
+    border: 0px solid #f1f1f1; /* Padding around scrollbar handle */
 }
 
-::-webkit-scrollbar-thumb:hover {
-    background: #555; /* Color of the scrollbar handle on hover */
+::-webkit-scrollbar-thumb:active {
+    background: #555; /* Color of the scrollbar handle on click */
 }
