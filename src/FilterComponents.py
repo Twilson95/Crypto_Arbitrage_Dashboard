@@ -15,6 +15,10 @@ class FilterComponent:
         ]
 
     @staticmethod
+    def get_currency_names():
+        return ["bitcoin", "ethereum", "solana", "dogecoin", "cardano", "ripple"]
+
+    @staticmethod
     def get_exchange_options():
         # Fetch exchange options
         return [
@@ -22,6 +26,10 @@ class FilterComponent:
             {"label": "Coinbase", "value": "coinbase"},
             {"label": "Binance", "value": "binance"},
         ]
+
+    @staticmethod
+    def get_exchange_names():
+        return ["bitmex", "coinbase", "binance"]
 
     @staticmethod
     def get_indicator_options():
