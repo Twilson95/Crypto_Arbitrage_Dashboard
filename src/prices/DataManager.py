@@ -20,23 +20,28 @@ class DataManager:
         await asyncio.gather(*tasks)
 
     async def initialize_exchange(self, exchange_name):
-        # try:
-        api_key = self.config[exchange_name]["api_key"]
-        api_secret = self.config[exchange_name]["api_secret"]
-        exchange_class = getattr(ccxt, exchange_name.lower())  # Get the exchange class
-        exchange = exchange_class(
-            {
-                "apiKey": api_key,
-                "secret": api_secret,
-            }
-        )
-        await exchange.load_markets()
-        data_fetcher = DataFetcher(exchange)
-        self.exchanges[exchange_name] = data_fetcher
-        await data_fetcher.async_init()
-        print(f"{exchange_name} initialized successfully")
-        # except Exception as e:
-        #     print(f"Failed to initialize {exchange_name}: {e}")
+        try:
+            api_key = self.config[exchange_name]["api_key"]
+            api_secret = self.config[exchange_name]["api_secret"]
+            api_secret = api_secret.replace("\\n", "\n").strip()
+
+            exchange_class = getattr(
+                ccxt, exchange_name.lower()
+            )  # Get the exchange class
+            exchange = exchange_class(
+                {
+                    "apiKey": api_key,
+                    "secret": api_secret,
+                }
+            )
+            await exchange.load_markets()
+            data_fetcher = DataFetcher(exchange)
+            self.exchanges[exchange_name] = data_fetcher
+            await data_fetcher.async_init()
+            print(f"{exchange_name} initialized successfully")
+
+        except Exception as e:
+            print(f"Failed to initialize {exchange_name}: {e}")
 
     async def close_exchanges(self):
         tasks = [exchange.close() for exchange in self.exchanges.values()]

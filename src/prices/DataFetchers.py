@@ -27,9 +27,11 @@ class DataFetcher:
         }
         self.historical_data = {}
         self.live_data = {}
+        self.market_symbols = []
 
     async def async_init(self):
         await self.fetch_all_initial_live_prices(count=10)
+        self.market_symbols = self.client.symbols
         await self.update_all_historical_prices()
 
     def initialize_ohlc_data(self, currency):
