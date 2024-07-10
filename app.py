@@ -14,18 +14,21 @@ from src.news.NewsChart import NewsChart
 
 from time import time
 import asyncio
+from threading import Thread
 
 import src.Warnings_to_ignore
 import configparser
+import yaml
+
 
 app = Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
 app.title = "Crypto Dashboard"
 
-exchange_config = configparser.ConfigParser()
-exchange_config.read("./src/config/exchange_api_keys.ini")
+with open("./src/config/exchange_config.yaml", "r") as f:
+    exchange_config = yaml.safe_load(f)
 
-news_config = configparser.ConfigParser()
-news_config.read("./src/config/news_api_keys.ini")
+with open("./src/config/news_config.yaml", "r") as f:
+    news_config = yaml.safe_load(f)
 
 filter_component = FilterComponent()
 technical_indicators = TechnicalIndicators()
@@ -35,24 +38,28 @@ start_time = time()
 data_manager = DataManager(exchange_config)
 end_time = time()
 print(f"finished querying data: {end_time-start_time}")
-news_fetcher = NewsFetcher(news_config)
+# news_fetcher = NewsFetcher(news_config)
 print("data enabled")
 
 price_chart = PriceChart()
-news_chart = NewsChart()
+# news_chart = NewsChart()
 
 
-@app.callback(
-    [
-        Input("interval-component", "n_intervals"),
-    ]
-)
-def fetch_all_live_prices(n_intervals):
-    data_manager.fetch_all_live_prices()
-    # get_current_prices()
-    # identify_arbitrage()
-    # display_arbitrage()
-    # trade_arbitrage()
+# @app.callback(
+#     [
+#         Input("interval-component", "n_intervals"),
+#     ]
+# )
+# def fetch_all_live_prices(n_intervals):
+#     loop = asyncio.get_event_loop()
+#     loop.run_until_complete(data_manager.fetch_all_live_prices())
+# asyncio.create_task(data_manager.fetch_all_live_prices())
+# asyncio.ensure_future
+# asyncio.run(data_manager.fetch_all_live_prices())
+# get_current_prices()
+# identify_arbitrage()
+# display_arbitrage()
+# trade_arbitrage()
 
 
 @app.callback(
@@ -65,7 +72,6 @@ def fetch_all_live_prices(n_intervals):
     ],
 )
 def update_historic_price_chart(currency, exchange, selected_indicators):
-    # print("history price update", exchange)
     if not (currency and exchange):
         return {}
 
@@ -90,29 +96,49 @@ def update_historic_price_chart(currency, exchange, selected_indicators):
     ],
 )
 def update_live_price_chart(currency, exchange, n_intervals, indicator):
-    # print("live chart update", exchange)
     if not (currency or exchange):
         return {}
 
     prices = data_manager.get_live_prices(exchange, currency)
-    # print(prices)
     if not prices:
         return {}
 
     return price_chart.create_chart(prices, mark_limit=20, title="Live Price")
 
 
-@app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
-def update_news_chart(currency):
-    if not currency:
-        return {}
+# @app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
+# def update_news_chart(currency):
+#     if not currency:
+#         return {}
+#
+#     news = news_fetcher.get_news_data(currency)
+#     if not news:
+#         return {}
+#
+#     return news_chart.create_table(news)
 
-    news = news_fetcher.get_news_data(currency)
-    if not news:
-        return {}
 
-    return news_chart.create_table(news)
+# async def fetch_all_live_data():
+#     """Another async function"""
+#     while True:
+#         await data_manager.fetch_all_live_prices()
+#         await asyncio.sleep(10)
+#         print("Fetched live data")
+#
+#
+# async def async_main():
+#     """Main async function"""
+#     await fetch_all_live_data()
+#     # await asyncio.gather(fetch_all_live_data())
+#
+#
+# def async_main_wrapper():
+#     """Not async Wrapper around async_main to run it as target function of Thread"""
+#     asyncio.run(async_main())
 
 
 if __name__ == "__main__":
+    # th = Thread(target=async_main_wrapper, daemon=True)
+    # th.start()
     app.run_server(debug=True, use_reloader=False)
+    # th.join()

@@ -2,29 +2,23 @@ from abc import abstractmethod
 from datetime import datetime, timedelta
 from dateutil.tz import tzutc
 import time
-import pandas as pd
-from bitmex import bitmex
+import pytz
 
-# import ccxt
+import pandas as pd
+
 import ccxt.async_support as ccxt
 from ccxt.base.errors import RateLimitExceeded
 
 from src.prices.OHLCData import OHLCData
 import logging
 import asyncio
+from aiohttp import ClientTimeout
 
 
 class DataFetcher:
-    def __init__(self, client):
+    def __init__(self, client, pairs_mapping):
         self.client = client
-        self.currencies = {
-            "bitcoin": "BTC/USD",
-            "ethereum": "ETH/USD",
-            "solana": "SOL/USD",
-            "dogecoin": "DOGE/USD",
-            "cardano": "ADA/USD",
-            "ripple": "XRP/USD",
-        }
+        self.currencies = pairs_mapping
         self.historical_data = {}
         self.live_data = {}
         self.market_symbols = []
@@ -44,11 +38,6 @@ class DataFetcher:
     def get_live_prices(self, currency):
         return self.live_data[currency]
 
-    async def fetch_all_live_prices(self):
-        tasks = [self.fetch_live_price(currency) for currency in self.currencies.keys()]
-        await asyncio.gather(*tasks)
-        # time.sleep(0.1)
-
     async def fetch_all_initial_live_prices(self, count=10):
         tasks = [
             self.fetch_initial_live_prices(currency, count)
@@ -65,20 +54,28 @@ class DataFetcher:
 
     async def fetch_initial_live_prices(self, currency, count):
         symbol = self.currencies[currency]
-        since = int((datetime.now() - timedelta(seconds=1000)).timestamp() * 1000)
-        trades_df = await self.fetch_trades_within_timeframe(symbol, since)
+
+        trades_df = await self.fetch_trades_within_timeframe(symbol)
         # Bucket trades into 10-second intervals and aggregate into OHLCV
         ohlcv_df = self.bucket_trades_into_intervals(
             trades_df, interval="10s"
         ).reset_index()
 
-        if currency not in self.historical_data.keys():
+        if currency not in self.live_data.keys():
             self.initialize_ohlc_data(currency)
 
-        self.historical_data[currency].update_from_dataframe(ohlcv_df)
+        self.live_data[currency].update_from_dataframe(ohlcv_df)
 
-    async def fetch_trades_within_timeframe(self, symbol, since):
-        until = self.client.parse8601(datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"))
+    async def fetch_trades_within_timeframe(self, symbol):
+        now = datetime.now(pytz.timezone("Europe/London"))
+        # until = self.client.parse8601(now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        # since = self.client.parse8601(
+        #     (datetime.now() - timedelta(minutes=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # )
+        since = int((now - timedelta(minutes=30)).timestamp() * 1000)
+        until = int(now.timestamp() * 1000)
+        # print(until)
+        # print(datetime.now())
         trades = await self.client.fetch_trades(
             symbol, since=since, params={"until": until}
         )
@@ -90,6 +87,7 @@ class DataFetcher:
             }
             for trade in trades
         ]
+        print(data)
         df = pd.DataFrame(data)
         df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
         return df
@@ -101,7 +99,6 @@ class DataFetcher:
         ohlcv = df.resample(interval, on="datetime").agg(
             {"price": ["first", "max", "min", "last"], "amount": "sum"}
         )
-        # Rename columns
         ohlcv.columns = ["open", "high", "low", "close", "volume"]
 
         # Forward-fill missing data
@@ -113,9 +110,16 @@ class DataFetcher:
 
         return ohlcv
 
+    async def fetch_all_live_prices(self):
+        tasks = [self.fetch_live_price(currency) for currency in self.currencies.keys()]
+        await asyncio.gather(*tasks)
+
     async def fetch_live_price(self, currency):
+        # print("fetching", currency)
         symbol = self.currencies[currency]
+
         ticker = await self.client.fetch_ticker(symbol)
+        # print("returned_live_price")
         timestamp_ms = ticker["timestamp"]
         timestamp_s = timestamp_ms / 1000
         datetime_obj = datetime.fromtimestamp(timestamp_s)
