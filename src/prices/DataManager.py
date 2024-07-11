@@ -8,9 +8,7 @@ class DataManager:
     def __init__(self, config):
         self.config = config
         self.exchanges = {}
-
-        # self.loop = asyncio.get_event_loop()
-        # self.loop.run_until_complete(self.initialize_exchanges())
+        self.initialized_event = asyncio.Event()
 
         self.loop = asyncio.new_event_loop()
         self.thread = Thread(target=self.run_loop, args=(self.loop,))
@@ -28,7 +26,7 @@ class DataManager:
             while True:
                 await self.fetch_all_live_prices()
                 await asyncio.sleep(10)  # Fetch every 10 seconds
-                print("Scheduled fetch_all_live_prices executed")
+                # print("Scheduled fetch_all_live_prices executed")
 
         asyncio.run_coroutine_threadsafe(periodic_fetch(), self.loop)
 
@@ -36,6 +34,7 @@ class DataManager:
         # initialise any exchange there exists api keys for
         tasks = [self.initialize_exchange(section) for section in self.config.keys()]
         await asyncio.gather(*tasks)
+        self.initialized_event.set()  # Signal that initialization is complete
 
     async def initialize_exchange(self, exchange_name):
         try:
@@ -77,14 +76,28 @@ class DataManager:
         await asyncio.gather(*tasks)
 
     def get_historical_prices(self, exchange, currency):
-        data_fetcher = self.exchanges[exchange]
+        future = asyncio.run_coroutine_threadsafe(
+            self._get_historical_prices(exchange, currency), self.loop
+        )
+        return future.result()
+
+    async def _get_historical_prices(self, exchange, currency):
+        await self.initialized_event.wait()  # Wait for initialization to complete
+        data_fetcher = self.exchanges.get(exchange)
         if not data_fetcher:
             return None
         prices = data_fetcher.get_historical_prices(currency)
         return prices
 
     def get_live_prices(self, exchange, currency):
-        data_fetcher = self.exchanges[exchange]
+        future = asyncio.run_coroutine_threadsafe(
+            self._get_live_prices(exchange, currency), self.loop
+        )
+        return future.result()
+
+    async def _get_live_prices(self, exchange, currency):
+        await self.initialized_event.wait()  # Wait for initialization to complete
+        data_fetcher = self.exchanges.get(exchange)
         if not data_fetcher:
             return None
         prices = data_fetcher.get_live_prices(currency)

@@ -24,7 +24,7 @@ class DataFetcher:
         self.market_symbols = []
 
     async def async_init(self):
-        await self.fetch_all_initial_live_prices(count=10)
+        # await self.fetch_all_initial_live_prices(count=10)
         self.market_symbols = self.client.symbols
         await self.update_all_historical_prices()
 
@@ -68,14 +68,9 @@ class DataFetcher:
 
     async def fetch_trades_within_timeframe(self, symbol):
         now = datetime.now(pytz.timezone("Europe/London"))
-        # until = self.client.parse8601(now.strftime("%Y-%m-%dT%H:%M:%SZ"))
-        # since = self.client.parse8601(
-        #     (datetime.now() - timedelta(minutes=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        # )
+
         since = int((now - timedelta(minutes=30)).timestamp() * 1000)
         until = int(now.timestamp() * 1000)
-        # print(until)
-        # print(datetime.now())
         trades = await self.client.fetch_trades(
             symbol, since=since, params={"until": until}
         )
@@ -87,7 +82,7 @@ class DataFetcher:
             }
             for trade in trades
         ]
-        print(data)
+        # print(data)
         df = pd.DataFrame(data)
         df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
         return df

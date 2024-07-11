@@ -13,8 +13,6 @@ from src.news.NewsFetcher import NewsFetcher
 from src.news.NewsChart import NewsChart
 
 from time import time
-import asyncio
-from threading import Thread
 
 import src.Warnings_to_ignore
 import configparser
@@ -37,13 +35,14 @@ app.layout = app_layout.generate_layout()
 start_time = time()
 data_manager = DataManager(exchange_config)
 end_time = time()
+
+
 print(f"finished querying data: {end_time-start_time}")
-# news_fetcher = NewsFetcher(news_config)
+news_fetcher = NewsFetcher(news_config)
 print("data enabled")
 
 price_chart = PriceChart()
-# news_chart = NewsChart()
-
+news_chart = NewsChart()
 
 # @app.callback(
 #     [
@@ -51,11 +50,6 @@ price_chart = PriceChart()
 #     ]
 # )
 # def fetch_all_live_prices(n_intervals):
-#     loop = asyncio.get_event_loop()
-#     loop.run_until_complete(data_manager.fetch_all_live_prices())
-# asyncio.create_task(data_manager.fetch_all_live_prices())
-# asyncio.ensure_future
-# asyncio.run(data_manager.fetch_all_live_prices())
 # get_current_prices()
 # identify_arbitrage()
 # display_arbitrage()
@@ -106,39 +100,17 @@ def update_live_price_chart(currency, exchange, n_intervals, indicator):
     return price_chart.create_chart(prices, mark_limit=20, title="Live Price")
 
 
-# @app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
-# def update_news_chart(currency):
-#     if not currency:
-#         return {}
-#
-#     news = news_fetcher.get_news_data(currency)
-#     if not news:
-#         return {}
-#
-#     return news_chart.create_table(news)
+@app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
+def update_news_chart(currency):
+    if not currency:
+        return {}
 
+    news = news_fetcher.get_news_data(currency)
+    if not news:
+        return {}
 
-# async def fetch_all_live_data():
-#     """Another async function"""
-#     while True:
-#         await data_manager.fetch_all_live_prices()
-#         await asyncio.sleep(10)
-#         print("Fetched live data")
-#
-#
-# async def async_main():
-#     """Main async function"""
-#     await fetch_all_live_data()
-#     # await asyncio.gather(fetch_all_live_data())
-#
-#
-# def async_main_wrapper():
-#     """Not async Wrapper around async_main to run it as target function of Thread"""
-#     asyncio.run(async_main())
+    return news_chart.create_table(news)
 
 
 if __name__ == "__main__":
-    # th = Thread(target=async_main_wrapper, daemon=True)
-    # th.start()
     app.run_server(debug=True, use_reloader=False)
-    # th.join()
