@@ -8,15 +8,8 @@ class NewsFetcher:
         self.api_key = config["NewsApi"]["api_key"]
         self.client = NewsApiClient(self.api_key)
         self.sentiment_allocator = SentimentAllocator()
-        self.fetch_news_sources()
-        self.currencies = {
-            "bitcoin": "bitcoin",
-            "ethereum": "ethereum",
-            "solana": "solana",
-            "dogecoin": "dogecoin",
-            "cardano": "cardano",
-            "ripple": "ripple",
-        }
+        # self.fetch_news_sources()
+        self.currencies = config["NewsApi"]["pairs"]
         self.fetch_all_latest_news()
 
     def fetch_news_sources(self):
@@ -28,16 +21,16 @@ class NewsFetcher:
         )
 
     def fetch_all_latest_news(self):
-        currencies = self.currencies.keys()
-        for currency in currencies:
+        for currency in self.currencies.keys():
             self.fetch_latest_news(currency)
 
     def fetch_latest_news(self, currency):
         self.news_data[currency] = []
+        search_query = self.currencies[currency]
 
         # /v2/top-headlines
         top_headlines = self.client.get_top_headlines(
-            q=currency,
+            q=search_query,
             # sources="bbc-news,the-verge",
             category="business",
             language="en",
@@ -45,7 +38,6 @@ class NewsFetcher:
         )
 
         for headline in top_headlines["articles"]:
-            # print(headline)
             headline["sentiment"] = self.get_sentiment(headline)
             self.news_data[currency].append(headline)
 

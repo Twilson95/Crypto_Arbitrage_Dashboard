@@ -1,10 +1,19 @@
 from plotly import graph_objs as go
+from plotly.subplots import make_subplots
 
 
 class PriceChart:
     @staticmethod
     def create_chart(prices, indicators=None, mark_limit=30, title="Price Chart"):
         fig = go.Figure()
+        # fig = make_subplots(
+        #     rows=3,
+        #     cols=1,
+        #     shared_xaxes=True,
+        #     row_heights=[0.5, 0.25, 0.25],
+        #     vertical_spacing=0.05,
+        #     subplot_titles=("Price", "MACD", "RSI"),
+        # )
 
         x = [dt.strftime("%Y-%m-%d %H:%M:%S") for dt in prices.datetime[-mark_limit:]]
         # print("dates: ", input_from, x)

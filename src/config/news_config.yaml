@@ -1,0 +1,12 @@
+CoinMarketCap:
+  api_key: bac77d39-fa4a-4d2f-89c8-da6aa31e7e18
+
+NewsApi:
+  api_key: be255c6b37f34a44b58a4e5ef6683c5b
+  pairs:
+    "BTC/USD": "bitcoin"
+    "ETH/USD": "ethereum"
+    "SOL/USD": "solana"
+    "DOGE/USD": "dogecoin"
+    "ADA/USD": "cardano"
+    "XRP/USD": "ripple"

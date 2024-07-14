@@ -6,12 +6,12 @@ class FilterComponent:
     def get_currency_options():
         # Fetch currency options
         return [
-            {"label": "Bitcoin", "value": "bitcoin"},
-            {"label": "Ethereum", "value": "ethereum"},
-            {"label": "Solana", "value": "solana"},
-            {"label": "Dogecoin", "value": "dogecoin"},
-            {"label": "Cardano", "value": "cardano"},
-            {"label": "Ripple", "value": "ripple"},
+            {"label": "Bitcoin", "value": "BTC/USD"},
+            {"label": "Ethereum", "value": "ETH/USD"},
+            {"label": "Solana", "value": "SOL/USD"},
+            {"label": "Dogecoin", "value": "DOGE/USD"},
+            {"label": "Cardano", "value": "ADA/USD"},
+            {"label": "Ripple", "value": "XRP/USD"},
         ]
 
     @staticmethod
@@ -22,9 +22,9 @@ class FilterComponent:
     def get_exchange_options():
         # Fetch exchange options
         return [
-            {"label": "Bitmex", "value": "bitmex"},
-            {"label": "Coinbase", "value": "coinbase"},
-            {"label": "Binance", "value": "binance"},
+            {"label": "Bitmex", "value": "Bitmex"},
+            {"label": "Coinbase", "value": "Coinbase"},
+            {"label": "Binance", "value": "Binance"},
         ]
 
     @staticmethod
