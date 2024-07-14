@@ -101,70 +101,94 @@ class AppLayout:
         ]
 
     def generate_layout(self):
-        return html.Div(
+        return dbc.Col(
             children=[
-                html.Div(
-                    html.H1("Crypto Dashboard"),
-                    style=header_style,
-                ),
-                html.Div(
-                    self.create_filters(),
-                    style=filter_container_style,
-                ),
-                html.Div(
-                    id="grid-container",
-                    style=grid_container_style,
-                    children=self.create_grid_elements(),
-                ),
+                self.create_title_and_tabs(),
                 dcc.Interval(
                     id="interval-component", interval=10 * 1000, n_intervals=0
                 ),
+                html.Div(
+                    self.create_filters(),
+                    id="filter-container",
+                    style=filter_container_style,
+                ),
+                # html.Div(id="tabs-content"),
+                self.tab_1_elements(),
+                self.tab_2_elements(),
             ],
             style=container_style,
         )
 
-    # import dash_ag_grid as dag
-    # from dash import Dash, html
-    #
-    # app = Dash(__name__)
-    #
-    # columnDefs = [
-    #     {"headerName": "Employee", "field": "employee"},
-    #     {
-    #         "headerName": "Number Sick Days (Editable)",
-    #         "field": "sickDays",
-    #         "editable": True,
-    #     },
-    # ]
-    #
-    # rowData = [
-    #     {"employee": "Josh Finch", "sickDays": 4},
-    #     {"employee": "Flavia Mccloskey", "sickDays": 1},
-    # ]
-    #
-    # getRowStyle = {
-    #     "styleConditions": [
-    #         {
-    #             "condition": "params.data.sickDays > 5 && params.data.sickDays <= 7",
-    #             "style": {"backgroundColor": "sandybrown"},
-    #         },
-    #         {
-    #             "condition": "params.data.sickDays >= 8",
-    #             "style": {"backgroundColor": "lightcoral"},
-    #         },
-    #     ],
-    #     "defaultStyle": {"backgroundColor": "grey", "color": "white"},
-    # }
-    #
-    # app.layout = html.Div(
-    #     [
-    #         dag.AgGrid(
-    #             id="styling-rows-conditional-style1",
-    #             columnDefs=columnDefs,
-    #             rowData=rowData,
-    #             columnSize="sizeToFit",
-    #             getRowStyle=getRowStyle,
-    #             dashGridOptions={"animateRows": False},
-    #         ),
-    #     ],
-    # )
+    @staticmethod
+    def create_title_and_tabs():
+        return dbc.Row(
+            children=[
+                dbc.Col(
+                    dcc.Tabs(
+                        id="tabs",
+                        value="tab-1",
+                        children=[
+                            dcc.Tab(label="Summary", value="tab-1"),
+                            dcc.Tab(label="Arbitrage", value="tab-2"),
+                        ],
+                        style={"width": "100%", "padding": "10px"},
+                    ),
+                    width={"size": 3, "order": 1},
+                    style={"display": "flex", "align-items": "center"},
+                ),
+                dbc.Col(
+                    html.Div(
+                        html.H1("Crypto Dashboard"),
+                        style={"textAlign": "center", **header_style},
+                    ),
+                    width={"size": 6, "order": 2},
+                ),
+                dbc.Col(
+                    # Empty column for spacing or other elements if needed
+                    width={"size": 3, "order": 3},
+                ),
+            ],
+            style={
+                "padding": "5px",
+                "align-items": "center",
+                "justify-content": "center",
+            },
+        )
+
+    def tab_1_elements(self):
+        return html.Div(
+            id="grid-container",
+            style=grid_container_style,
+            children=self.create_grid_elements(),
+        )
+
+    def tab_2_elements(self):
+        return html.Div(
+            id="arbitrage-container",
+            style=grid_container_style,
+            children=self.create_arbitrage_elements(),
+        )
+
+    @staticmethod
+    def create_arbitrage_elements():
+        return [
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dcc.Graph(
+                            id="arbitrage_main_view",
+                            style={"height": "100%", "width": "100%"},
+                        ),
+                        style=grid_element_style,
+                    ),
+                    dbc.Col(
+                        dcc.Graph(
+                            id="arbitrage_instructions",
+                            style={"height": "100%", "width": "100%"},
+                        ),
+                        style=grid_element_style,
+                    ),
+                ],
+                style=grid_row_style,
+            ),
+        ]

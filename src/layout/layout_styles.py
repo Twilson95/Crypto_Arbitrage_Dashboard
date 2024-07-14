@@ -2,7 +2,8 @@ container_style = {
     "display": "flex",
     "flex-direction": "column",
     "height": "100vh",  # Use full viewport height
-    "margin": "0px",
+    # "margin": "5px",
+    "overflow-x": "hidden",
 }
 header_style = {
     "flex": "0 1 auto",  # Allow header to take only necessary space
@@ -16,12 +17,18 @@ filter_container_style = {
     "width": "100%",
     "padding": "10px",
     "outline": "2px solid red",
-    "flex": "0 1 auto",  # Allow filter container to take only necessary space
 }
 filter_style = {
-    "width": "100%",
-    "margin-left": "1%",
-    "margin-right": "1%",
+    "flex": "1 1 auto",
+    # "display": "flex",
+    # "width": "100%",
+    # "margin-left": "1%",
+    # "margin-right": "1%",
+    # "margin": "1%",
+    "padding-left": "1%",
+    "padding-right": "1%",
+    # "min-width": "300px",
+    "outline": "2px solid green",
 }
 grid_container_style = {
     "flex": "1",  # Take the remaining space
@@ -33,6 +40,7 @@ grid_container_style = {
     # "height": "80vh",
     "outline": "2px solid blue",
 }
+
 grid_row_style = {
     "width": "100%",
     "display": "flex",
@@ -40,6 +48,8 @@ grid_row_style = {
     "justify-content": "stretch",
     "align-items": "stretch",
     "outline": "2px solid orange",
+    "margin": "0px",
+    "padding": "0px",
 }
 grid_element_style = {
     "flex": "1",  # flex-grow, flex-shrink, flex-basis
