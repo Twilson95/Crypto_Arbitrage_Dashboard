@@ -37,6 +37,7 @@ class DataManager:
         self.initialized_event.set()  # Signal that initialization is complete
 
     async def initialize_exchange(self, exchange_name):
+        exchange = None
         try:
             api_key = self.config[exchange_name]["api_key"]
             api_secret = self.config[exchange_name]["api_secret"]
@@ -58,8 +59,17 @@ class DataManager:
             self.exchanges[exchange_name] = data_fetcher
             await data_fetcher.async_init()
             print(f"{exchange_name} initialized successfully")
-
+        except ccxt.AuthenticationError as e:
+            print(f"Authentication failed for {exchange_name}: {e}")
+        except ccxt.NetworkError as e:
+            print(f"Network error for {exchange_name}: {e}")
+        except ccxt.BaseError as e:
+            print(f"Exchange error for {exchange_name}: {e}")
         except Exception as e:
+            print(f"Unexpected error for {exchange_name}: {e}")
+        finally:
+            if exchange is not None:
+                await exchange.close()
             print(f"Failed to initialize {exchange_name}: {e}")
 
     async def close_exchanges(self):
