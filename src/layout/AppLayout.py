@@ -41,7 +41,17 @@ class AppLayout:
             multi=True,
             style=filter_style,
         )
-        return [exchange_filter, currency_filter, indicator_filter]
+
+        arbitrage_filter = dcc.Dropdown(
+            id="arbitrage-selector",
+            options=self.filter_component.get_arbitrage_options(),
+            placeholder="Select an Arbitrage technique",
+            value="simple",
+            multi=False,
+            style=filter_style,
+        )
+
+        return [exchange_filter, currency_filter, indicator_filter, arbitrage_filter]
 
     @staticmethod
     def create_grid_elements():
@@ -131,28 +141,28 @@ class AppLayout:
                             dcc.Tab(label="Summary", value="tab-1"),
                             dcc.Tab(label="Arbitrage", value="tab-2"),
                         ],
-                        style={"width": "100%", "padding": "10px"},
+                        style={"width": "100%", "padding": "0px", "height": "60px"},
                     ),
-                    width={"size": 3, "order": 1},
-                    style={"display": "flex", "align-items": "center"},
+                    width={"size": 3, "order": 1, "height": "100%"},
+                    style={
+                        "display": "flex",
+                        "align-items": "center",
+                        "height": "100%",
+                    },
                 ),
                 dbc.Col(
                     html.Div(
                         html.H1("Crypto Dashboard"),
                         style={"textAlign": "center", **header_style},
                     ),
-                    width={"size": 6, "order": 2},
+                    width={"size": 6, "order": 2, "height": "100%"},
                 ),
                 dbc.Col(
                     # Empty column for spacing or other elements if needed
-                    width={"size": 3, "order": 3},
+                    width={"size": 3, "order": 3, "height": "100%"},
                 ),
             ],
-            style={
-                "padding": "5px",
-                "align-items": "center",
-                "justify-content": "center",
-            },
+            style=header_style,
         )
 
     def tab_1_elements(self):

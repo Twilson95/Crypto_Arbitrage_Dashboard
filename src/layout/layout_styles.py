@@ -5,30 +5,21 @@ container_style = {
     # "margin": "5px",
     "overflow-x": "hidden",
 }
-header_style = {
-    "flex": "0 1 auto",  # Allow header to take only necessary space
-    "text-align": "center",
-    "padding": "10px",
-}
+
 filter_container_style = {
     "display": "flex",
     "justify-content": "space-between",
     "align-items": "center",
     "width": "100%",
     "padding": "10px",
-    "outline": "2px solid red",
+    "outline": "2px solid white",
+    # "outline": "2px solid red",
 }
 filter_style = {
     "flex": "1 1 auto",
-    # "display": "flex",
-    # "width": "100%",
-    # "margin-left": "1%",
-    # "margin-right": "1%",
-    # "margin": "1%",
     "padding-left": "1%",
     "padding-right": "1%",
-    # "min-width": "300px",
-    "outline": "2px solid green",
+    # "outline": "2px solid green",
 }
 grid_container_style = {
     "flex": "1",  # Take the remaining space
@@ -37,19 +28,23 @@ grid_container_style = {
     # "justify-content": "center",
     "align-items": "center",
     "width": "100%",
-    # "height": "80vh",
-    "outline": "2px solid blue",
+    "padding": "5px",
+    # "outline": "2px solid blue",
 }
-
+header_style = {
+    # "padding": "5px",
+    # "height": "80px",
+    "align-items": "center",
+    "justify-content": "center",
+}
 grid_row_style = {
     "width": "100%",
     "display": "flex",
     "flex": "1",
     "justify-content": "stretch",
     "align-items": "stretch",
-    "outline": "2px solid orange",
     "margin": "0px",
-    "padding": "0px",
+    # "outline": "2px solid orange",
 }
 grid_element_style = {
     "flex": "1",  # flex-grow, flex-shrink, flex-basis
@@ -57,15 +52,13 @@ grid_element_style = {
     "flex-direction": "column",  # Make sure the flex direction is column
     "height": "100%",  # Set a fixed height to prevent shrinking
     "max-width": "50%",
-    # "margin": "1%",
+    "padding": "2.5px",
     "overflow": "hidden",
-    "outline": "2px solid yellow",
+    # "outline": "2px solid yellow",
 }
 style_table = {
     "flex": "1",
-    # "display": "flex",
     "height": "290px",
-    # "maxHeight": "290px",
     "overflowY": "scroll",  # Enable vertical scrolling
     "overflowX": "auto",  # Enable horizontal scrolling if needed
     "width": "100%",  # Ensure the table takes full width of the container
@@ -77,7 +70,6 @@ style_cell = {
     "maxWidth": "200px",
     "width": "auto",  # Allow width to adjust automatically
     "whiteSpace": "normal",  # Ensure content wraps within cells
-    # "whiteSpace": "no-wrap",
     "overflow": "hidden",
     "textOverflow": "ellipsis",
 }

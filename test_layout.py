@@ -37,6 +37,7 @@ news_chart = NewsChart()
         Output("exchange-selector", "style"),
         Output("currency-selector", "style"),
         Output("indicator-selector", "style"),
+        Output("arbitrage-selector", "style"),
     ],
     [Input("tabs", "value")],
     [
@@ -45,6 +46,7 @@ news_chart = NewsChart()
         State("exchange-selector", "style"),
         State("currency-selector", "style"),
         State("indicator-selector", "style"),
+        State("arbitrage-selector", "style"),
     ],
 )
 def render_tab_content(
@@ -54,6 +56,7 @@ def render_tab_content(
     exchange_filter_style,
     currency_filter_style,
     indicator_filter_style,
+    arbitrage_filter_style,
 ):
     if active_tab == "tab-1":
         grid_style["display"] = "flex"
@@ -61,18 +64,21 @@ def render_tab_content(
         exchange_filter_style["display"] = "block"
         currency_filter_style["display"] = "block"
         indicator_filter_style["display"] = "block"
+        arbitrage_filter_style["display"] = "none"
     elif active_tab == "tab-2":
         grid_style["display"] = "none"
         arbitrage_style["display"] = "flex"
         exchange_filter_style["display"] = "none"
         currency_filter_style["display"] = "block"
         indicator_filter_style["display"] = "none"
+        arbitrage_filter_style["display"] = "block"
     return (
         grid_style,
         arbitrage_style,
         exchange_filter_style,
         currency_filter_style,
         indicator_filter_style,
+        arbitrage_filter_style,
     )
 
 

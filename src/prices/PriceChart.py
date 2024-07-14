@@ -52,7 +52,7 @@ class PriceChart:
         fig.update_layout(
             title=title,
             xaxis=dict(
-                title="Time",
+                # title="Time",
                 #  type="date",
                 #  tickformat="%Y-%m-%d %H:%M:%S",
                 tickangle=0,
