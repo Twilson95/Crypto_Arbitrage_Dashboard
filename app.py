@@ -35,7 +35,6 @@ start_time = time()
 data_manager = DataManager(exchange_config)
 end_time = time()
 
-
 print(f"finished querying data: {end_time-start_time}")
 news_fetcher = NewsFetcher(news_config)
 print("data enabled")
@@ -141,6 +140,7 @@ def update_historic_price_chart(currency, exchange, selected_indicators):
     ],
 )
 def update_live_price_chart(currency, exchange, n_intervals, indicator):
+    print(currency, exchange)
     if not (currency or exchange):
         return {}
 
