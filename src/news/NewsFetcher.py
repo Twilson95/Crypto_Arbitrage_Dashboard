@@ -1,6 +1,5 @@
 from newsapi import NewsApiClient
-from datetime import datetime
-from src.SentimentAllocator import SentimentAllocator
+from src.news.SentimentAllocator import SentimentAllocator
 
 
 class NewsFetcher:
@@ -9,10 +8,9 @@ class NewsFetcher:
         self.api_key = config["NewsApi"]["api_key"]
         self.client = NewsApiClient(self.api_key)
         self.sentiment_allocator = SentimentAllocator()
-        self.fetch_news_sources()
-        # self.fetch_all_latest_news()
-        self.fetch_latest_news("bitcoin")
-        # self.add_sentiment_analysis()
+        # self.fetch_news_sources()
+        self.currencies = config["NewsApi"]["pairs"]
+        self.fetch_all_latest_news()
 
     def fetch_news_sources(self):
         # /v2/top-headlines/sources
@@ -21,27 +19,26 @@ class NewsFetcher:
             language="en",
             # country="us",
         )
-        # print(sources)
 
     def fetch_all_latest_news(self):
-        currencies = self.news_data.keys()
-        for currency in currencies:
+        for currency in self.currencies.keys():
             self.fetch_latest_news(currency)
 
     def fetch_latest_news(self, currency):
-        currency = "bitcoin"
         self.news_data[currency] = []
+        search_query = self.currencies[currency]
 
         # /v2/top-headlines
         top_headlines = self.client.get_top_headlines(
-            q=currency,
+            q=search_query,
             # sources="bbc-news,the-verge",
             category="business",
             language="en",
             # country="us",
         )
-        # print("top_headlines", top_headlines[0])
+
         for headline in top_headlines["articles"]:
+            headline["sentiment"] = self.get_sentiment(headline)
             self.news_data[currency].append(headline)
 
         # /v2/everything
@@ -56,6 +53,15 @@ class NewsFetcher:
         #     page=2,
         # )
         # print("all_articles", all_articles)
+
+    def get_sentiment(self, headline):
+        text = headline.get("description") or headline.get("title")
+
+        if text is None:
+            return None
+
+        sentiment = self.sentiment_allocator.generate_sentiment(text)
+        return sentiment
 
     def get_news_data(self, currency):
         return self.news_data[currency]

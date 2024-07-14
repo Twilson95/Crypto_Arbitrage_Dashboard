@@ -1,42 +1,59 @@
-from dash import Dash, html, dcc, dash_table
+from dash import Dash
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output
 
-from src.AppLayout import AppLayout
-from src.FilterComponents import FilterComponent
-from src.TechnicalIndicators import TechnicalIndicators
-from src.PriceChart import PriceChart
-from src.NewsFetcher import NewsFetcher
-from src.NewsChart import NewsChart
-from src.DataManager import DataManager
+from src.layout.AppLayout import AppLayout
+from src.layout.FilterComponents import FilterComponent
 
+from src.prices.TechnicalIndicators import TechnicalIndicators
+from src.prices.PriceChart import PriceChart
+from src.prices.DataManager import DataManager
+
+from src.news.NewsFetcher import NewsFetcher
+from src.news.NewsChart import NewsChart
+
+from time import time
+
+import src.Warnings_to_ignore
 import configparser
+import yaml
+
 
 app = Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
 app.title = "Crypto Dashboard"
 
-config = configparser.ConfigParser()
-config.read("./src/Config.ini")
+with open("./src/config/exchange_config.yaml", "r") as f:
+    exchange_config = yaml.safe_load(f)
+
+with open("./src/config/news_config.yaml", "r") as f:
+    news_config = yaml.safe_load(f)
 
 filter_component = FilterComponent()
 technical_indicators = TechnicalIndicators()
 app_layout = AppLayout(filter_component, technical_indicators)
 app.layout = app_layout.generate_layout()
-data_manager = DataManager(config)
-news_fetcher = NewsFetcher(config)
+start_time = time()
+data_manager = DataManager(exchange_config)
+end_time = time()
+
+
+print(f"finished querying data: {end_time-start_time}")
+news_fetcher = NewsFetcher(news_config)
 print("data enabled")
 
 price_chart = PriceChart()
 news_chart = NewsChart()
 
-
-@app.callback(
-    [
-        Input("interval-component", "n_intervals"),
-    ]
-)
-def fetch_all_live_prices(n_intervals):
-    data_manager.fetch_all_live_prices()
+# @app.callback(
+#     [
+#         Input("interval-component", "n_intervals"),
+#     ]
+# )
+# def fetch_all_live_prices(n_intervals):
+# get_current_prices()
+# identify_arbitrage()
+# display_arbitrage()
+# trade_arbitrage()
 
 
 @app.callback(
@@ -49,7 +66,6 @@ def fetch_all_live_prices(n_intervals):
     ],
 )
 def update_historic_price_chart(currency, exchange, selected_indicators):
-    # print("history price update", exchange)
     if not (currency and exchange):
         return {}
 
@@ -74,12 +90,10 @@ def update_historic_price_chart(currency, exchange, selected_indicators):
     ],
 )
 def update_live_price_chart(currency, exchange, n_intervals, indicator):
-    # print("live chart update", exchange)
     if not (currency or exchange):
         return {}
 
     prices = data_manager.get_live_prices(exchange, currency)
-    print(prices)
     if not prices:
         return {}
 

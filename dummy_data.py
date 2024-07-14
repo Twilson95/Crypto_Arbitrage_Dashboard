@@ -1,4 +1,4 @@
-from src.OHLCData import OHLCData
+from src.prices.OHLCData import OHLCData
 from datetime import datetime
 from dateutil.tz import tzutc
 

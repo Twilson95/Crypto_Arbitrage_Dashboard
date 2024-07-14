@@ -1,14 +1,12 @@
-from dash import Dash, html, dcc, dash_table
+from dash import Dash
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output
 
-from src.AppLayout import AppLayout
-from src.FilterComponents import FilterComponent
-from src.TechnicalIndicators import TechnicalIndicators
-from src.PriceChart import PriceChart
-from src.NewsFetcher import NewsFetcher
-from src.NewsChart import NewsChart
-from src.DataManager import DataManager
+from src.layout.AppLayout import AppLayout
+from src.layout.FilterComponents import FilterComponent
+from src.prices.TechnicalIndicators import TechnicalIndicators
+from src.prices.PriceChart import PriceChart
+from src.news.NewsChart import NewsChart
 from dummy_data import news, live_data, historical_data
 
 import configparser

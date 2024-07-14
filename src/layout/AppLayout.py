@@ -1,6 +1,6 @@
-from dash import Dash, html, dcc, dash_table
+from dash import html, dcc
 import dash_bootstrap_components as dbc
-from src.layout_styles import (
+from src.layout.layout_styles import (
     container_style,
     header_style,
     filter_container_style,
@@ -21,7 +21,7 @@ class AppLayout:
             id="exchange-selector",
             options=self.filter_component.get_exchange_options(),
             placeholder="Select an exchange",
-            value="bitmex",
+            value="Bitmex",
             style=filter_style,
         )
 
@@ -29,7 +29,7 @@ class AppLayout:
             id="currency-selector",
             options=self.filter_component.get_currency_options(),
             placeholder="Select a currency",
-            value="bitcoin",
+            value="BTC/USD",
             style=filter_style,
         )
 
