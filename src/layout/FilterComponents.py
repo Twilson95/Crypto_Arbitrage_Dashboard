@@ -32,13 +32,9 @@ class FilterComponent:
         return ["bitmex", "coinbase", "binance"]
 
     @staticmethod
-    def get_indicator_options():
-        return dcc.Dropdown(
-            id="filter-component",
-            options=[
-                {"label": "SMA", "value": "SMA"},
-                {"label": "EMA", "value": "EMA"},
-            ],
-            multi=True,
-            placeholder="Select technical indicators",
-        )
+    def get_arbitrage_options():
+        return [
+            {"label": "Simple Arbitrage", "value": "simple"},
+            {"label": "Triangular Arbitrage", "value": "triangular"},
+            {"label": "Statistical Arbitrage", "value": "statistical"},
+        ]

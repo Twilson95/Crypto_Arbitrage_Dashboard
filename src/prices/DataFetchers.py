@@ -22,6 +22,7 @@ class DataFetcher:
         self.historical_data = {}
         self.live_data = {}
         self.market_symbols = []
+        self.timeout = 10
 
     async def async_init(self):
         # await self.fetch_all_initial_live_prices(count=10)
@@ -43,14 +44,14 @@ class DataFetcher:
             self.fetch_initial_live_prices(currency, count)
             for currency in self.currencies.keys()
         ]
-        await asyncio.gather(*tasks)
+        await self._gather_with_timeout(tasks, "fetch_all_initial_live_prices")
 
     async def update_all_historical_prices(self):
         tasks = [
             self.update_historical_prices(currency)
             for currency in self.currencies.keys()
         ]
-        await asyncio.gather(*tasks)
+        await self._gather_with_timeout(tasks, "update_all_historical_prices")
 
     async def fetch_initial_live_prices(self, currency, count):
         symbol = self.currencies[currency]
@@ -107,13 +108,23 @@ class DataFetcher:
 
     async def fetch_all_live_prices(self):
         tasks = [self.fetch_live_price(currency) for currency in self.currencies.keys()]
-        await asyncio.gather(*tasks)
+        await self._gather_with_timeout(tasks, "fetch_all_live_prices")
 
     async def fetch_live_price(self, currency):
         # print("fetching", currency)
         symbol = self.currencies[currency]
 
-        ticker = await self.client.fetch_ticker(symbol)
+        try:
+            ticker = await asyncio.wait_for(
+                self.client.fetch_ticker(symbol), timeout=self.timeout
+            )
+        except asyncio.TimeoutError:
+            print(f"Timeout while fetching live price for {currency}")
+            return
+        except Exception as e:
+            print(f"Error while fetching live price for {currency}: {e}")
+            return
+
         # print("returned_live_price")
         timestamp_ms = ticker["timestamp"]
         timestamp_s = timestamp_ms / 1000
@@ -153,3 +164,11 @@ class DataFetcher:
             self.initialize_ohlc_data(currency)
 
         self.historical_data[currency].update_from_dataframe(df)
+
+    async def _gather_with_timeout(self, tasks, task_name):
+        try:
+            await asyncio.wait_for(asyncio.gather(*tasks), self.timeout)
+        except asyncio.TimeoutError:
+            print(f"Timeout during {task_name}")
+        except Exception as e:
+            print(f"Error during {task_name}: {e}")

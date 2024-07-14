@@ -67,10 +67,6 @@ class DataManager:
             print(f"Exchange error for {exchange_name}: {e}")
         except Exception as e:
             print(f"Unexpected error for {exchange_name}: {e}")
-        finally:
-            if exchange is not None:
-                await exchange.close()
-            print(f"Failed to initialize {exchange_name}: {e}")
 
     async def close_exchanges(self):
         tasks = [exchange.close() for exchange in self.exchanges.values()]
