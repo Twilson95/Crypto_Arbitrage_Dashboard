@@ -3,8 +3,9 @@ from plotly.subplots import make_subplots
 
 
 class PriceChart:
+
     @staticmethod
-    def create_chart(prices, indicators=None, mark_limit=30, title="Price Chart"):
+    def create_ohlc_chart(prices, indicators=None, mark_limit=30, title="Price Chart"):
         fig = go.Figure()
         # fig = make_subplots(
         #     rows=3,
@@ -64,4 +65,38 @@ class PriceChart:
             # height=400,  # Set a fixed height for the chart
         )
 
+        return fig
+
+    @staticmethod
+    def create_line_charts(prices, indicators=None, mark_limit=30, title="Price Chart"):
+        fig = go.Figure()
+
+        for exchange, dataset in prices.items():
+            x = [
+                dt.strftime("%Y-%m-%d %H:%M:%S")
+                for dt in dataset.datetime[-mark_limit:]
+            ]
+            close_prices = dataset.close[-mark_limit:]
+
+            # Add the candlestick trace for prices
+            fig.add_trace(
+                go.Scatter(
+                    x=x,
+                    y=close_prices,
+                    mode="lines",
+                    name=exchange,
+                )
+            )
+
+        fig.update_layout(
+            title=title,
+            xaxis=dict(
+                tickangle=0,
+                rangeslider=dict(visible=False),
+            ),
+            yaxis=dict(title="Price (USD)"),
+            template="plotly_dark",  # Optional: add a template for better visualization
+            margin=dict(l=10, r=10, t=40, b=10),  # Minimize the margins
+            # height=400,  # Set a fixed height for the chart
+        )
         return fig

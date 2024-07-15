@@ -189,14 +189,28 @@ class AppLayout:
                             id="arbitrage_main_view",
                             style={"height": "100%", "width": "100%"},
                         ),
-                        style=grid_element_style,
+                        width=9,
+                        style={
+                            "height": "100%",  # Set a fixed height to prevent shrinking
+                            "padding": "2.5px",
+                            "overflow": "hidden",
+                            "size": 9,
+                            # "outline": "2px solid yellow",
+                        },
                     ),
                     dbc.Col(
-                        dcc.Graph(
-                            id="arbitrage_instructions",
+                        html.Div(
+                            id="arbitrage_plots_container",
                             style={"height": "100%", "width": "100%"},
                         ),
-                        style=grid_element_style,
+                        width=3,
+                        style={
+                            "height": "100%",  # Set a fixed height to prevent shrinking
+                            "padding": "2.5px",
+                            "overflow": "hidden",
+                            "size": 1,
+                            # "outline": "2px solid yellow",
+                        },
                     ),
                 ],
                 style=grid_row_style,

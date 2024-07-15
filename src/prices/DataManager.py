@@ -108,3 +108,10 @@ class DataManager:
             return None
         prices = data_fetcher.get_live_prices(currency)
         return prices
+
+    def get_live_prices_across_exchanges(self, currency):
+        exchange_prices = {}
+        for exchange in self.exchanges:
+            live_prices = self.get_live_prices(exchange, currency)
+            exchange_prices[exchange] = live_prices
+        return exchange_prices

@@ -125,7 +125,7 @@ def update_historic_price_chart(currency, exchange, selected_indicators):
 
     indicators = technical_indicators.apply_indicators(prices, selected_indicators)
 
-    return price_chart.create_chart(
+    return price_chart.create_ohlc_chart(
         prices, indicators, title="Historic Price", mark_limit=60
     )
 
@@ -140,7 +140,7 @@ def update_historic_price_chart(currency, exchange, selected_indicators):
     ],
 )
 def update_live_price_chart(currency, exchange, n_intervals, indicator):
-    print(currency, exchange)
+    # print(currency, exchange)
     if not (currency or exchange):
         return {}
 
@@ -148,7 +148,7 @@ def update_live_price_chart(currency, exchange, n_intervals, indicator):
     if not prices:
         return {}
 
-    return price_chart.create_chart(prices, mark_limit=20, title="Live Price")
+    return price_chart.create_ohlc_chart(prices, mark_limit=20, title="Live Price")
 
 
 @app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
@@ -161,6 +161,55 @@ def update_news_chart(currency):
         return {}
 
     return news_chart.create_table(news)
+
+
+@app.callback(
+    Output("arbitrage_main_view", "figure"),
+    [
+        Input("arbitrage-selector", "value"),
+        Input("currency-selector", "value"),
+        Input("interval-component", "n_intervals"),
+    ],
+)
+def update_main_arbitrage_chart(arbitrage, currency, n_intervals):
+    if not currency:
+        return {}
+
+    if arbitrage == "simple":
+        prices = data_manager.get_live_prices_across_exchanges(currency)
+        if not prices:
+            return {}
+
+        return price_chart.create_line_charts(
+            prices, mark_limit=20, title="Live Exchange Prices"
+        )
+    elif arbitrage == "triangular":
+        return {}
+    elif arbitrage == "statistical":
+        return {}
+
+    return {}
+
+
+@app.callback(
+    Output("arbitrage_plots_container", "children"),
+    [
+        Input("arbitrage-selector", "value"),
+        Input("currency-selector", "value"),
+        Input("interval-component", "n_intervals"),
+    ],
+)
+def update_arbitrage_instructions(arbitrage, currency, n_intervals):
+    # # Example: Generating multiple plots
+    # df = pd.DataFrame({"x": range(10), "y": [i * n_intervals for i in range(10)]})
+    #
+    # plots = []
+    # for i in range(3):  # Generate 3 example plots
+    #     fig = px.line(df, x="x", y="y", title=f"Plot {i + 1}")
+    #     plot = dcc.Graph(figure=fig, style={"height": "300px"})
+    #     plots.append(plot)
+    return {}
+    # return plots
 
 
 if __name__ == "__main__":
