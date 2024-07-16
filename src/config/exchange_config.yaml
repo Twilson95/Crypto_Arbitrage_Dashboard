@@ -19,3 +19,27 @@ Coinbase:
     "DOGE/USD": "DOGE/USD"
     "ADA/USD": "ADA/USD"
     "XRP/USD": "XRP/USD"
+
+#Binance
+
+HTX:
+  api_key: 924d44f9-ez2xc4vb6n-0b47dc63-4eaa3
+  api_secret: db4499ce-2b99a0db-bd1437c4-e9b93
+  pairs:
+    "BTC/USD": "BTC/USDT"
+    "ETH/USD": "ETH/USDT"
+    "SOL/USD": "SOL/USDT"
+    "DOGE/USD": "DOGE/USDT"
+    "ADA/USD": "ADA/USDT"
+    "XRP/USD": "XRP/USDT"
+
+Kraken:
+  api_key: sJK+rjNp1UA9IQwZDalwg+usU9LTG5KTmxt6Kl92++4vk4/+jMcIQYyZ
+  api_secret: 8Qevz6zp3JzOTwBEw/bv2+KsFCTZL5DiKeqVI0TuiZXfkzoy8jnM+TtB0Q7NoZtn3UYhCC/Yfau2Dlis4xLOdA==
+  pairs:
+    "BTC/USD": "BTC/USD"
+    "ETH/USD": "ETH/USD"
+    "SOL/USD": "SOL/USD"
+    "DOGE/USD": "DOGE/USD"
+    "ADA/USD": "ADA/USD"
+    "XRP/USD": "XRP/USD"

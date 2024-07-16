@@ -8,6 +8,7 @@ class DataManager:
     def __init__(self, config):
         self.config = config
         self.exchanges = {}
+        self.exchange_fees = {}
         self.initialized_event = asyncio.Event()
 
         self.loop = asyncio.new_event_loop()
@@ -45,27 +46,29 @@ class DataManager:
 
             api_secret = api_secret.replace("\\n", "\n").strip()
 
-            exchange_class = getattr(
-                ccxt, exchange_name.lower()
-            )  # Get the exchange class
+            exchange_class = getattr(ccxt, exchange_name.lower())
             exchange = exchange_class(
                 {
                     "apiKey": api_key,
                     "secret": api_secret,
                 }
             )
-            await exchange.load_markets()
-            data_fetcher = DataFetcher(exchange, pairs_mapping)
+            markets = await exchange.load_markets()
+            data_fetcher = DataFetcher(exchange, pairs_mapping, markets)
             self.exchanges[exchange_name] = data_fetcher
             await data_fetcher.async_init()
             print(f"{exchange_name} initialized successfully")
         except ccxt.AuthenticationError as e:
+            await exchange.close()
             print(f"Authentication failed for {exchange_name}: {e}")
         except ccxt.NetworkError as e:
+            await exchange.close()
             print(f"Network error for {exchange_name}: {e}")
         except ccxt.BaseError as e:
+            await exchange.close()
             print(f"Exchange error for {exchange_name}: {e}")
         except Exception as e:
+            await exchange.close()
             print(f"Unexpected error for {exchange_name}: {e}")
 
     async def close_exchanges(self):
@@ -113,5 +116,6 @@ class DataManager:
         exchange_prices = {}
         for exchange in self.exchanges:
             live_prices = self.get_live_prices(exchange, currency)
-            exchange_prices[exchange] = live_prices
+            if live_prices:
+                exchange_prices[exchange] = live_prices
         return exchange_prices

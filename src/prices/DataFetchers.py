@@ -16,13 +16,27 @@ from aiohttp import ClientTimeout
 
 
 class DataFetcher:
-    def __init__(self, client, pairs_mapping):
+    def __init__(self, client, pairs_mapping, markets):
         self.client = client
         self.currencies = pairs_mapping
         self.historical_data = {}
         self.live_data = {}
         self.market_symbols = []
         self.timeout = 10
+        self.currency_fees = {}
+        self.extract_currency_fees(markets)
+
+    def extract_currency_fees(self, markets):
+        # for currency, symbol in self.currencies.items():
+        #     print(currency, symbol)
+        #     return
+        for currency, stats in markets.items():
+            print(currency, stats)
+            return
+        # for currency, symbol in self.currencies.items():
+        #     self.currency_fees[currency]["maker"] = markets[currency]["maker"]
+        #     self.currency_fees[currency]["taker"] = markets[currency]["taker"]
+        # print(self.currency_fees)
 
     async def async_init(self):
         # await self.fetch_all_initial_live_prices(count=10)
@@ -37,7 +51,7 @@ class DataFetcher:
         return self.historical_data[currency]
 
     def get_live_prices(self, currency):
-        return self.live_data[currency]
+        return self.live_data.get(currency)
 
     async def fetch_all_initial_live_prices(self, count=10):
         tasks = [

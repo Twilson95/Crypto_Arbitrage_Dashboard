@@ -25,6 +25,8 @@ class FilterComponent:
             {"label": "Bitmex", "value": "Bitmex"},
             {"label": "Coinbase", "value": "Coinbase"},
             {"label": "Binance", "value": "Binance"},
+            {"label": "Huobi", "value": "HTX"},
+            {"label": "Kraken", "value": "Kraken"},
         ]
 
     @staticmethod
