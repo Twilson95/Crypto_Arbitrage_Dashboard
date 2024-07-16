@@ -16,15 +16,16 @@ from aiohttp import ClientTimeout
 
 
 class DataFetcher:
-    def __init__(self, client, pairs_mapping, markets):
+    def __init__(self, client, exchange_name, pairs_mapping, markets):
         self.client = client
+        self.exchange_name = exchange_name
         self.currencies = pairs_mapping
         self.historical_data = {}
         self.live_data = {}
         self.market_symbols = []
         self.timeout = 10
         self.currency_fees = {}
-        self.extract_currency_fees(markets)
+        # self.extract_currency_fees(markets)
 
     def extract_currency_fees(self, markets):
         # for currency, symbol in self.currencies.items():
@@ -139,10 +140,13 @@ class DataFetcher:
             print(f"Error while fetching live price for {currency}: {e}")
             return
 
-        # print("returned_live_price")
+        # print(self.exchange_name, ticker)
         timestamp_ms = ticker["timestamp"]
-        timestamp_s = timestamp_ms / 1000
-        datetime_obj = datetime.fromtimestamp(timestamp_s)
+        if timestamp_ms is None:
+            datetime_obj = datetime.now()
+        else:
+            timestamp_s = timestamp_ms / 1000
+            datetime_obj = datetime.fromtimestamp(timestamp_s)
 
         current_price = ticker["last"]
         self.live_data[currency].datetime.append(datetime_obj)

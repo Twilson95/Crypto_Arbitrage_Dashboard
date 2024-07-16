@@ -54,7 +54,7 @@ class DataManager:
                 }
             )
             markets = await exchange.load_markets()
-            data_fetcher = DataFetcher(exchange, pairs_mapping, markets)
+            data_fetcher = DataFetcher(exchange, exchange_name, pairs_mapping, markets)
             self.exchanges[exchange_name] = data_fetcher
             await data_fetcher.async_init()
             print(f"{exchange_name} initialized successfully")
