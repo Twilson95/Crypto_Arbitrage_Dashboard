@@ -176,7 +176,9 @@ def update_main_arbitrage_chart(arbitrage, currency, n_intervals):
         return {}
 
     if arbitrage == "simple":
-        prices = data_manager.get_live_prices_across_exchanges(currency)
+        prices = data_manager.get_live_prices_for_all_exchanges(currency)
+        fees = data_manager.get_fees_for_all_exchanges(currency)
+        print(fees)
         if not prices:
             return {}
 

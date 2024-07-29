@@ -25,23 +25,34 @@ class DataFetcher:
         self.market_symbols = []
         self.timeout = 10
         self.currency_fees = {}
-        # self.extract_currency_fees(markets)
+        self.markets = markets
+        # self.extract_currency_fees()
 
-    def extract_currency_fees(self, markets):
-        # for currency, symbol in self.currencies.items():
-        #     print(currency, symbol)
-        #     return
-        for currency, stats in markets.items():
-            print(currency, stats)
-            return
-        # for currency, symbol in self.currencies.items():
-        #     self.currency_fees[currency]["maker"] = markets[currency]["maker"]
-        #     self.currency_fees[currency]["taker"] = markets[currency]["taker"]
-        # print(self.currency_fees)
+    async def extract_currency_fees(self):
+        for currency, symbol in self.currencies.items():
+            # trading_fee = self.markets.get(currency, {})
+            # self.currency_fees[currency]["maker"] = trading_fee.get("maker", 0)
+            # self.currency_fees[currency]["taker"] = trading_fee.get("taker", 0)
+
+            trading_fee = await self.client.fetch_trading_fee(currency)
+            self.currency_fees[currency]["maker"] = trading_fee.get("maker", 0)
+            self.currency_fees[currency]["taker"] = trading_fee.get("taker", 0)
+
+            # try:
+            #     trading_fee = await self.client.fetch_trading_fee(currency)
+            #     self.currency_fees[currency]["maker"] = trading_fee.get("maker", 0)
+            #     self.currency_fees[currency]["taker"] = trading_fee.get("taker", 0)
+            #
+            # except:
+            #     print("failed to find fees", self.exchange_name, currency, symbol)
+            #     trading_fee = self.markets.get(currency, {})
+            #     self.currency_fees[currency]["maker"] = trading_fee.get("maker", 0)
+            #     self.currency_fees[currency]["taker"] = trading_fee.get("taker", 0)
 
     async def async_init(self):
         # await self.fetch_all_initial_live_prices(count=10)
         self.market_symbols = self.client.symbols
+        # await self.extract_currency_fees()
         await self.update_all_historical_prices()
 
     def initialize_ohlc_data(self, currency):
@@ -49,10 +60,13 @@ class DataFetcher:
         self.live_data[currency] = OHLCData()
 
     def get_historical_prices(self, currency):
-        return self.historical_data[currency]
+        return self.historical_data.get(currency)
 
     def get_live_prices(self, currency):
         return self.live_data.get(currency)
+
+    def get_fees(self, currency):
+        return self.currency_fees.get(currency)
 
     async def fetch_all_initial_live_prices(self, count=10):
         tasks = [
