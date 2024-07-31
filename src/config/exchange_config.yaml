@@ -19,9 +19,9 @@ Coinbase:
     "DOGE/USD": "DOGE/USD"
     "ADA/USD": "ADA/USD"
     "XRP/USD": "XRP/USD"
-
-#Binance
-
+#
+##Binance
+#
 #HTX:
 #  api_key: 924d44f9-ez2xc4vb6n-0b47dc63-4eaa3
 #  api_secret: db4499ce-2b99a0db-bd1437c4-e9b93

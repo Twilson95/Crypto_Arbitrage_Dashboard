@@ -8,6 +8,7 @@ from src.layout.FilterComponents import FilterComponent
 from src.prices.TechnicalIndicators import TechnicalIndicators
 from src.prices.PriceChart import PriceChart
 from src.prices.DataManager import DataManager
+from src.prices.ArbitrageHandler import ArbitrageHandler
 
 from src.news.NewsFetcher import NewsFetcher
 from src.news.NewsChart import NewsChart
@@ -29,6 +30,8 @@ with open("./src/config/news_config.yaml", "r") as f:
 
 filter_component = FilterComponent()
 technical_indicators = TechnicalIndicators()
+arbitrage_handler = ArbitrageHandler()
+
 app_layout = AppLayout(filter_component, technical_indicators)
 app.layout = app_layout.generate_layout()
 start_time = time()
@@ -178,7 +181,8 @@ def update_main_arbitrage_chart(arbitrage, currency, n_intervals):
     if arbitrage == "simple":
         prices = data_manager.get_live_prices_for_all_exchanges(currency)
         fees = data_manager.get_fees_for_all_exchanges(currency)
-        print(fees)
+        # print("live prices", prices)
+        # print("fees", fees)
         if not prices:
             return {}
 
@@ -202,14 +206,17 @@ def update_main_arbitrage_chart(arbitrage, currency, n_intervals):
     ],
 )
 def update_arbitrage_instructions(arbitrage, currency, n_intervals):
-    # # Example: Generating multiple plots
-    # df = pd.DataFrame({"x": range(10), "y": [i * n_intervals for i in range(10)]})
-    #
-    # plots = []
-    # for i in range(3):  # Generate 3 example plots
-    #     fig = px.line(df, x="x", y="y", title=f"Plot {i + 1}")
-    #     plot = dcc.Graph(figure=fig, style={"height": "300px"})
-    #     plots.append(plot)
+
+    if arbitrage == "simple":
+        prices = data_manager.get_live_prices_for_all_exchanges(currency)
+        fees = data_manager.get_fees_for_all_exchanges(currency)
+        if prices and fees:
+            arbitrage_handler.return_simple_arbitrage(prices, fees)
+
+        # print(arbitrage)
+        # print("live prices", prices)
+        # print("fees", fees)
+
     return {}
     # return plots
 
