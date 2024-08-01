@@ -12,7 +12,6 @@ from ccxt.base.errors import RateLimitExceeded
 from src.prices.OHLCData import OHLCData
 import logging
 import asyncio
-from aiohttp import ClientTimeout
 
 
 class DataFetcher:
@@ -24,7 +23,7 @@ class DataFetcher:
         self.historical_data = {}
         self.live_data = {}
         self.market_symbols = []
-        self.timeout = 10
+        self.timeout = 20
         self.markets = markets
         # self.extract_currency_fees()
 
@@ -144,10 +143,14 @@ class DataFetcher:
                 self.client.fetch_ticker(symbol), timeout=self.timeout
             )
         except asyncio.TimeoutError:
-            print(f"Timeout while fetching live price for {currency}")
+            print(
+                f"{self.exchange_name}: Timeout while fetching live price for {currency}"
+            )
             return
         except Exception as e:
-            print(f"Error while fetching live price for {currency}: {e}")
+            print(
+                f"{self.exchange_name}: Error while fetching live price for {currency}: {e}"
+            )
             return
 
         # print(self.exchange_name, ticker)

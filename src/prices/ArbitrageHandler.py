@@ -19,8 +19,8 @@ class ArbitrageHandler:
                 highest_price_fee[1] = price_minus_fee
 
         arbitrage_opportunity = highest_price_fee[1] - lowest_price_fee[1]
-        # print(lowest_price_fee)
-        # print(highest_price_fee)
+        print(lowest_price_fee)
+        print(highest_price_fee)
         print(f"arbitrage opportunity: {arbitrage_opportunity}")
 
         if arbitrage_opportunity < 0:
