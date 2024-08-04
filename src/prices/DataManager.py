@@ -26,6 +26,7 @@ class DataManager:
         async def periodic_fetch():
             while True:
                 await self.fetch_all_live_prices()
+
                 await asyncio.sleep(10)  # Fetch every 10 seconds
                 # print("Scheduled fetch_all_live_prices executed")
 
@@ -39,25 +40,20 @@ class DataManager:
 
     async def initialize_exchange(self, exchange_name):
         exchange = None
+        api_key = self.config[exchange_name]["api_key"]
+        api_secret = self.config[exchange_name]["api_secret"]
+        pairs_mapping = self.config[exchange_name]["pairs"]
+
+        api_secret = api_secret.replace("\\n", "\n").strip()
+        exchange_class = getattr(ccxt, exchange_name.lower())
+
         try:
-            api_key = self.config[exchange_name]["api_key"]
-            api_secret = self.config[exchange_name]["api_secret"]
-            pairs_mapping = self.config[exchange_name]["pairs"]
-
-            api_secret = api_secret.replace("\\n", "\n").strip()
-
-            exchange_class = getattr(ccxt, exchange_name.lower())
             exchange = exchange_class(
                 {
                     "apiKey": api_key,
                     "secret": api_secret,
                 }
             )
-            markets = await exchange.load_markets()
-            data_fetcher = DataFetcher(exchange, exchange_name, pairs_mapping, markets)
-            self.exchanges[exchange_name] = data_fetcher
-            await data_fetcher.async_init()
-            print(f"{exchange_name} initialized successfully")
         except ccxt.AuthenticationError as e:
             await exchange.close()
             print(f"Authentication failed for {exchange_name}: {e}")
@@ -70,6 +66,27 @@ class DataManager:
         except Exception as e:
             await exchange.close()
             print(f"Unexpected error for {exchange_name}: {e}")
+
+        markets = await exchange.load_markets()
+        # print(exchange_name, "markets loaded")
+        # await self.extract_currency_fees(exchange, exchange_name, pairs_mapping)
+
+        data_fetcher = DataFetcher(exchange, exchange_name, pairs_mapping, markets)
+        # print(exchange_name, "data fetcher created")
+        self.exchanges[exchange_name] = data_fetcher
+        # print(exchange_name, "added to exchange dict")
+        await data_fetcher.async_init()
+        # print(exchange_name, "data fetcher initialized")
+
+        print(f"{exchange_name} initialized successfully")
+
+    async def extract_currency_fees(self, exchange, exchange_name, currencies):
+        for currency, symbol in currencies.items():
+            trading_fee = await exchange.fetch_trading_fee(currency)
+            self.exchange_fees[exchange_name][currency] = {
+                "maker": trading_fee.get("maker", 0),
+                "taker": trading_fee.get("taker", 0),
+            }
 
     async def close_exchanges(self):
         tasks = [exchange.close() for exchange in self.exchanges.values()]
@@ -112,10 +129,34 @@ class DataManager:
         prices = data_fetcher.get_live_prices(currency)
         return prices
 
-    def get_live_prices_across_exchanges(self, currency):
+    def get_live_prices_for_all_exchanges(self, currency):
         exchange_prices = {}
         for exchange in self.exchanges:
             live_prices = self.get_live_prices(exchange, currency)
             if live_prices:
                 exchange_prices[exchange] = live_prices
         return exchange_prices
+
+    def get_fees_for_all_exchanges(self, currency):
+        future = asyncio.run_coroutine_threadsafe(
+            self._get_fees_for_all_exchanges(currency), self.loop
+        )
+        return future.result()
+
+    async def _get_fees_for_all_exchanges(self, currency):
+        await self.initialized_event.wait()
+        exchange_fees = {}
+        for exchange in self.exchanges.keys():
+            fees = self.get_fees(exchange, currency)
+            if fees:
+                exchange_fees[exchange] = fees
+        return exchange_fees
+
+    def get_fees(self, exchange_name, currency):
+        exchange = self.exchanges.get(exchange_name, {})
+        return exchange.get_currency_fee(currency)
+
+    def fetch_deposit_withdrawal_rates(self):
+        deposit = None
+        withdrawal = None
+        return deposit, withdrawal

@@ -8,6 +8,7 @@ from src.layout.FilterComponents import FilterComponent
 from src.prices.TechnicalIndicators import TechnicalIndicators
 from src.prices.PriceChart import PriceChart
 from src.prices.DataManager import DataManager
+from src.prices.ArbitrageHandler import ArbitrageHandler
 
 from src.news.NewsFetcher import NewsFetcher
 from src.news.NewsChart import NewsChart
@@ -29,6 +30,8 @@ with open("./src/config/news_config.yaml", "r") as f:
 
 filter_component = FilterComponent()
 technical_indicators = TechnicalIndicators()
+arbitrage_handler = ArbitrageHandler()
+
 app_layout = AppLayout(filter_component, technical_indicators)
 app.layout = app_layout.generate_layout()
 start_time = time()
@@ -36,11 +39,11 @@ data_manager = DataManager(exchange_config)
 end_time = time()
 
 print(f"finished querying data: {end_time-start_time}")
-news_fetcher = NewsFetcher(news_config)
-print("data enabled")
+# news_fetcher = NewsFetcher(news_config)
+# news_chart = NewsChart()
 
+print("data enabled")
 price_chart = PriceChart()
-news_chart = NewsChart()
 
 # @app.callback(
 #     [
@@ -151,16 +154,16 @@ def update_live_price_chart(currency, exchange, n_intervals, indicator):
     return price_chart.create_ohlc_chart(prices, mark_limit=20, title="Live Price")
 
 
-@app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
-def update_news_chart(currency):
-    if not currency:
-        return {}
-
-    news = news_fetcher.get_news_data(currency)
-    if not news:
-        return {}
-
-    return news_chart.create_table(news)
+# @app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
+# def update_news_chart(currency):
+#     if not currency:
+#         return {}
+#
+#     news = news_fetcher.get_news_data(currency)
+#     if not news:
+#         return {}
+#
+#     return news_chart.create_table(news)
 
 
 @app.callback(
@@ -176,7 +179,10 @@ def update_main_arbitrage_chart(arbitrage, currency, n_intervals):
         return {}
 
     if arbitrage == "simple":
-        prices = data_manager.get_live_prices_across_exchanges(currency)
+        prices = data_manager.get_live_prices_for_all_exchanges(currency)
+        fees = data_manager.get_fees_for_all_exchanges(currency)
+        # print("live prices", prices)
+        # print("fees", fees)
         if not prices:
             return {}
 
@@ -200,14 +206,17 @@ def update_main_arbitrage_chart(arbitrage, currency, n_intervals):
     ],
 )
 def update_arbitrage_instructions(arbitrage, currency, n_intervals):
-    # # Example: Generating multiple plots
-    # df = pd.DataFrame({"x": range(10), "y": [i * n_intervals for i in range(10)]})
-    #
-    # plots = []
-    # for i in range(3):  # Generate 3 example plots
-    #     fig = px.line(df, x="x", y="y", title=f"Plot {i + 1}")
-    #     plot = dcc.Graph(figure=fig, style={"height": "300px"})
-    #     plots.append(plot)
+
+    if arbitrage == "simple":
+        prices = data_manager.get_live_prices_for_all_exchanges(currency)
+        fees = data_manager.get_fees_for_all_exchanges(currency)
+        if prices and fees:
+            arbitrage_handler.return_simple_arbitrage(prices, fees)
+
+        # print(arbitrage)
+        # print("live prices", prices)
+        # print("fees", fees)
+
     return {}
     # return plots
 

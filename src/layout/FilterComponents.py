@@ -27,6 +27,7 @@ class FilterComponent:
             {"label": "Binance", "value": "Binance"},
             {"label": "Huobi", "value": "HTX"},
             {"label": "Kraken", "value": "Kraken"},
+            {"label": "Bybit", "value": "Bybit"},
         ]
 
     @staticmethod
