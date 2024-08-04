@@ -68,8 +68,6 @@ class DataManager:
             print(f"Unexpected error for {exchange_name}: {e}")
 
         markets = await exchange.load_markets()
-        # print(exchange_name, "markets loaded")
-        # await self.extract_currency_fees(exchange, exchange_name, pairs_mapping)
 
         data_fetcher = DataFetcher(exchange, exchange_name, pairs_mapping, markets)
         # print(exchange_name, "data fetcher created")
@@ -137,26 +135,32 @@ class DataManager:
                 exchange_prices[exchange] = live_prices
         return exchange_prices
 
-    def get_fees_for_all_exchanges(self, currency):
+    def get_maker_taker_fees_for_all_exchanges(self, currency):
         future = asyncio.run_coroutine_threadsafe(
-            self._get_fees_for_all_exchanges(currency), self.loop
+            self._get_maker_taker_fees_for_all_exchanges(currency), self.loop
         )
         return future.result()
 
-    async def _get_fees_for_all_exchanges(self, currency):
+    async def _get_maker_taker_fees_for_all_exchanges(self, currency):
         await self.initialized_event.wait()
         exchange_fees = {}
-        for exchange in self.exchanges.keys():
-            fees = self.get_fees(exchange, currency)
+        for exchange_name, exchange in self.exchanges.items():
+            fees = exchange.get_currency_fee(exchange, currency)
             if fees:
                 exchange_fees[exchange] = fees
         return exchange_fees
 
-    def get_fees(self, exchange_name, currency):
-        exchange = self.exchanges.get(exchange_name, {})
-        return exchange.get_currency_fee(currency)
+    def get_withdrawal_deposit_fees_for_all_exchanges(self):
+        future = asyncio.run_coroutine_threadsafe(
+            self._get_withdrawal_deposit_fees_for_all_exchanges(), self.loop
+        )
+        return future.result()
 
-    def fetch_deposit_withdrawal_rates(self):
-        deposit = None
-        withdrawal = None
-        return deposit, withdrawal
+    async def _get_withdrawal_deposit_fees_for_all_exchanges(self):
+        await self.initialized_event.wait()
+        exchange_fees = {}
+        for exchange_name, exchange in self.exchanges.items():
+            fees = exchange.get_exchange_fees()
+            if fees:
+                exchange_fees[exchange] = fees
+        return exchange_fees

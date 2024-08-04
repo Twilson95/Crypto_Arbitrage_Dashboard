@@ -20,11 +20,22 @@ class DataFetcher:
         self.exchange_name = exchange_name
         self.currencies = pairs_mapping
         self.currency_fees = {}
+        self.exchange_fees = {}
         self.historical_data = {}
         self.live_data = {}
         self.market_symbols = []
         self.timeout = 10
         self.markets = markets
+
+    def extract_exchange_fees(self):
+        exchange_fees = self.client.fees["funding"]
+        for fee_type in ["withdrawal", "deposit"]:
+            if exchange_fees.get(fee_type, 0) == {}:
+                exchange_fees[fee_type] = 0
+        self.exchange_fees = {
+            "withdrawal": exchange_fees.get("withdrawal", 0),
+            "deposit": exchange_fees.get("deposit", 0),
+        }
 
     async def extract_currency_fees(self):
         for currency, symbol in self.currencies.items():
@@ -66,19 +77,15 @@ class DataFetcher:
     def get_currency_fee(self, currency):
         return self.currency_fees.get(currency, 0)
 
+    def get_exchange_fees(self):
+        return self.exchange_fees
+
     async def async_init(self):
         # await self.fetch_all_initial_live_prices(count=10)
-        # print(self.exchange_name, "async init started")
         self.market_symbols = self.client.symbols
-        # print(self.exchange_name, "got symbols")
-        start_time = time.time()
+        self.extract_exchange_fees()
         await self.extract_currency_fees()
-        end_time = time.time()
-        print(self.exchange_name, end_time - start_time, "extract time")
-        print(self.exchange_name, "extracted fees")
-
         await self.update_all_historical_prices()
-        print(self.exchange_name, "updated historic prices")
 
     def initialize_ohlc_data(self, currency):
         self.historical_data[currency] = OHLCData()

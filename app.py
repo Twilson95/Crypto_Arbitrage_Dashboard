@@ -176,7 +176,8 @@ def update_main_arbitrage_chart(arbitrage, currency, n_intervals):
 
     if arbitrage == "simple":
         prices = data_manager.get_live_prices_for_all_exchanges(currency)
-        fees = data_manager.get_fees_for_all_exchanges(currency)
+        currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(currency)
+        exchange_fees = data_manager.get_withdrawal_deposit_fees_for_all_exchanges()
         # print("live prices", prices)
         # print("fees", fees)
         if not prices:
@@ -205,9 +206,13 @@ def update_arbitrage_instructions(arbitrage, currency, n_intervals):
 
     if arbitrage == "simple":
         prices = data_manager.get_live_prices_for_all_exchanges(currency)
-        fees = data_manager.get_fees_for_all_exchanges(currency)
-        if prices and fees:
-            arbitrage_handler.return_simple_arbitrage(prices, fees)
+        currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(currency)
+        exchange_fees = data_manager.get_withdrawal_deposit_fees_for_all_exchanges()
+
+        if prices and currency_fees and exchange_fees:
+            arbitrage_handler.return_simple_arbitrage(
+                prices, currency_fees, exchange_fees
+            )
 
         # print(arbitrage)
         # print("live prices", prices)

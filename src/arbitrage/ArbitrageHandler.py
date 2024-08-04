@@ -4,8 +4,8 @@ from ArbitrageInstructions import ArbitrageInstructions
 class ArbitrageHandler:
     def __init__(self):
 
-    def return_simple_arbitrage(self, exchange_prices, fees):
-        arbitrages = self.identify_simple_arbitrage(exchange_prices, fees)
+    def return_simple_arbitrage(self, exchange_prices, currency_fees, exchange_fees):
+        arbitrages = self.identify_simple_arbitrage(exchange_prices, currency_fees)
         instruction_diagrams = []
         for arbitrage in arbitrages:
             arbitrage_instructions = ArbitrageInstructions(arbitrage)
@@ -13,7 +13,7 @@ class ArbitrageHandler:
             intruction_diagrams.append(instructions)
         return instruction_diagrams
 
-    def identify_simple_arbitrage(self, exchange_prices, fees):
+    def identify_simple_arbitrage(self, exchange_prices, currency_fees):
         """
         return list of arbitrage opportunities, if none exist return the closest
         """
@@ -23,7 +23,7 @@ class ArbitrageHandler:
         # print(fees)
 
         for exchange, prices in exchange_prices.items():
-            taker_fee = fees.get(exchange, {}).get("taker", 0)
+            taker_fee = currency_fees.get(exchange, {}).get("taker", 0)
             close_price = prices.close
             if len(close_price) == 0:
                 print(exchange, "has no prices")
@@ -50,11 +50,11 @@ class ArbitrageHandler:
         if arbitrage_opportunity < 0:
             exchange = lowest_price_fee[0]
             low_price = exchange_prices[exchange].close[-1]
-            low_fee = fees[exchange]["taker"]
+            low_fee = currency_fees[exchange]["taker"]
 
             exchange = highest_price_fee[0]
             high_price = exchange_prices[exchange].close[-1]
-            high_fee = fees[exchange]["taker"]
+            high_fee = currency_fees[exchange]["taker"]
 
             total_fees = low_price * low_fee + high_price * high_fee
 
@@ -64,4 +64,5 @@ class ArbitrageHandler:
 # get prices across exchanges
 # apply all maker/taker fees
 # apply all deposit and withdrawal fees
+# apply network fees
 # get best pair
