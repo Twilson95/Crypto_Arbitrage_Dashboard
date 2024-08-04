@@ -26,6 +26,7 @@ class DataManager:
         async def periodic_fetch():
             while True:
                 await self.fetch_all_live_prices()
+
                 await asyncio.sleep(10)  # Fetch every 10 seconds
                 # print("Scheduled fetch_all_live_prices executed")
 
@@ -67,11 +68,15 @@ class DataManager:
             print(f"Unexpected error for {exchange_name}: {e}")
 
         markets = await exchange.load_markets()
+        # print(exchange_name, "markets loaded")
         # await self.extract_currency_fees(exchange, exchange_name, pairs_mapping)
 
         data_fetcher = DataFetcher(exchange, exchange_name, pairs_mapping, markets)
+        # print(exchange_name, "data fetcher created")
         self.exchanges[exchange_name] = data_fetcher
+        # print(exchange_name, "added to exchange dict")
         await data_fetcher.async_init()
+        # print(exchange_name, "data fetcher initialized")
 
         print(f"{exchange_name} initialized successfully")
 

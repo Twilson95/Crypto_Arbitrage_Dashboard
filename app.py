@@ -39,11 +39,11 @@ data_manager = DataManager(exchange_config)
 end_time = time()
 
 print(f"finished querying data: {end_time-start_time}")
-news_fetcher = NewsFetcher(news_config)
-print("data enabled")
+# news_fetcher = NewsFetcher(news_config)
+# news_chart = NewsChart()
 
+print("data enabled")
 price_chart = PriceChart()
-news_chart = NewsChart()
 
 # @app.callback(
 #     [
@@ -154,16 +154,16 @@ def update_live_price_chart(currency, exchange, n_intervals, indicator):
     return price_chart.create_ohlc_chart(prices, mark_limit=20, title="Live Price")
 
 
-@app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
-def update_news_chart(currency):
-    if not currency:
-        return {}
-
-    news = news_fetcher.get_news_data(currency)
-    if not news:
-        return {}
-
-    return news_chart.create_table(news)
+# @app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
+# def update_news_chart(currency):
+#     if not currency:
+#         return {}
+#
+#     news = news_fetcher.get_news_data(currency)
+#     if not news:
+#         return {}
+#
+#     return news_chart.create_table(news)
 
 
 @app.callback(

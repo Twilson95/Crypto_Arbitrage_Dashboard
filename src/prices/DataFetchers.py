@@ -23,32 +23,62 @@ class DataFetcher:
         self.historical_data = {}
         self.live_data = {}
         self.market_symbols = []
-        self.timeout = 20
+        self.timeout = 10
         self.markets = markets
-        # self.extract_currency_fees()
 
     async def extract_currency_fees(self):
         for currency, symbol in self.currencies.items():
-            try:
-                trading_fee = await self.client.fetch_trading_fee(currency)
-            except:
-                print("failed to find fees", self.exchange_name, currency, symbol)
-                trading_fee = self.markets.get(currency, {})
+            options = [currency, symbol, currency + ":BTC", symbol + ":BTC"]
+            trading_fee = self.extract_currency_fee_simple(options)
 
-            if trading_fee is not None:
-                self.currency_fees[currency] = {
-                    "maker": trading_fee.get("maker", 0),
-                    "taker": trading_fee.get("taker", 0),
-                }
+            if trading_fee is None:
+                trading_fee = await self.extract_currency_fee_complex(options)
+
+            self.update_currency_fee(currency, trading_fee)
+        # print(self.exchange_name, self.currency_fees)
+
+    def extract_currency_fee_simple(self, options):
+        for option in options:
+            trading_fee = self.markets.get(option, None)
+            if trading_fee:
+                return trading_fee
+        return None
+
+    async def extract_currency_fee_complex(self, options):
+        trading_fee = None
+        for option in options:
+            try:
+                trading_fee = await self.client.fetch_trading_fee(option)
+                break
+            except Exception as e:
+                trading_fee = self.markets.get(option, None)
+                if trading_fee:
+                    break
+        return trading_fee
+
+    def update_currency_fee(self, currency, trading_fee):
+        if trading_fee is not None:
+            self.currency_fees[currency] = {
+                "maker": trading_fee.get("maker", 0),
+                "taker": trading_fee.get("taker", 0),
+            }
 
     def get_currency_fee(self, currency):
         return self.currency_fees.get(currency, 0)
 
     async def async_init(self):
         # await self.fetch_all_initial_live_prices(count=10)
+        # print(self.exchange_name, "async init started")
         self.market_symbols = self.client.symbols
+        # print(self.exchange_name, "got symbols")
+        start_time = time.time()
         await self.extract_currency_fees()
+        end_time = time.time()
+        print(self.exchange_name, end_time - start_time, "extract time")
+        print(self.exchange_name, "extracted fees")
+
         await self.update_all_historical_prices()
+        print(self.exchange_name, "updated historic prices")
 
     def initialize_ohlc_data(self, currency):
         self.historical_data[currency] = OHLCData()
@@ -153,13 +183,15 @@ class DataFetcher:
             )
             return
 
-        # print(self.exchange_name, ticker)
         timestamp_ms = ticker["timestamp"]
         if timestamp_ms is None:
             datetime_obj = datetime.now()
         else:
             timestamp_s = timestamp_ms / 1000
             datetime_obj = datetime.fromtimestamp(timestamp_s)
+
+        if currency not in self.live_data.keys():
+            self.initialize_ohlc_data(currency)
 
         current_price = ticker["last"]
         self.live_data[currency].datetime.append(datetime_obj)
@@ -197,9 +229,11 @@ class DataFetcher:
         self.historical_data[currency].update_from_dataframe(df)
 
     async def _gather_with_timeout(self, tasks, task_name):
-        try:
-            await asyncio.wait_for(asyncio.gather(*tasks), self.timeout)
-        except asyncio.TimeoutError:
-            print(f"{self.exchange_name}: Timeout during {task_name}")
-        except Exception as e:
-            print(f"{self.exchange_name}: Error during {task_name}: {e}")
+        await asyncio.wait_for(asyncio.gather(*tasks), self.timeout)
+
+        # try:
+        #     await asyncio.wait_for(asyncio.gather(*tasks), self.timeout)
+        # except asyncio.TimeoutError:
+        #     print(f"{self.exchange_name}: Timeout during {task_name}")
+        # except Exception as e:
+        #     print(f"{self.exchange_name}: Error during {task_name}: {e}")
