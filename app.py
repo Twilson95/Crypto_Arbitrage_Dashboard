@@ -8,14 +8,10 @@ from src.layout.FilterComponents import FilterComponent
 from src.prices.TechnicalIndicators import TechnicalIndicators
 from src.prices.PriceChart import PriceChart
 from src.prices.DataManager import DataManager
-from src.prices.ArbitrageHandler import ArbitrageHandler
-
-from src.news.NewsFetcher import NewsFetcher
-from src.news.NewsChart import NewsChart
+from src.arbitrage.ArbitrageHandler import ArbitrageHandler
 
 from time import time
 
-import src.Warnings_to_ignore
 import yaml
 
 

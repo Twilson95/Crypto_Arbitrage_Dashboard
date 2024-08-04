@@ -1,8 +1,23 @@
+from ArbitrageInstructions import ArbitrageInstructions
+
+
 class ArbitrageHandler:
     def __init__(self):
-        self.intruction_diagrams = []
 
     def return_simple_arbitrage(self, exchange_prices, fees):
+        arbitrages = self.identify_simple_arbitrage(exchange_prices, fees)
+        instruction_diagrams = []
+        for arbitrage in arbitrages:
+            arbitrage_instructions = ArbitrageInstructions(arbitrage)
+            instructions = arbitrage_instructions.return_simple_arbitrage_instructions()
+            intruction_diagrams.append(instructions)
+        return instruction_diagrams
+
+    def identify_simple_arbitrage(self, exchange_prices, fees):
+        """
+        return list of arbitrage opportunities, if none exist return the closest
+        """
+
         lowest_price_fee = ["exchange", float("inf"), "fee"]
         highest_price_fee = ["exchange", float("-inf"), "fee"]
         # print(fees)
