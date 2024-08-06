@@ -5,10 +5,12 @@ from threading import Thread
 
 
 class DataManager:
-    def __init__(self, config):
+    def __init__(self, config, network_fees_config):
         self.config = config
+        self.network_fees_config = network_fees_config
         self.exchanges = {}
         self.exchange_fees = {}
+        self.network_fees = self.fetch_network_fees()
         self.initialized_event = asyncio.Event()
 
         self.loop = asyncio.new_event_loop()
@@ -145,7 +147,7 @@ class DataManager:
         await self.initialized_event.wait()
         exchange_fees = {}
         for exchange_name, exchange in self.exchanges.items():
-            fees = exchange.get_currency_fee(exchange, currency)
+            fees = exchange.get_currency_fee(currency)
             if fees:
                 exchange_fees[exchange] = fees
         return exchange_fees
@@ -164,3 +166,10 @@ class DataManager:
             if fees:
                 exchange_fees[exchange] = fees
         return exchange_fees
+
+    def fetch_network_fees(self):
+        # possible to make this dynamic in future
+        return self.network_fees_config["default_network_fees"]
+
+    def get_network_fees(self, currency):
+        return self.network_fees[currency]

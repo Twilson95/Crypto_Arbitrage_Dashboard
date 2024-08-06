@@ -5,7 +5,7 @@ with open("./src/config/exchange_config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
 exchange_name = "Bitmex"
-exchange_name = "Kraken"
+# exchange_name = "Kraken"
 api_key = config[exchange_name]["api_key"]
 api_secret = config[exchange_name]["api_secret"]
 pairs_mapping = config[exchange_name]["pairs"]
@@ -22,7 +22,13 @@ exchange = exchange_class(
 markets = exchange.load_markets()
 
 # print(exchange.fetch_withdrawal_fees())
+# exchange_fees = exchange.fees
 
+currency = "BTC"
+fees = exchange.fetch_fees()
+print(fees)
+# Accessing the withdrawal fee for BTC
+withdrawal_fee = fees["withdraw"][currency]
 
-exchange_fees = exchange.fees
-exchange_fees["withdrawal"]
+print(f"The withdrawal fee for {currency} is {withdrawal_fee}")
+# exchange_fees["withdrawal"]

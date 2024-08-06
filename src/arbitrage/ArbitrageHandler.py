@@ -1,68 +1,103 @@
-from ArbitrageInstructions import ArbitrageInstructions
+from src.arbitrage.ArbitrageInstructions import ArbitrageInstructions
 
 
 class ArbitrageHandler:
     def __init__(self):
+        pass
 
-    def return_simple_arbitrage(self, exchange_prices, currency_fees, exchange_fees):
-        arbitrages = self.identify_simple_arbitrage(exchange_prices, currency_fees)
+    def return_simple_arbitrage(
+        self, exchange_prices, currency_fees, exchange_fees, network_fees
+    ):
+        arbitrages = self.identify_simple_arbitrage(
+            exchange_prices, currency_fees, exchange_fees, network_fees
+        )
         instruction_diagrams = []
         for arbitrage in arbitrages:
             arbitrage_instructions = ArbitrageInstructions(arbitrage)
             instructions = arbitrage_instructions.return_simple_arbitrage_instructions()
-            intruction_diagrams.append(instructions)
+            instruction_diagrams.append(instructions)
         return instruction_diagrams
 
-    def identify_simple_arbitrage(self, exchange_prices, currency_fees):
+    def identify_simple_arbitrage(
+        self, exchange_prices, currency_fees, exchange_fees, network_fees
+    ):
         """
-        return list of arbitrage opportunities, if none exist return the closest
+        Returns a list of arbitrage opportunities, if none exist return the closest opportunity.
+        Includes deposit/withdrawal fees, and network fees only when transferring between exchanges.
         """
+        arbitrage_opportunities = []
+        closest_opportunity = None
+        closest_difference = float("inf")
 
-        lowest_price_fee = ["exchange", float("inf"), "fee"]
-        highest_price_fee = ["exchange", float("-inf"), "fee"]
-        # print(fees)
+        # Iterate over all pairs of exchanges
+        for exchange_buy, prices_buy in exchange_prices.items():
+            taker_fee_buy = currency_fees.get(exchange_buy, {}).get("taker", 0)
+            deposit_fee_buy = exchange_fees.get(exchange_buy, {}).get("deposit", 0)
+            withdraw_fee_buy = exchange_fees.get(exchange_buy, {}).get("withdraw", 0)
 
-        for exchange, prices in exchange_prices.items():
-            taker_fee = currency_fees.get(exchange, {}).get("taker", 0)
-            close_price = prices.close
-            if len(close_price) == 0:
-                print(exchange, "has no prices")
+            close_price_buy = prices_buy.close
+            if len(close_price_buy) == 0:
+                print(exchange_buy, "has no prices")
                 continue
-            price = prices.close[-1]
-            price_minus_fee = price * (1 - taker_fee)
-            price_plus_fee = price * (1 + taker_fee)
+            price_buy = close_price_buy[-1]
+            price_plus_fee_buy = price_buy * (1 + taker_fee_buy + withdraw_fee_buy)
 
-            if price_plus_fee < lowest_price_fee[1]:
-                lowest_price_fee[0] = exchange
-                lowest_price_fee[1] = price_plus_fee
-                lowest_price_fee[2] = taker_fee
+            for exchange_sell, prices_sell in exchange_prices.items():
+                if exchange_sell == exchange_buy:
+                    continue
 
-            if price_minus_fee > highest_price_fee[1]:
-                highest_price_fee[0] = exchange
-                highest_price_fee[1] = price_minus_fee
-                highest_price_fee[2] = taker_fee
+                taker_fee_sell = currency_fees.get(exchange_sell, {}).get("taker", 0)
+                deposit_fee_sell = exchange_fees.get(exchange_sell, {}).get(
+                    "deposit", 0
+                )
+                withdraw_fee_sell = exchange_fees.get(exchange_sell, {}).get(
+                    "withdraw", 0
+                )
 
-        arbitrage_opportunity = highest_price_fee[1] - lowest_price_fee[1]
-        print(lowest_price_fee)
-        print(highest_price_fee)
-        print(f"arbitrage opportunity: {arbitrage_opportunity}")
+                close_price_sell = prices_sell.close
+                if len(close_price_sell) == 0:
+                    print(exchange_sell, "has no prices")
+                    continue
+                price_sell = close_price_sell[-1]
+                price_minus_fee_sell = price_sell * (
+                    1 - taker_fee_sell - deposit_fee_sell
+                )
 
-        if arbitrage_opportunity < 0:
-            exchange = lowest_price_fee[0]
-            low_price = exchange_prices[exchange].close[-1]
-            low_fee = currency_fees[exchange]["taker"]
+                # Calculate the network fee only if a transfer is needed
+                network_fee = network_fees if exchange_buy != exchange_sell else 0
 
-            exchange = highest_price_fee[0]
-            high_price = exchange_prices[exchange].close[-1]
-            high_fee = currency_fees[exchange]["taker"]
+                # Calculate potential arbitrage opportunity
+                arbitrage_profit = price_minus_fee_sell - (
+                    price_plus_fee_buy + network_fee
+                )
+                total_fees = (
+                    (price_buy * (taker_fee_buy + withdraw_fee_buy))
+                    + (price_sell * (taker_fee_sell + deposit_fee_sell))
+                    + network_fee
+                )
 
-            total_fees = low_price * low_fee + high_price * high_fee
+                arbitrage_details = {
+                    "buy_exchange": exchange_buy,
+                    "buy_price": price_buy,
+                    "buy_taker_fee": taker_fee_buy,
+                    "buy_withdraw_fee": withdraw_fee_buy,
+                    "sell_exchange": exchange_sell,
+                    "sell_price": price_sell,
+                    "sell_taker_fee": taker_fee_sell,
+                    "sell_deposit_fee": deposit_fee_sell,
+                    "profit": arbitrage_profit,
+                    "total_fees": total_fees,
+                }
 
-            print(f"Prices difference needs to be at least {total_fees}")
+                if arbitrage_profit > 0:
+                    arbitrage_opportunities.append(arbitrage_details)
+                else:
+                    difference = abs(arbitrage_profit)
+                    if difference < closest_difference:
+                        closest_difference = difference
+                        closest_opportunity = arbitrage_details
 
-
-# get prices across exchanges
-# apply all maker/taker fees
-# apply all deposit and withdrawal fees
-# apply network fees
-# get best pair
+        if arbitrage_opportunities:
+            return arbitrage_opportunities
+        else:
+            return [closest_opportunity]

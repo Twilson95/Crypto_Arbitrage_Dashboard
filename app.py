@@ -24,6 +24,9 @@ with open("./src/config/exchange_config.yaml", "r") as f:
 with open("./src/config/news_config.yaml", "r") as f:
     news_config = yaml.safe_load(f)
 
+with open("./src/config/network_fees.yaml", "r") as f:
+    network_fees_config = yaml.safe_load(f)
+
 filter_component = FilterComponent()
 technical_indicators = TechnicalIndicators()
 arbitrage_handler = ArbitrageHandler()
@@ -31,7 +34,7 @@ arbitrage_handler = ArbitrageHandler()
 app_layout = AppLayout(filter_component, technical_indicators)
 app.layout = app_layout.generate_layout()
 start_time = time()
-data_manager = DataManager(exchange_config)
+data_manager = DataManager(exchange_config, network_fees_config)
 end_time = time()
 
 print(f"finished querying data: {end_time-start_time}")
@@ -195,7 +198,7 @@ def update_main_arbitrage_chart(arbitrage, currency, n_intervals):
 
 
 @app.callback(
-    Output("arbitrage_plots_container", "children"),
+    Output("arbitrage_instructions_container", "children"),
     [
         Input("arbitrage-selector", "value"),
         Input("currency-selector", "value"),
@@ -208,10 +211,14 @@ def update_arbitrage_instructions(arbitrage, currency, n_intervals):
         prices = data_manager.get_live_prices_for_all_exchanges(currency)
         currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(currency)
         exchange_fees = data_manager.get_withdrawal_deposit_fees_for_all_exchanges()
+        network_fees = data_manager.get_network_fees(currency)
+        # print("currency_fees", currency_fees)
+        # print("exchange_fees", exchange_fees)
+        # print("network_fees", network_fees)
 
-        if prices and currency_fees and exchange_fees:
-            arbitrage_handler.return_simple_arbitrage(
-                prices, currency_fees, exchange_fees
+        if prices and currency_fees and exchange_fees and network_fees:
+            return arbitrage_handler.return_simple_arbitrage(
+                prices, currency_fees, exchange_fees, network_fees
             )
 
         # print(arbitrage)

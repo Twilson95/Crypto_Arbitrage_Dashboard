@@ -200,14 +200,18 @@ class AppLayout:
                     ),
                     dbc.Col(
                         html.Div(
-                            id="arbitrage_plots_container",
-                            style={"height": "100%", "width": "100%"},
+                            id="arbitrage_instructions_container",
+                            style={
+                                "height": "550px",
+                                "width": "100%",
+                                "overflowY": "scroll",
+                            },
                         ),
                         width=3,
                         style={
                             "height": "100%",  # Set a fixed height to prevent shrinking
                             "padding": "2.5px",
-                            "overflow": "hidden",
+                            "overflowY": "scroll",
                             "size": 1,
                             # "outline": "2px solid yellow",
                         },
