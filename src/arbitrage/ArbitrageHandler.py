@@ -31,6 +31,7 @@ class ArbitrageHandler:
 
         # Iterate over all pairs of exchanges
         for exchange_buy, prices_buy in exchange_prices.items():
+            print(currency_fees)
             taker_fee_buy = currency_fees.get(exchange_buy, {}).get("taker", 0)
             deposit_fee_buy = exchange_fees.get(exchange_buy, {}).get("deposit", 0)
             withdraw_fee_buy = exchange_fees.get(exchange_buy, {}).get("withdraw", 0)

@@ -28,6 +28,9 @@ class ArbitrageInstructions:
         fees_amount = (
             self.arbitrage["buy_taker_fee"] + self.arbitrage["buy_withdraw_fee"]
         ) * self.funds
+        print(self.arbitrage)
+        print("fees", fees_amount)
+
         # Decrease the running total
         self.funds -= fees_amount
         return dcc.Graph(

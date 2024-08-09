@@ -141,12 +141,12 @@ def update_historic_price_chart(currency, exchange, selected_indicators):
         Input("indicator-selector", "value"),
     ],
 )
-def update_live_price_chart(currency, exchange, n_intervals, indicator):
+def update_live_price_chart(currency, exchange_name, n_intervals, indicator):
     # print(currency, exchange)
-    if not (currency or exchange):
+    if not (currency or exchange_name):
         return {}
 
-    prices = data_manager.get_live_prices(exchange, currency)
+    prices = data_manager.get_live_prices(exchange_name, currency)
     if not prices:
         return {}
 
@@ -212,18 +212,11 @@ def update_arbitrage_instructions(arbitrage, currency, n_intervals):
         currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(currency)
         exchange_fees = data_manager.get_withdrawal_deposit_fees_for_all_exchanges()
         network_fees = data_manager.get_network_fees(currency)
-        # print("currency_fees", currency_fees)
-        # print("exchange_fees", exchange_fees)
-        # print("network_fees", network_fees)
 
         if prices and currency_fees and exchange_fees and network_fees:
             return arbitrage_handler.return_simple_arbitrage(
                 prices, currency_fees, exchange_fees, network_fees
             )
-
-        # print(arbitrage)
-        # print("live prices", prices)
-        # print("fees", fees)
 
     return {}
     # return plots
