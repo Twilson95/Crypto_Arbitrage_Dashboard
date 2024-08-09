@@ -31,9 +31,8 @@ class ArbitrageHandler:
 
         # Iterate over all pairs of exchanges
         for exchange_buy, prices_buy in exchange_prices.items():
-            print(currency_fees)
             taker_fee_buy = currency_fees.get(exchange_buy, {}).get("taker", 0)
-            deposit_fee_buy = exchange_fees.get(exchange_buy, {}).get("deposit", 0)
+            # deposit_fee_buy = exchange_fees.get(exchange_buy, {}).get("deposit", 0)
             withdraw_fee_buy = exchange_fees.get(exchange_buy, {}).get("withdraw", 0)
 
             close_price_buy = prices_buy.close
@@ -51,9 +50,9 @@ class ArbitrageHandler:
                 deposit_fee_sell = exchange_fees.get(exchange_sell, {}).get(
                     "deposit", 0
                 )
-                withdraw_fee_sell = exchange_fees.get(exchange_sell, {}).get(
-                    "withdraw", 0
-                )
+                # withdraw_fee_sell = exchange_fees.get(exchange_sell, {}).get(
+                #     "withdraw", 0
+                # )
 
                 close_price_sell = prices_sell.close
                 if len(close_price_sell) == 0:
@@ -87,6 +86,7 @@ class ArbitrageHandler:
                     "sell_taker_fee": taker_fee_sell,
                     "sell_deposit_fee": deposit_fee_sell,
                     "profit": arbitrage_profit,
+                    "network fees": network_fees,
                     "total_fees": total_fees,
                 }
 
