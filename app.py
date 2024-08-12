@@ -9,6 +9,9 @@ from src.prices.TechnicalIndicators import TechnicalIndicators
 from src.prices.PriceChart import PriceChart
 from src.prices.DataManager import DataManager
 from src.arbitrage.ArbitrageHandler import ArbitrageHandler
+from src.news.NewsFetcher import NewsFetcher
+from src.news.NewsChart import NewsChart
+
 
 from time import time
 
@@ -38,8 +41,8 @@ data_manager = DataManager(exchange_config, network_fees_config)
 end_time = time()
 
 print(f"finished querying data: {end_time-start_time}")
-# news_fetcher = NewsFetcher(news_config)
-# news_chart = NewsChart()
+news_fetcher = NewsFetcher(news_config)
+news_chart = NewsChart()
 
 print("data enabled")
 price_chart = PriceChart()
@@ -153,16 +156,16 @@ def update_live_price_chart(currency, exchange_name, n_intervals, indicator):
     return price_chart.create_ohlc_chart(prices, mark_limit=20, title="Live Price")
 
 
-# @app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
-# def update_news_chart(currency):
-#     if not currency:
-#         return {}
-#
-#     news = news_fetcher.get_news_data(currency)
-#     if not news:
-#         return {}
-#
-#     return news_chart.create_table(news)
+@app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
+def update_news_chart(currency):
+    if not currency:
+        return {}
+
+    news = news_fetcher.get_news_data(currency)
+    if not news:
+        return {}
+
+    return news_chart.create_table(news)
 
 
 @app.callback(
@@ -215,7 +218,7 @@ def update_arbitrage_instructions(arbitrage, currency, n_intervals):
 
         if prices and currency_fees and exchange_fees and network_fees:
             return arbitrage_handler.return_simple_arbitrage(
-                prices, currency_fees, exchange_fees, network_fees
+                currency, prices, currency_fees, exchange_fees, network_fees
             )
 
     return {}
