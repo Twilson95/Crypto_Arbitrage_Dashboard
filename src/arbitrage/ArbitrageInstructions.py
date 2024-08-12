@@ -5,8 +5,9 @@ from dash import html, dcc
 class ArbitrageInstructions:
     def __init__(self, arbitrage):
         self.arbitrage = arbitrage
-        self.funds = 1000
-        self.instruction_height = 150
+        # self.funds = 1000
+        self.funds = arbitrage["buy_price"]
+        self.instruction_height = 130
 
     def return_simple_arbitrage_instructions(self):
         return html.Div(
@@ -20,7 +21,7 @@ class ArbitrageInstructions:
         )
 
     def create_summary_instruction(self):
-        self.funds = 1000  # Reset the funds to $100 at the start
+        self.funds = self.arbitrage["buy_price"]  # Reset the funds to $100 at the start
         profit = round(self.arbitrage["profit"], 2)
         summary_text = (
             f"Arbitrage Opportunity: Buy from {self.arbitrage['buy_exchange']} and sell at "
@@ -45,7 +46,8 @@ class ArbitrageInstructions:
                 to_amount,
                 total_fees,
                 from_usd=None,
-                to_usd=None,
+                to_usd=to_usd,
+                instruction="buy",
             ),
             style={
                 "height": str(self.instruction_height) + "px",
@@ -81,6 +83,7 @@ class ArbitrageInstructions:
                 total_fees,
                 from_usd=start_funds,
                 to_usd=end_funds,
+                instruction="transfer",
             ),
             style={
                 "height": str(self.instruction_height) + "px",
@@ -92,8 +95,11 @@ class ArbitrageInstructions:
         total_fees = self.funds * self.arbitrage["sell_taker_fee"]
         start_funds = self.funds
         self.funds -= total_fees
-        to_amount = self.funds
-        from_amount = self.funds / self.arbitrage["sell_price"]
+        to_amount = (self.funds / self.arbitrage["buy_price"]) * self.arbitrage[
+            "sell_price"
+        ]
+        from_amount = start_funds / self.arbitrage["buy_price"]
+        funds_change = start_funds - to_amount
 
         return dcc.Graph(
             figure=self._generate_exchange_flow(
@@ -103,8 +109,9 @@ class ArbitrageInstructions:
                 "Wallet",
                 self.arbitrage["currency"][1],
                 to_amount,
-                total_fees,
+                funds_change,
                 from_usd=start_funds,
+                instruction="sell",
             ),
             style={
                 "height": str(self.instruction_height) + "px",
@@ -159,21 +166,22 @@ class ArbitrageInstructions:
         total_fees,
         from_usd=None,
         to_usd=None,
+        instruction=None,
     ):
         fig = go.Figure()
 
         # arrow
         fig.add_annotation(
             x=3.5,
-            y=1.5,
+            y=2,
             xref="x",
             yref="y",
             text="",
             showarrow=True,
             axref="x",
             ayref="y",
-            ax=1,
-            ay=1.5,
+            ax=1.5,
+            ay=2,
             arrowhead=3,
             arrowwidth=1.5,
             arrowcolor="white",
@@ -182,8 +190,8 @@ class ArbitrageInstructions:
         # transfer fees
         fig.add_annotation(
             x=0.5,
-            y=0.2,
-            text=str(round(total_fees, 2)) + " USD",
+            y=0.4,
+            text=self.format_amount(total_fees, "USD"),
             showarrow=False,
             xref="paper",
             yref="paper",
@@ -192,8 +200,8 @@ class ArbitrageInstructions:
 
         # Exchange names
         fig.add_annotation(
-            x=0.1,
-            y=0.5,
+            x=0.05,
+            y=0.8,
             text=from_exchange,
             showarrow=False,
             xref="paper",
@@ -202,8 +210,8 @@ class ArbitrageInstructions:
         )
 
         fig.add_annotation(
-            x=0.9,
-            y=0.5,
+            x=0.95,
+            y=0.8,
             text=to_exchange,
             showarrow=False,
             xref="paper",
@@ -211,47 +219,60 @@ class ArbitrageInstructions:
             font=dict(color="white", size=14),
         )
 
+        # from amount
         fig.add_annotation(
-            x=0.9,
-            y=0.3,
-            text=str(round(to_amount, 2)) + " " + to_unit,
+            x=0.05,
+            y=0.5,
+            text=self.format_amount(from_amount, from_unit),
             showarrow=False,
             xref="paper",
             yref="paper",
             font=dict(color="white", size=14),
         )
 
-        if to_usd:
+        # to amount
+        fig.add_annotation(
+            x=0.95,
+            y=0.5,
+            text=self.format_amount(to_amount, to_unit),
+            showarrow=False,
+            xref="paper",
+            yref="paper",
+            font=dict(color="white", size=14),
+        )
+
+        if instruction:
             fig.add_annotation(
-                x=0.9,
-                y=0.15,
-                text="(" + str(round(to_usd, 2)) + " USD)",
+                x=0.5,
+                y=0.75,
+                text=instruction,
                 showarrow=False,
                 xref="paper",
                 yref="paper",
-                font=dict(color="white", size=14),
+                font=dict(color="white", size=12),
             )
 
         if from_usd:
             fig.add_annotation(
-                x=0.1,
-                y=0.15,
-                text="(" + str(round(from_usd, 2)) + " USD)",
+                x=0.05,
+                y=0.20,
+                text="(" + self.format_amount(from_usd, "USD") + ")",
                 showarrow=False,
                 xref="paper",
                 yref="paper",
-                font=dict(color="white", size=14),
+                font=dict(color="white", size=12),
             )
 
-        fig.add_annotation(
-            x=0.1,
-            y=0.3,
-            text=str(round(from_amount, 2)) + " " + from_unit,
-            showarrow=False,
-            xref="paper",
-            yref="paper",
-            font=dict(color="white", size=14),
-        )
+        if to_usd:
+            fig.add_annotation(
+                x=0.95,
+                y=0.20,
+                text="(" + self.format_amount(to_usd, "USD") + ")",
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                font=dict(color="white", size=12),
+            )
 
         # Update layout to hide axes and grid lines
         fig.update_layout(
@@ -269,7 +290,7 @@ class ArbitrageInstructions:
         return dcc.Graph(
             figure=self.create_waterfall_plot(),
             style={
-                "height": str(self.instruction_height * 2) + "px",
+                "height": str(self.instruction_height * 2.2) + "px",
                 "margin-bottom": "2px",
             },
         )
@@ -324,7 +345,7 @@ class ArbitrageInstructions:
 
         # Update layout for better visualization
         fig.update_layout(
-            title="Cryptocurrency Profit Waterfall Chart",
+            title="Profit and Fees",
             showlegend=False,
             margin=dict(l=10, r=0, b=10, t=50),
             # xaxis_title="Components",
@@ -334,3 +355,14 @@ class ArbitrageInstructions:
         )
 
         return fig
+
+    @staticmethod
+    def format_amount(value, unit):
+        if value == 0:
+            return f"0 {unit}"
+        elif abs(value) >= 10000:
+            return f"{abs(value):,.1f} {unit}"
+        elif abs(value) >= 1:
+            return f"{abs(value):,.2f} {unit}"
+        else:
+            return f"{abs(value):.3g} {unit}"

@@ -202,7 +202,7 @@ class AppLayout:
                         html.Div(
                             id="arbitrage_instructions_container",
                             style={
-                                "height": "550px",
+                                "height": "570px",
                                 "width": "100%",
                                 "overflowY": "scroll",
                             },
