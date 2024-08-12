@@ -54,6 +54,10 @@ class DataManager:
                 {
                     "apiKey": api_key,
                     "secret": api_secret,
+                    # "enable_time_sync": True,
+                    "options": {
+                        "recvWindow": 10000,  # Increase recv_window to 10 seconds
+                    },
                 }
             )
         except ccxt.AuthenticationError as e:
