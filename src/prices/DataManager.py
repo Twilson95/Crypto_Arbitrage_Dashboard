@@ -5,10 +5,12 @@ from threading import Thread
 
 
 class DataManager:
-    def __init__(self, config):
+    def __init__(self, config, network_fees_config):
         self.config = config
+        self.network_fees_config = network_fees_config
         self.exchanges = {}
         self.exchange_fees = {}
+        self.network_fees = self.fetch_network_fees()
         self.initialized_event = asyncio.Event()
 
         self.loop = asyncio.new_event_loop()
@@ -52,6 +54,10 @@ class DataManager:
                 {
                     "apiKey": api_key,
                     "secret": api_secret,
+                    # "enable_time_sync": True,
+                    "options": {
+                        "recvWindow": 10000,  # Increase recv_window to 10 seconds
+                    },
                 }
             )
         except ccxt.AuthenticationError as e:
@@ -67,15 +73,19 @@ class DataManager:
             await exchange.close()
             print(f"Unexpected error for {exchange_name}: {e}")
 
-        markets = await exchange.load_markets()
-        # print(exchange_name, "markets loaded")
-        # await self.extract_currency_fees(exchange, exchange_name, pairs_mapping)
+        # print(exchange_name, "pre_market_load")
+        try:
+            markets = await exchange.load_markets()
+        except:
+            markets = None
+        # print("market loaded")
 
         data_fetcher = DataFetcher(exchange, exchange_name, pairs_mapping, markets)
         # print(exchange_name, "data fetcher created")
         self.exchanges[exchange_name] = data_fetcher
         # print(exchange_name, "added to exchange dict")
         await data_fetcher.async_init()
+
         # print(exchange_name, "data fetcher initialized")
 
         print(f"{exchange_name} initialized successfully")
@@ -92,8 +102,8 @@ class DataManager:
         tasks = [exchange.close() for exchange in self.exchanges.values()]
         await asyncio.gather(*tasks)
 
-    def select_data_fetcher(self, exchange):
-        return self.exchanges[exchange]
+    def select_data_fetcher(self, exchange_name):
+        return self.exchanges[exchange_name]
 
     async def fetch_all_live_prices(self):
         tasks = [
@@ -101,29 +111,29 @@ class DataManager:
         ]
         await asyncio.gather(*tasks)
 
-    def get_historical_prices(self, exchange, currency):
+    def get_historical_prices(self, exchange_name, currency):
         future = asyncio.run_coroutine_threadsafe(
-            self._get_historical_prices(exchange, currency), self.loop
+            self._get_historical_prices(exchange_name, currency), self.loop
         )
         return future.result()
 
-    async def _get_historical_prices(self, exchange, currency):
+    async def _get_historical_prices(self, exchange_name, currency):
         await self.initialized_event.wait()  # Wait for initialization to complete
-        data_fetcher = self.exchanges.get(exchange)
+        data_fetcher = self.exchanges.get(exchange_name)
         if not data_fetcher:
             return None
         prices = data_fetcher.get_historical_prices(currency)
         return prices
 
-    def get_live_prices(self, exchange, currency):
+    def get_live_prices(self, exchange_name, currency):
         future = asyncio.run_coroutine_threadsafe(
-            self._get_live_prices(exchange, currency), self.loop
+            self._get_live_prices(exchange_name, currency), self.loop
         )
         return future.result()
 
-    async def _get_live_prices(self, exchange, currency):
+    async def _get_live_prices(self, exchange_name, currency):
         await self.initialized_event.wait()  # Wait for initialization to complete
-        data_fetcher = self.exchanges.get(exchange)
+        data_fetcher = self.exchanges.get(exchange_name)
         if not data_fetcher:
             return None
         prices = data_fetcher.get_live_prices(currency)
@@ -131,32 +141,52 @@ class DataManager:
 
     def get_live_prices_for_all_exchanges(self, currency):
         exchange_prices = {}
-        for exchange in self.exchanges:
-            live_prices = self.get_live_prices(exchange, currency)
+        for exchange_name in self.exchanges.keys():
+            live_prices = self.get_live_prices(exchange_name, currency)
             if live_prices:
-                exchange_prices[exchange] = live_prices
+                exchange_prices[exchange_name] = live_prices
         return exchange_prices
 
-    def get_fees_for_all_exchanges(self, currency):
+    def get_maker_taker_fees_for_all_exchanges(self, currency):
         future = asyncio.run_coroutine_threadsafe(
-            self._get_fees_for_all_exchanges(currency), self.loop
+            self._get_maker_taker_fees_for_all_exchanges(currency), self.loop
         )
         return future.result()
 
-    async def _get_fees_for_all_exchanges(self, currency):
+    async def _get_maker_taker_fees_for_all_exchanges(self, currency):
         await self.initialized_event.wait()
         exchange_fees = {}
-        for exchange in self.exchanges.keys():
-            fees = self.get_fees(exchange, currency)
+        for exchange_name, exchange in self.exchanges.items():
+            fees = exchange.get_currency_fee(currency)
             if fees:
-                exchange_fees[exchange] = fees
+                exchange_fees[exchange_name] = fees
         return exchange_fees
 
-    def get_fees(self, exchange_name, currency):
-        exchange = self.exchanges.get(exchange_name, {})
-        return exchange.get_currency_fee(currency)
+    def get_withdrawal_deposit_fees_for_all_exchanges(self):
+        future = asyncio.run_coroutine_threadsafe(
+            self._get_withdrawal_deposit_fees_for_all_exchanges(), self.loop
+        )
+        return future.result()
 
-    def fetch_deposit_withdrawal_rates(self):
-        deposit = None
-        withdrawal = None
-        return deposit, withdrawal
+    async def _get_withdrawal_deposit_fees_for_all_exchanges(self):
+        await self.initialized_event.wait()
+        exchange_fees = {}
+        for exchange_name, exchange in self.exchanges.items():
+            fees = exchange.get_exchange_fees()
+            if fees:
+                exchange_fees[exchange_name] = fees
+        return exchange_fees
+
+    def fetch_network_fees(self):
+        # possible to make this dynamic in future
+        return self.network_fees_config["default_network_fees"]
+
+    def get_network_fees(self, currency):
+        return self.network_fees[currency]
+
+    def get_live_prices_and_fees_for_single_exchange(self, exchange_name):
+        exchange = self.exchanges[exchange_name]
+        prices = exchange.get_all_live_prices()
+        exchange_fees = exchange.get_all_exchange_fees()
+        currency_fees = exchange.get_all_currency_fees()
+        return prices, exchange_fees, currency_fees

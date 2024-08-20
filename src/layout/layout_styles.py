@@ -29,6 +29,7 @@ grid_container_style = {
     "align-items": "center",
     "width": "100%",
     "padding": "5px",
+    "overflowY": "hidden",
     # "outline": "2px solid blue",
 }
 header_style = {
