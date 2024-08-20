@@ -51,7 +51,7 @@ class AppLayout:
             style=filter_style,
         )
 
-        return [exchange_filter, currency_filter, indicator_filter, arbitrage_filter]
+        return [arbitrage_filter, exchange_filter, currency_filter, indicator_filter]
 
     @staticmethod
     def create_grid_elements():

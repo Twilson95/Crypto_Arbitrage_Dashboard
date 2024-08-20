@@ -97,8 +97,19 @@ class DataFetcher:
     def get_live_prices(self, currency):
         return self.live_data.get(currency)
 
+    def get_all_live_prices(self):
+        return {
+            currency: prices.close[-1] for currency, prices in self.currencies.items()
+        }
+
     def get_fees(self, currency):
         return self.currency_fees.get(currency)
+
+    def get_all_currency_fees(self):
+        return self.currency_fees
+
+    def get_all_exchange_fees(self):
+        return self.exchange_fees
 
     async def fetch_all_initial_live_prices(self, count=10):
         tasks = [

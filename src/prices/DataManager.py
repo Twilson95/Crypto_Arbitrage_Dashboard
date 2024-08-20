@@ -183,3 +183,10 @@ class DataManager:
 
     def get_network_fees(self, currency):
         return self.network_fees[currency]
+
+    def get_live_prices_and_fees_for_single_exchange(self, exchange_name):
+        exchange = self.exchanges[exchange_name]
+        prices = exchange.get_all_live_prices()
+        exchange_fees = exchange.get_all_exchange_fees()
+        currency_fees = exchange.get_all_currency_fees()
+        return prices, exchange_fees, currency_fees
