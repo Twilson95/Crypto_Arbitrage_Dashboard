@@ -8,13 +8,14 @@ from src.layout.FilterComponents import FilterComponent
 from src.prices.TechnicalIndicators import TechnicalIndicators
 from src.prices.PriceChart import PriceChart
 from src.prices.DataManager import DataManager
-from src.arbitrage.ArbitrageHandler import ArbitrageHandler
+from src.prices.ArbitrageHandler import ArbitrageHandler
+
 from src.news.NewsFetcher import NewsFetcher
 from src.news.NewsChart import NewsChart
 
-
 from time import time
 
+import src.Warnings_to_ignore
 import yaml
 
 
@@ -27,9 +28,6 @@ with open("./src/config/exchange_config.yaml", "r") as f:
 with open("./src/config/news_config.yaml", "r") as f:
     news_config = yaml.safe_load(f)
 
-with open("./src/config/network_fees.yaml", "r") as f:
-    network_fees_config = yaml.safe_load(f)
-
 filter_component = FilterComponent()
 technical_indicators = TechnicalIndicators()
 arbitrage_handler = ArbitrageHandler()
@@ -37,7 +35,7 @@ arbitrage_handler = ArbitrageHandler()
 app_layout = AppLayout(filter_component, technical_indicators)
 app.layout = app_layout.generate_layout()
 start_time = time()
-data_manager = DataManager(exchange_config, network_fees_config)
+data_manager = DataManager(exchange_config)
 end_time = time()
 
 print(f"finished querying data: {end_time-start_time}")
@@ -76,7 +74,6 @@ price_chart = PriceChart()
         State("currency-selector", "style"),
         State("indicator-selector", "style"),
         State("arbitrage-selector", "style"),
-        Input("arbitrage-selector", "value"),
     ],
 )
 def render_tab_content(
@@ -87,7 +84,6 @@ def render_tab_content(
     currency_filter_style,
     indicator_filter_style,
     arbitrage_filter_style,
-    arbitrage_filter_value,
 ):
     if active_tab == "tab-1":
         grid_style["display"] = "flex"
@@ -99,12 +95,8 @@ def render_tab_content(
     elif active_tab == "tab-2":
         grid_style["display"] = "none"
         arbitrage_style["display"] = "flex"
-        if arbitrage_filter_value == "triangular":
-            exchange_filter_style["display"] = "block"
-            currency_filter_style["display"] = "none"
-        else:
-            exchange_filter_style["display"] = "none"
-            currency_filter_style["display"] = "block"
+        exchange_filter_style["display"] = "none"
+        currency_filter_style["display"] = "block"
         indicator_filter_style["display"] = "none"
         arbitrage_filter_style["display"] = "block"
     return (
@@ -150,12 +142,12 @@ def update_historic_price_chart(currency, exchange, selected_indicators):
         Input("indicator-selector", "value"),
     ],
 )
-def update_live_price_chart(currency, exchange_name, n_intervals, indicator):
+def update_live_price_chart(currency, exchange, n_intervals, indicator):
     # print(currency, exchange)
-    if not (currency or exchange_name):
+    if not (currency or exchange):
         return {}
 
-    prices = data_manager.get_live_prices(exchange_name, currency)
+    prices = data_manager.get_live_prices(exchange, currency)
     if not prices:
         return {}
 
@@ -178,30 +170,26 @@ def update_live_price_chart(currency, exchange_name, n_intervals, indicator):
     Output("arbitrage_main_view", "figure"),
     [
         Input("arbitrage-selector", "value"),
-        Input("exchange-selector", "value"),
         Input("currency-selector", "value"),
         Input("interval-component", "n_intervals"),
     ],
 )
-def update_main_arbitrage_chart(arbitrage, exchange, currency, n_intervals):
+def update_main_arbitrage_chart(arbitrage, currency, n_intervals):
     if not currency:
         return {}
 
     if arbitrage == "simple":
         prices = data_manager.get_live_prices_for_all_exchanges(currency)
-
+        fees = data_manager.get_fees_for_all_exchanges(currency)
+        # print("live prices", prices)
+        # print("fees", fees)
         if not prices:
             return {}
 
         return price_chart.create_line_charts(
             prices, mark_limit=20, title="Live Exchange Prices"
         )
-
     elif arbitrage == "triangular":
-        prices = data_manager.get_live_prices_for_all_exchanges(exchange)
-        currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(exchange)
-        exchange_fees = data_manager.get_withdrawal_deposit_fees_for_all_exchanges()
-
         return {}
     elif arbitrage == "statistical":
         return {}
@@ -210,37 +198,24 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, n_intervals):
 
 
 @app.callback(
-    Output("arbitrage_instructions_container", "children"),
+    Output("arbitrage_plots_container", "children"),
     [
         Input("arbitrage-selector", "value"),
-        Input("exchange-selector", "value"),
         Input("currency-selector", "value"),
         Input("interval-component", "n_intervals"),
     ],
 )
-def update_arbitrage_instructions(arbitrage, exchange, currency, n_intervals):
+def update_arbitrage_instructions(arbitrage, currency, n_intervals):
 
     if arbitrage == "simple":
         prices = data_manager.get_live_prices_for_all_exchanges(currency)
-        currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(currency)
-        exchange_fees = data_manager.get_withdrawal_deposit_fees_for_all_exchanges()
-        network_fees = data_manager.get_network_fees(currency)
+        fees = data_manager.get_fees_for_all_exchanges(currency)
+        if prices and fees:
+            arbitrage_handler.return_simple_arbitrage(prices, fees)
 
-        if prices and currency_fees and exchange_fees and network_fees:
-            return arbitrage_handler.return_simple_arbitrage_instructions(
-                currency, prices, currency_fees, exchange_fees, network_fees
-            )
-
-    if arbitrage == "triangle":
-        prices, exchange_fees, currency_fees = (
-            data_manager.get_live_prices_and_fees_for_single_exchange(exchange)
-        )
-        if prices and currency_fees and exchange_fees:
-            return arbitrage_handler.return_triangle_arbitrage_instructions(
-                prices, currency_fees, exchange_fees
-            )
-        pass
-    #     get
+        # print(arbitrage)
+        # print("live prices", prices)
+        # print("fees", fees)
 
     return {}
     # return plots

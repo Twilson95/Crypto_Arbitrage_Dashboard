@@ -51,7 +51,7 @@ class AppLayout:
             style=filter_style,
         )
 
-        return [arbitrage_filter, exchange_filter, currency_filter, indicator_filter]
+        return [exchange_filter, currency_filter, indicator_filter, arbitrage_filter]
 
     @staticmethod
     def create_grid_elements():
@@ -200,18 +200,14 @@ class AppLayout:
                     ),
                     dbc.Col(
                         html.Div(
-                            id="arbitrage_instructions_container",
-                            style={
-                                "height": "570px",
-                                "width": "100%",
-                                "overflowY": "scroll",
-                            },
+                            id="arbitrage_plots_container",
+                            style={"height": "100%", "width": "100%"},
                         ),
                         width=3,
                         style={
                             "height": "100%",  # Set a fixed height to prevent shrinking
                             "padding": "2.5px",
-                            "overflowY": "scroll",
+                            "overflow": "hidden",
                             "size": 1,
                             # "outline": "2px solid yellow",
                         },
