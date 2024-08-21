@@ -231,13 +231,13 @@ def update_arbitrage_instructions(arbitrage, exchange, currency, n_intervals):
                 currency, prices, currency_fees, exchange_fees, network_fees
             )
 
-    if arbitrage == "triangle":
-        prices, exchange_fees, currency_fees = (
+    if arbitrage == "triangular":
+        prices, currency_fees = (
             data_manager.get_live_prices_and_fees_for_single_exchange(exchange)
         )
-        if prices and currency_fees and exchange_fees:
+        if prices and currency_fees:
             return arbitrage_handler.return_triangle_arbitrage_instructions(
-                prices, currency_fees, exchange_fees
+                prices, currency_fees
             )
         pass
     #     get

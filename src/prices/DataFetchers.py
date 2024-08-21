@@ -99,7 +99,7 @@ class DataFetcher:
 
     def get_all_live_prices(self):
         return {
-            currency: prices.close[-1] for currency, prices in self.currencies.items()
+            currency: prices.close[-1] for currency, prices in self.live_data.items()
         }
 
     def get_fees(self, currency):

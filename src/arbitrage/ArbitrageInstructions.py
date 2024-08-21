@@ -5,8 +5,8 @@ from dash import html, dcc
 class ArbitrageInstructions:
     def __init__(self, arbitrage):
         self.arbitrage = arbitrage
-        # self.funds = 1000
-        self.funds = arbitrage["buy_price"]
+        self.funds = 1000
+        # self.funds = arbitrage["buy_price"]
         self.instruction_height = 130
 
     def return_simple_arbitrage_instructions(self):
@@ -18,6 +18,31 @@ class ArbitrageInstructions:
                 self.create_transfer_instruction(),
                 self.create_sell_instruction(),
             ],
+        )
+
+    def return_triangle_arbitrage_instructions(self):
+        return html.Div(
+            [self.build_instruction(instructions) for instructions in self.arbitrage]
+        )
+
+    def build_instruction(self, instruction):
+        return dcc.Graph(
+            figure=self._generate_exchange_flow(
+                instruction["from_exchange"],
+                instruction["from_currency"],
+                instruction["from_amount"],
+                instruction["to_exchange"],
+                instruction["to_currency"],
+                instruction["to_amount"],
+                instruction["total_fees"],
+                from_usd=instruction["from_usd"],
+                to_usd=instruction["to_usd"],
+                instruction=instruction["instruction"],
+            ),
+            style={
+                "height": str(self.instruction_height) + "px",
+                "margin-bottom": "2px",
+            },
         )
 
     def create_summary_instruction(self):
