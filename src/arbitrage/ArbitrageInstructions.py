@@ -3,11 +3,11 @@ from dash import html, dcc
 
 
 class ArbitrageInstructions:
+    instruction_height = 130
+
     def __init__(self, arbitrage):
         self.arbitrage = arbitrage
         self.funds = 1000
-        # self.funds = arbitrage["buy_price"]
-        self.instruction_height = 130
 
     def return_simple_arbitrage_instructions(self):
         return html.Div(
@@ -20,14 +20,75 @@ class ArbitrageInstructions:
             ],
         )
 
-    def return_triangle_arbitrage_instructions(self):
-        return html.Div(
-            [self.build_instruction(instructions) for instructions in self.arbitrage]
-        )
+    def return_single_arbitrage_panels(self):
+        panels = []
+        if "summary_header" in self.arbitrage.keys():
+            header_panel = self.build_simple_summary_panel(
+                self.arbitrage["summary_header"]
+            )
+            panels.append(header_panel)
+        if "waterfall_data" in self.arbitrage.keys():
+            waterfall_panel = self.build_waterfall_panel(
+                self.arbitrage["waterfall_data"]
+            )
+            panels.append(waterfall_panel)
+        if "instructions" in self.arbitrage.keys():
+            instruction_panels = self.build_all_instruction_panels(
+                self.arbitrage["instructions"]
+            )
+            panels += instruction_panels
+        return html.Div(panels)
 
-    def build_instruction(self, instruction):
+    def return_triangle_arbitrage_panels(self):
+        panels = []
+        if "summary_header" in self.arbitrage.keys():
+            header_panel = ArbitrageInstructions.build_triangular_summary_panel(
+                self.arbitrage["summary_header"]
+            )
+            panels.append(header_panel)
+        if "waterfall_data" in self.arbitrage.keys():
+            waterfall_panel = ArbitrageInstructions.build_waterfall_panel(
+                self.arbitrage["waterfall_data"]
+            )
+            panels.append(waterfall_panel)
+        if "instructions" in self.arbitrage.keys():
+            instruction_panels = ArbitrageInstructions.build_all_instruction_panels(
+                self.arbitrage["instructions"]
+            )
+            panels += instruction_panels
+        return html.Div(panels)
+
+    @staticmethod
+    def build_simple_summary_panel(summary_data):
+        exchanges = summary_data["exchanges_used"]
+        total_profit = summary_data["total_profit"]
+        summary_text = (
+            f"Arbitrage Opportunity: Buy from {exchanges[0]} and sell at "
+            f"{exchanges[1]}. Expected profit: ${total_profit:.2f} after fees."
+        )
+        return html.P(summary_text, style={"margin-bottom": "2px"})
+
+    @staticmethod
+    def build_triangular_summary_panel(summary_data):
+        coins = summary_data["coins_used"]
+        total_profit = summary_data["total_profit"]
+        summary_text = (
+            f"Arbitrage Opportunity: Buy {coins[0]}, convert to {coins[1]} and sell for an "
+            f"expected profit of ${total_profit:.2f} after fees."
+        )
+        return html.P(summary_text, style={"margin-bottom": "2px"})
+
+    @staticmethod
+    def build_all_instruction_panels(instructions):
+        return [
+            ArbitrageInstructions.build_instruction_panel(instructions)
+            for instructions in instructions
+        ]
+
+    @staticmethod
+    def build_instruction_panel(instruction):
         return dcc.Graph(
-            figure=self._generate_exchange_flow(
+            figure=ArbitrageInstructions._generate_exchange_flow(
                 instruction["from_exchange"],
                 instruction["from_currency"],
                 instruction["from_amount"],
@@ -40,7 +101,45 @@ class ArbitrageInstructions:
                 instruction=instruction["instruction"],
             ),
             style={
-                "height": str(self.instruction_height) + "px",
+                "height": str(ArbitrageInstructions.instruction_height) + "px",
+                "margin-bottom": "2px",
+            },
+        )
+
+    @staticmethod
+    def build_waterfall_panel(waterfall_data):
+        categories = list(waterfall_data.keys())
+        values = [round(value, 2) for value in waterfall_data.values()]
+
+        # Create a Waterfall chart
+        fig = go.Figure()
+
+        fig.add_waterfall(
+            name="Profit Calculation",
+            orientation="v",
+            measure=["relative" for _ in values] + ["total"],
+            x=categories,
+            cliponaxis=False,
+            text=[f"${val}" for val in values],
+            y=values,
+            connector=dict(line=dict(color="rgba(63, 63, 63, 0.5)")),
+        )
+
+        # Update layout for better visualization
+        fig.update_layout(
+            title="Profit and Fees",
+            showlegend=False,
+            margin=dict(l=10, r=0, b=10, t=50),
+            # xaxis_title="Components",
+            yaxis_title="Amount (USD)",
+            yaxis=dict(tickprefix="$"),
+            template="plotly_dark",
+        )
+
+        return dcc.Graph(
+            figure=fig,
+            style={
+                "height": str(ArbitrageInstructions.instruction_height * 2.2) + "px",
                 "margin-bottom": "2px",
             },
         )
@@ -180,8 +279,8 @@ class ArbitrageInstructions:
 
         return fig
 
+    @staticmethod
     def _generate_exchange_flow(
-        self,
         from_exchange,
         from_unit,
         from_amount,
@@ -216,7 +315,7 @@ class ArbitrageInstructions:
         fig.add_annotation(
             x=0.5,
             y=0.4,
-            text=self.format_amount(total_fees, "USD"),
+            text=ArbitrageInstructions.format_amount(total_fees, "USD"),
             showarrow=False,
             xref="paper",
             yref="paper",
@@ -248,7 +347,7 @@ class ArbitrageInstructions:
         fig.add_annotation(
             x=0.05,
             y=0.5,
-            text=self.format_amount(from_amount, from_unit),
+            text=ArbitrageInstructions.format_amount(from_amount, from_unit),
             showarrow=False,
             xref="paper",
             yref="paper",
@@ -259,7 +358,7 @@ class ArbitrageInstructions:
         fig.add_annotation(
             x=0.95,
             y=0.5,
-            text=self.format_amount(to_amount, to_unit),
+            text=ArbitrageInstructions.format_amount(to_amount, to_unit),
             showarrow=False,
             xref="paper",
             yref="paper",
@@ -281,7 +380,7 @@ class ArbitrageInstructions:
             fig.add_annotation(
                 x=0.05,
                 y=0.20,
-                text="(" + self.format_amount(from_usd, "USD") + ")",
+                text="(" + ArbitrageInstructions.format_amount(from_usd, "USD") + ")",
                 showarrow=False,
                 xref="paper",
                 yref="paper",
@@ -292,7 +391,7 @@ class ArbitrageInstructions:
             fig.add_annotation(
                 x=0.95,
                 y=0.20,
-                text="(" + self.format_amount(to_usd, "USD") + ")",
+                text="(" + ArbitrageInstructions.format_amount(to_usd, "USD") + ")",
                 showarrow=False,
                 xref="paper",
                 yref="paper",
@@ -303,7 +402,7 @@ class ArbitrageInstructions:
         fig.update_layout(
             showlegend=False,
             margin=dict(l=0, r=0, t=0, b=0),
-            height=self.instruction_height,
+            height=ArbitrageInstructions.instruction_height,
             xaxis=dict(visible=False),
             yaxis=dict(visible=False),
             template="plotly_dark",
@@ -315,7 +414,7 @@ class ArbitrageInstructions:
         return dcc.Graph(
             figure=self.create_waterfall_plot(),
             style={
-                "height": str(self.instruction_height * 2.2) + "px",
+                "height": str(ArbitrageInstructions.instruction_height * 2.2) + "px",
                 "margin-bottom": "2px",
             },
         )

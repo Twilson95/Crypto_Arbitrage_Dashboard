@@ -15,7 +15,7 @@ class ArbitrageHandler:
         instruction_diagrams = []
         for arbitrage in arbitrages:
             arbitrage_instructions = ArbitrageInstructions(arbitrage)
-            instructions = arbitrage_instructions.return_simple_arbitrage_instructions()
+            instructions = arbitrage_instructions.return_single_arbitrage_panels()
             instruction_diagrams.append(instructions)
         return instruction_diagrams
 
@@ -101,31 +101,37 @@ class ArbitrageHandler:
                 }
 
                 if arbitrage_profit > 0:
-                    arbitrage_opportunities.append(arbitrage_details)
+                    arbitrage_opportunities.append(
+                        ArbitrageHandler.create_arbitrage_simple_instructions_data(
+                            arbitrage_details
+                        )
+                    )
                 else:
                     difference = abs(arbitrage_profit)
                     if difference < closest_difference:
                         closest_difference = difference
-                        closest_opportunity = arbitrage_details
+                        closest_opportunity = (
+                            ArbitrageHandler.create_arbitrage_simple_instructions_data(
+                                arbitrage_details
+                            )
+                        )
 
         if arbitrage_opportunities:
             return arbitrage_opportunities
         else:
             return [closest_opportunity]
 
-    def return_triangle_arbitrage_instructions(self, prices, currency_fees):
+    def return_triangle_arbitrage_instructions(self, prices, currency_fees, exchange):
         all_prices, all_fees = self.generate_crypto_to_crypto_pairs(
             prices, currency_fees
         )
 
-        arbitrages = self.identify_triangle_arbitrage(all_prices, all_fees)
+        arbitrages = self.identify_triangle_arbitrage(all_prices, all_fees, exchange)
 
         instruction_diagrams = []
         for arbitrage in arbitrages:
             arbitrage_instructions = ArbitrageInstructions(arbitrage)
-            instructions = (
-                arbitrage_instructions.return_triangle_arbitrage_instructions()
-            )
+            instructions = arbitrage_instructions.return_triangle_arbitrage_panels()
             instruction_diagrams.append(instructions)
         return instruction_diagrams
 
@@ -180,7 +186,7 @@ class ArbitrageHandler:
         return amount * currency_fees.get(pair, {}).get(fee_type, 0)
 
     @staticmethod
-    def identify_triangle_arbitrage(prices, currency_fees):
+    def identify_triangle_arbitrage(prices, currency_fees, exchange):
         coins = set()
         for pair in prices.keys():
             coin1, coin2 = pair.split("/")
@@ -233,11 +239,12 @@ class ArbitrageHandler:
                 "fees": [fees1, fees2, fees3],
                 "final_amount": final_amount,
                 "profit": profit,
+                "exchange": exchange,
             }
 
             if profit > 0:
                 arbitrage_opportunities.append(
-                    ArbitrageHandler.create_arbitrage_instructions_data(
+                    ArbitrageHandler.create_arbitrage_triangular_instructions_data(
                         arbitrage_opportunity
                     )
                 )
@@ -246,7 +253,7 @@ class ArbitrageHandler:
                 if abs(profit) < smallest_loss:
                     smallest_loss = abs(profit)
                     closest_opportunity = (
-                        ArbitrageHandler.create_arbitrage_instructions_data(
+                        ArbitrageHandler.create_arbitrage_triangular_instructions_data(
                             arbitrage_opportunity
                         )
                     )
@@ -259,17 +266,19 @@ class ArbitrageHandler:
             return [closest_opportunity]
 
     @staticmethod
-    def create_arbitrage_instructions_data(opportunity):
+    def create_arbitrage_triangular_instructions_data(opportunity):
         instructions = []
 
         # Extract data from opportunity
         coin1, coin2 = opportunity["path"][1], opportunity["path"][2]
         rate1, rate2, rate3 = opportunity["conversion_rates"]
         fees1, fees2, fees3 = opportunity["fees"]
+        total_profit = opportunity["profit"]
+        exchange = opportunity["exchange"]
 
         funds = rate1
         # Initial funds in USD
-        from_usd = rate1
+        from_usd = funds
 
         # 1. Buy step (USD -> Coin1)
         from_amount = funds
@@ -280,10 +289,10 @@ class ArbitrageHandler:
         instructions.append(
             {
                 "instruction": "buy",
-                "from_exchange": "Wallet",
+                "from_exchange": exchange,
                 "from_currency": "usd",
                 "from_amount": from_amount,
-                "to_exchange": "Exchange 1",
+                "to_exchange": exchange,
                 "to_currency": coin1,
                 "to_amount": to_amount,
                 "total_fees": fees1,
@@ -304,10 +313,10 @@ class ArbitrageHandler:
         instructions.append(
             {
                 "instruction": "transfer",
-                "from_exchange": "Exchange 1",
+                "from_exchange": exchange,
                 "from_currency": coin1,
                 "from_amount": from_amount,
-                "to_exchange": "Exchange 2",
+                "to_exchange": exchange,
                 "to_currency": coin2,
                 "to_amount": to_amount,
                 "total_fees": fees2,
@@ -327,10 +336,10 @@ class ArbitrageHandler:
         instructions.append(
             {
                 "instruction": "sell",
-                "from_exchange": "Exchange 2",
+                "from_exchange": exchange,
                 "from_currency": coin2,
                 "from_amount": from_amount,
-                "to_exchange": "Wallet",
+                "to_exchange": exchange,
                 "to_currency": "usd",
                 "to_amount": to_amount,
                 "total_fees": fees3,
@@ -339,4 +348,130 @@ class ArbitrageHandler:
             }
         )
 
-        return instructions
+        # Calculate the waterfall data
+        waterfall_data = {
+            "Potential Profit": total_profit + fees1 + fees2 + fees3,
+            "Buy Fees": -fees1,
+            "Transfer Fees": -fees2,
+            "Sell Fees": -fees3,
+        }
+
+        # Create the summary header
+        summary_header = {
+            "total_profit": total_profit,
+            "coins_used": [coin1, coin2],
+            "exchanges_used": exchange,
+        }
+
+        return {
+            "summary_header": summary_header,
+            "waterfall_data": waterfall_data,
+            "instructions": instructions,
+        }
+
+    @staticmethod
+    def create_arbitrage_simple_instructions_data(opportunity):
+        # Extract data
+        currency_pair = opportunity["currency"]
+        buy_exchange = opportunity["buy_exchange"]
+        sell_exchange = opportunity["sell_exchange"]
+        total_profit = opportunity["profit"]
+
+        # Summary Header
+        summary_header = {
+            "total_profit": total_profit,
+            "currency": currency_pair,
+            "exchanges_used": [buy_exchange, sell_exchange],
+        }
+
+        # Waterfall Plot Data
+        waterfall_data = {
+            "Price Delta": opportunity["sell_price"] - opportunity["buy_price"],
+            "Buy Fees": -opportunity["buy_price"] * opportunity["buy_taker_fee"],
+            "Withdraw Fee": -opportunity["buy_withdraw_fee"],
+            "Network Fee": -opportunity["network_fees_usd"],
+            "Deposit Fee": -opportunity["effective_sell_price"]
+            * opportunity["sell_deposit_fee"],
+            "Sell Fees": -opportunity["effective_sell_price"]
+            * opportunity["sell_taker_fee"],
+        }
+
+        # Instructions
+        instructions = []
+
+        # Buy Step
+        from_usd = opportunity["buy_price"]
+        to_crypto = from_usd / opportunity["buy_price"]  # Convert USD to Crypto
+        to_usd = to_crypto * opportunity["buy_price"]
+        fees = opportunity["buy_price"] * opportunity["buy_taker_fee"]
+        funds = to_usd - fees
+
+        instructions.append(
+            {
+                "instruction": "buy",
+                "from_exchange": buy_exchange,
+                "from_currency": "USD",
+                "from_amount": from_usd,
+                "to_exchange": buy_exchange,
+                "to_currency": currency_pair[0],
+                "to_amount": to_crypto,
+                "total_fees": opportunity["buy_taker_fee"],
+                "from_usd": from_usd,
+                "to_usd": funds,
+            }
+        )
+
+        # Transfer Step (if applicable)
+        if opportunity["network_fees_crypto"] > 0:
+            from_crypto = to_crypto
+            to_crypto = (
+                from_crypto * (1 - opportunity["network_fees_crypto"])
+                + from_crypto * opportunity["buy_withdraw_fee"]
+            )
+            to_crypto *= opportunity["sell_deposit_fee"]
+
+            to_usd = to_crypto * opportunity["sell_price"]
+            funds = to_usd
+            fees = to_usd - from_usd
+
+            instructions.append(
+                {
+                    "instruction": "transfer",
+                    "from_exchange": buy_exchange,
+                    "from_currency": currency_pair[0],
+                    "from_amount": from_crypto,
+                    "to_exchange": sell_exchange,
+                    "to_currency": currency_pair[0],
+                    "to_amount": to_crypto,
+                    "total_fees": fees,
+                    "from_usd": from_usd,
+                    "to_usd": funds,
+                }
+            )
+
+        # Sell Step
+        from_crypto = to_crypto
+        to_usd = from_crypto * opportunity["sell_price"]
+        fees = opportunity["effective_sell_price"] * opportunity["sell_taker_fee"]
+        funds = to_usd - fees
+
+        instructions.append(
+            {
+                "instruction": "sell",
+                "from_exchange": sell_exchange,
+                "from_currency": currency_pair[0],
+                "from_amount": from_crypto,
+                "to_exchange": sell_exchange,
+                "to_currency": "USD",
+                "to_amount": to_usd,
+                "total_fees": fees,
+                "from_usd": funds,
+                "to_usd": funds,
+            }
+        )
+
+        return {
+            "summary_header": summary_header,
+            "waterfall_data": waterfall_data,
+            "instructions": instructions,
+        }

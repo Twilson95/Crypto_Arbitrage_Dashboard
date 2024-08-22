@@ -237,7 +237,7 @@ def update_arbitrage_instructions(arbitrage, exchange, currency, n_intervals):
         )
         if prices and currency_fees:
             return arbitrage_handler.return_triangle_arbitrage_instructions(
-                prices, currency_fees
+                prices, currency_fees, exchange
             )
         pass
     #     get
