@@ -9,6 +9,7 @@ class ArbitrageInstructions:
         self.arbitrage = arbitrage
         self.funds = 1000
 
+
     def return_simple_arbitrage_instructions(self):
         return html.Div(
             [

@@ -190,3 +190,4 @@ class DataManager:
         # exchange_fees = exchange.get_all_exchange_fees()
         currency_fees = exchange.get_all_currency_fees()
         return prices, currency_fees
+

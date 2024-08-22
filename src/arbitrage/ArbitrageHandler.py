@@ -1,7 +1,6 @@
 from src.arbitrage.ArbitrageInstructions import ArbitrageInstructions
 import itertools
 
-
 class ArbitrageHandler:
 
     @staticmethod
@@ -106,6 +105,7 @@ class ArbitrageHandler:
                             arbitrage_details
                         )
                     )
+
                 else:
                     difference = abs(arbitrage_profit)
                     if difference < closest_difference:
@@ -475,3 +475,4 @@ class ArbitrageHandler:
             "waterfall_data": waterfall_data,
             "instructions": instructions,
         }
+
