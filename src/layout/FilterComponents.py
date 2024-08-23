@@ -9,6 +9,7 @@ class FilterComponent:
             {"label": "Bitcoin", "value": "BTC/USD"},
             {"label": "Ethereum", "value": "ETH/USD"},
             {"label": "Solana", "value": "SOL/USD"},
+            {"label": "Litecoin", "value": "LTC/USD"},
             {"label": "Dogecoin", "value": "DOGE/USD"},
             {"label": "Cardano", "value": "ADA/USD"},
             {"label": "Ripple", "value": "XRP/USD"},
@@ -24,7 +25,7 @@ class FilterComponent:
         return [
             {"label": "Bitmex", "value": "Bitmex"},
             {"label": "Coinbase", "value": "Coinbase"},
-            {"label": "Binance", "value": "Binance"},
+            # {"label": "Binance", "value": "Binance"},
             {"label": "Huobi", "value": "HTX"},
             {"label": "Kraken", "value": "Kraken"},
             {"label": "Bybit", "value": "Bybit"},

@@ -17,6 +17,16 @@ class AppLayout:
         self.technical_indicators = technical_indicators
 
     def create_filters(self):
+
+        arbitrage_filter = dcc.Dropdown(
+            id="arbitrage-selector",
+            options=self.filter_component.get_arbitrage_options(),
+            placeholder="Select an Arbitrage technique",
+            value="simple",
+            multi=False,
+            style=filter_style,
+        )
+
         exchange_filter = dcc.Dropdown(
             id="exchange-selector",
             options=self.filter_component.get_exchange_options(),
@@ -42,16 +52,7 @@ class AppLayout:
             style=filter_style,
         )
 
-        arbitrage_filter = dcc.Dropdown(
-            id="arbitrage-selector",
-            options=self.filter_component.get_arbitrage_options(),
-            placeholder="Select an Arbitrage technique",
-            value="simple",
-            multi=False,
-            style=filter_style,
-        )
-
-        return [exchange_filter, currency_filter, indicator_filter, arbitrage_filter]
+        return [arbitrage_filter, exchange_filter, currency_filter, indicator_filter]
 
     @staticmethod
     def create_grid_elements():
@@ -200,14 +201,17 @@ class AppLayout:
                     ),
                     dbc.Col(
                         html.Div(
-                            id="arbitrage_plots_container",
-                            style={"height": "100%", "width": "100%"},
+                            id="arbitrage_instructions_container",
+                            style={
+                                "height": "570px",
+                                "width": "100%",
+                                "overflowY": "scroll",
+                            },
                         ),
                         width=3,
                         style={
                             "height": "100%",  # Set a fixed height to prevent shrinking
                             "padding": "2.5px",
-                            "overflow": "hidden",
                             "size": 1,
                             # "outline": "2px solid yellow",
                         },
