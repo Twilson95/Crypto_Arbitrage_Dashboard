@@ -1,6 +1,7 @@
 from src.arbitrage.ArbitrageInstructions import ArbitrageInstructions
 import itertools
 
+
 class ArbitrageHandler:
 
     @staticmethod
@@ -401,10 +402,12 @@ class ArbitrageHandler:
 
         # Buy Step
         from_usd = opportunity["buy_price"]
-        to_crypto = from_usd / opportunity["buy_price"]  # Convert USD to Crypto
-        to_usd = to_crypto * opportunity["buy_price"]
         fees = opportunity["buy_price"] * opportunity["buy_taker_fee"]
-        funds = to_usd - fees
+        to_crypto = (from_usd - fees) / opportunity[
+            "buy_price"
+        ]  # Convert USD to Crypto
+        to_usd = to_crypto * opportunity["buy_price"]
+        funds = to_usd
 
         instructions.append(
             {
@@ -415,20 +418,19 @@ class ArbitrageHandler:
                 "to_exchange": buy_exchange,
                 "to_currency": currency_pair[0],
                 "to_amount": to_crypto,
-                "total_fees": opportunity["buy_taker_fee"],
-                "from_usd": from_usd,
-                "to_usd": funds,
+                "total_fees": fees,
+                "from_usd": None,
+                "to_usd": to_usd,
             }
         )
 
         # Transfer Step (if applicable)
         if opportunity["network_fees_crypto"] > 0:
             from_crypto = to_crypto
-            to_crypto = (
-                from_crypto * (1 - opportunity["network_fees_crypto"])
-                + from_crypto * opportunity["buy_withdraw_fee"]
-            )
-            to_crypto *= opportunity["sell_deposit_fee"]
+            from_usd = funds
+            to_crypto = from_crypto * (1 - opportunity["buy_withdraw_fee"])
+            to_crypto -= opportunity["network_fees_crypto"]
+            to_crypto *= 1 - opportunity["sell_deposit_fee"]
 
             to_usd = to_crypto * opportunity["sell_price"]
             funds = to_usd
@@ -445,12 +447,14 @@ class ArbitrageHandler:
                     "to_amount": to_crypto,
                     "total_fees": fees,
                     "from_usd": from_usd,
-                    "to_usd": funds,
+                    "to_usd": to_usd,
                 }
             )
 
         # Sell Step
         from_crypto = to_crypto
+        from_usd = to_usd
+
         to_usd = from_crypto * opportunity["sell_price"]
         fees = opportunity["effective_sell_price"] * opportunity["sell_taker_fee"]
         funds = to_usd - fees
@@ -475,4 +479,3 @@ class ArbitrageHandler:
             "waterfall_data": waterfall_data,
             "instructions": instructions,
         }
-
