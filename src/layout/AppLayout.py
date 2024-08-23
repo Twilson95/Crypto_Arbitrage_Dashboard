@@ -17,6 +17,16 @@ class AppLayout:
         self.technical_indicators = technical_indicators
 
     def create_filters(self):
+
+        arbitrage_filter = dcc.Dropdown(
+            id="arbitrage-selector",
+            options=self.filter_component.get_arbitrage_options(),
+            placeholder="Select an Arbitrage technique",
+            value="simple",
+            multi=False,
+            style=filter_style,
+        )
+
         exchange_filter = dcc.Dropdown(
             id="exchange-selector",
             options=self.filter_component.get_exchange_options(),
@@ -39,15 +49,6 @@ class AppLayout:
             placeholder="Select a Technical Indicator",
             value=[],
             multi=True,
-            style=filter_style,
-        )
-
-        arbitrage_filter = dcc.Dropdown(
-            id="arbitrage-selector",
-            options=self.filter_component.get_arbitrage_options(),
-            placeholder="Select an Arbitrage technique",
-            value="simple",
-            multi=False,
             style=filter_style,
         )
 
@@ -211,7 +212,6 @@ class AppLayout:
                         style={
                             "height": "100%",  # Set a fixed height to prevent shrinking
                             "padding": "2.5px",
-                            "overflowY": "scroll",
                             "size": 1,
                             # "outline": "2px solid yellow",
                         },
