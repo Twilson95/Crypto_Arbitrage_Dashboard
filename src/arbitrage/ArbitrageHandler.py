@@ -1,6 +1,7 @@
 from src.arbitrage.ArbitrageInstructions import ArbitrageInstructions
 import itertools
 
+
 class ArbitrageHandler:
 
     @staticmethod
@@ -81,6 +82,7 @@ class ArbitrageHandler:
                 total_fees = (buy_price * (buy_taker_fee + withdraw_fee)) + (
                     effective_sell_price * (sell_taker_fee + deposit_fee)
                 )
+                # arbitrage_profit = sell_price - buy_price - total_fees
 
                 arbitrage_details = {
                     "currency": currency.split("/"),
@@ -183,7 +185,11 @@ class ArbitrageHandler:
     @staticmethod
     def calculate_fees(currency_fees, pair, amount, fee_type="taker"):
         """Calculate the fees for a given trading pair."""
-        return amount * currency_fees.get(pair, {}).get(fee_type, 0)
+        if currency_fees.get(pair, {}) == {}:
+            reversed_pair = f"{pair.split('/')[1]}/{pair.split('/')[0]}"
+            return amount * currency_fees.get(reversed_pair, {}).get(fee_type, 0)
+        else:
+            return amount * currency_fees.get(pair, {}).get(fee_type, 0)
 
     @staticmethod
     def identify_triangle_arbitrage(prices, currency_fees, exchange):
@@ -213,30 +219,44 @@ class ArbitrageHandler:
             if rate1 is None or rate2 is None or rate3 is None:
                 continue
 
-            # Assume you start with 1 unit of USD
+            # Start with 1 unit of USD
             amount1 = 1
             amount2 = amount1 * rate1
             amount3 = amount2 * rate2
-            final_amount = amount3 * rate3
 
-            # Calculate fees (assuming taker fees for simplicity)
-            fees1 = ArbitrageHandler.calculate_fees(
-                currency_fees, pair1, amount1, fee_type="taker"
+            # Apply fees in terms of the relevant currency
+            # Fee calculation in the respective coin
+            fees1_coin = ArbitrageHandler.calculate_fees(
+                currency_fees, pair1, amount1 * rate1, fee_type="taker"
             )
-            fees2 = ArbitrageHandler.calculate_fees(
+            amount2 -= fees1_coin
+
+            fees2_coin = ArbitrageHandler.calculate_fees(
                 currency_fees, pair2, amount2, fee_type="taker"
             )
-            fees3 = ArbitrageHandler.calculate_fees(
-                currency_fees, pair3, amount3, fee_type="taker"
-            )
+            amount3 -= fees2_coin
 
-            total_fees = fees1 + fees2 + fees3
-            profit = final_amount - (amount1 + total_fees)
+            # Convert to USD for final profit calculation
+            final_amount = amount3 * rate3
+
+            # Apply final fees in terms of USD
+            fees3_usd = ArbitrageHandler.calculate_fees(
+                currency_fees, pair3, final_amount, fee_type="taker"
+            )
+            final_amount -= fees3_usd
+
+            # Convert all fees to USD for profit calculation
+            fees1_usd = fees1_coin / rate1  # Convert Coin1 fees back to USD
+            fees2_usd = (fees2_coin / rate3) * rate2  # Convert Coin2 fees back to USD
+
+            total_fees_usd = fees1_usd + fees2_usd + fees3_usd
+            profit = final_amount - (amount1 + total_fees_usd)
 
             arbitrage_opportunity = {
-                "path": ["usd", coin1, coin2, "usd"],
+                "path": ["USD", coin1, coin2, "USD"],
                 "conversion_rates": [rate1, rate2, rate3],
-                "fees": [fees1, fees2, fees3],
+                "fees_coin": [fees1_coin, fees2_coin, fees3_usd],
+                "fees_usd": [fees1_usd, fees2_usd, fees3_usd],
                 "final_amount": final_amount,
                 "profit": profit,
                 "exchange": exchange,
@@ -272,19 +292,15 @@ class ArbitrageHandler:
         # Extract data from opportunity
         coin1, coin2 = opportunity["path"][1], opportunity["path"][2]
         rate1, rate2, rate3 = opportunity["conversion_rates"]
-        fees1, fees2, fees3 = opportunity["fees"]
+        fees1_usd, fees2_usd, fees3_usd = opportunity["fees_usd"]
+        fees1_coin, fees2_coin, fees3_coin = opportunity["fees_coin"]
         total_profit = opportunity["profit"]
         exchange = opportunity["exchange"]
 
-        funds = rate1
-        # Initial funds in USD
-        from_usd = funds
-
         # 1. Buy step (USD -> Coin1)
-        from_amount = funds
-        to_amount = funds / rate1  # Convert USD to Coin1
-        to_usd = to_amount * rate1
-        funds = to_usd - fees1  # Apply fees
+        from_amount = rate1
+        to_amount = (rate1 - fees1_coin) / rate1  # Convert USD to Coin1
+        to_usd = rate1 - fees1_usd
 
         instructions.append(
             {
@@ -295,20 +311,18 @@ class ArbitrageHandler:
                 "to_exchange": exchange,
                 "to_currency": coin1,
                 "to_amount": to_amount,
-                "total_fees": fees1,
-                "from_usd": from_usd,
-                "to_usd": funds,
+                "total_fees": fees1_usd,
+                "from_usd": None,
+                "to_usd": to_usd,
             }
         )
 
         # Update from_usd for the next step
-        from_usd = funds
+        from_usd = to_usd
 
-        # 2. Transfer step (Coin1 -> Coin2)
         from_amount = to_amount
-        to_amount = from_amount * rate2  # Convert Coin1 to Coin2
-        to_usd = to_amount * rate3  # Convert to USD equivalent
-        funds = to_usd - fees2  # Apply fees
+        to_amount = (from_amount - fees2_coin) / rate2  # Convert USD to Coin1
+        to_usd = to_amount / rate3
 
         instructions.append(
             {
@@ -319,20 +333,17 @@ class ArbitrageHandler:
                 "to_exchange": exchange,
                 "to_currency": coin2,
                 "to_amount": to_amount,
-                "total_fees": fees2,
+                "total_fees": -fees2_usd,
                 "from_usd": from_usd,
-                "to_usd": funds,
+                "to_usd": to_usd,
             }
         )
 
         # Update from_usd for the next step
-        from_usd = funds
+        from_usd = to_usd
 
-        # 3. Sell step (Coin2 -> USD)
         from_amount = to_amount
-        to_amount = from_amount * rate3  # Convert Coin2 back to USD
-        funds = to_amount - fees3  # Apply fees
-
+        to_amount = (from_amount - fees3_coin) / rate3  # Convert USD to Coin1
         instructions.append(
             {
                 "instruction": "sell",
@@ -342,18 +353,18 @@ class ArbitrageHandler:
                 "to_exchange": exchange,
                 "to_currency": "usd",
                 "to_amount": to_amount,
-                "total_fees": fees3,
+                "total_fees": fees3_usd,
                 "from_usd": from_usd,
-                "to_usd": funds,
+                "to_usd": None,
             }
         )
 
         # Calculate the waterfall data
         waterfall_data = {
-            "Potential Profit": total_profit + fees1 + fees2 + fees3,
-            "Buy Fees": -fees1,
-            "Transfer Fees": -fees2,
-            "Sell Fees": -fees3,
+            "Potential Profit": total_profit + fees1_usd + fees2_usd + fees3_usd,
+            "Buy Fees": -fees1_usd,
+            "Transfer Fees": -fees2_usd,
+            "Sell Fees": -fees3_usd,
         }
 
         # Create the summary header
@@ -401,10 +412,12 @@ class ArbitrageHandler:
 
         # Buy Step
         from_usd = opportunity["buy_price"]
-        to_crypto = from_usd / opportunity["buy_price"]  # Convert USD to Crypto
-        to_usd = to_crypto * opportunity["buy_price"]
         fees = opportunity["buy_price"] * opportunity["buy_taker_fee"]
-        funds = to_usd - fees
+        to_crypto = (from_usd - fees) / opportunity[
+            "buy_price"
+        ]  # Convert USD to Crypto
+        to_usd = to_crypto * opportunity["buy_price"]
+        funds = to_usd
 
         instructions.append(
             {
@@ -415,24 +428,22 @@ class ArbitrageHandler:
                 "to_exchange": buy_exchange,
                 "to_currency": currency_pair[0],
                 "to_amount": to_crypto,
-                "total_fees": opportunity["buy_taker_fee"],
-                "from_usd": from_usd,
-                "to_usd": funds,
+                "total_fees": fees,
+                "from_usd": None,
+                "to_usd": to_usd,
             }
         )
 
         # Transfer Step (if applicable)
         if opportunity["network_fees_crypto"] > 0:
             from_crypto = to_crypto
-            to_crypto = (
-                from_crypto * (1 - opportunity["network_fees_crypto"])
-                + from_crypto * opportunity["buy_withdraw_fee"]
-            )
-            to_crypto *= opportunity["sell_deposit_fee"]
+            from_usd = funds
+            to_crypto = from_crypto * (1 - opportunity["buy_withdraw_fee"])
+            to_crypto -= opportunity["network_fees_crypto"]
+            to_crypto *= 1 - opportunity["sell_deposit_fee"]
 
             to_usd = to_crypto * opportunity["sell_price"]
-            funds = to_usd
-            fees = to_usd - from_usd
+            fees = from_usd - to_usd
 
             instructions.append(
                 {
@@ -445,15 +456,16 @@ class ArbitrageHandler:
                     "to_amount": to_crypto,
                     "total_fees": fees,
                     "from_usd": from_usd,
-                    "to_usd": funds,
+                    "to_usd": to_usd,
                 }
             )
 
         # Sell Step
         from_crypto = to_crypto
-        to_usd = from_crypto * opportunity["sell_price"]
+        from_usd = to_usd
+
         fees = opportunity["effective_sell_price"] * opportunity["sell_taker_fee"]
-        funds = to_usd - fees
+        to_usd = from_crypto * opportunity["sell_price"] - fees
 
         instructions.append(
             {
@@ -465,8 +477,8 @@ class ArbitrageHandler:
                 "to_currency": "USD",
                 "to_amount": to_usd,
                 "total_fees": fees,
-                "from_usd": funds,
-                "to_usd": funds,
+                "from_usd": from_usd,
+                "to_usd": None,
             }
         )
 
@@ -475,4 +487,3 @@ class ArbitrageHandler:
             "waterfall_data": waterfall_data,
             "instructions": instructions,
         }
-
