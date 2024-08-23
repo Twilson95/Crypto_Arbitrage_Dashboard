@@ -9,6 +9,7 @@ class FilterComponent:
             {"label": "Bitcoin", "value": "BTC/USD"},
             {"label": "Ethereum", "value": "ETH/USD"},
             {"label": "Solana", "value": "SOL/USD"},
+            {"label": "Litecoin", "value": "LTC/USD"},
             {"label": "Dogecoin", "value": "DOGE/USD"},
             {"label": "Cardano", "value": "ADA/USD"},
             {"label": "Ripple", "value": "XRP/USD"},
