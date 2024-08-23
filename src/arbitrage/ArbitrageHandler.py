@@ -433,8 +433,7 @@ class ArbitrageHandler:
             to_crypto *= 1 - opportunity["sell_deposit_fee"]
 
             to_usd = to_crypto * opportunity["sell_price"]
-            funds = to_usd
-            fees = to_usd - from_usd
+            fees = from_usd - to_usd
 
             instructions.append(
                 {
@@ -455,9 +454,8 @@ class ArbitrageHandler:
         from_crypto = to_crypto
         from_usd = to_usd
 
-        to_usd = from_crypto * opportunity["sell_price"]
         fees = opportunity["effective_sell_price"] * opportunity["sell_taker_fee"]
-        funds = to_usd - fees
+        to_usd = from_crypto * opportunity["sell_price"] - fees
 
         instructions.append(
             {
@@ -469,8 +467,8 @@ class ArbitrageHandler:
                 "to_currency": "USD",
                 "to_amount": to_usd,
                 "total_fees": fees,
-                "from_usd": funds,
-                "to_usd": funds,
+                "from_usd": from_usd,
+                "to_usd": None,
             }
         )
 
