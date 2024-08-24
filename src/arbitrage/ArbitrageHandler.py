@@ -224,6 +224,12 @@ class ArbitrageHandler:
             amount2 = amount1 * rate1
             amount3 = amount2 * rate2
 
+            # rate2_breakeven = rate1 *
+            rate2_breakeven = 1 / (rate3 * rate1)
+            print(pair1, rate1, pair2, rate2, pair3, rate3, rate2_breakeven)
+            # Potential profit before fees based on difference between actual rate2 and rate2_breakeven
+            potential_profit_before_fees = (rate2 - rate2_breakeven) / rate3
+
             # Apply fees in terms of the relevant currency
             # Fee calculation in the respective coin
             fees1_coin = ArbitrageHandler.calculate_fees(
@@ -259,6 +265,7 @@ class ArbitrageHandler:
                 "fees_usd": [fees1_usd, fees2_usd, fees3_usd],
                 "final_amount": final_amount,
                 "profit": profit,
+                "potential_profit": potential_profit_before_fees,
                 "exchange": exchange,
             }
 
@@ -295,6 +302,7 @@ class ArbitrageHandler:
         fees1_usd, fees2_usd, fees3_usd = opportunity["fees_usd"]
         fees1_coin, fees2_coin, fees3_coin = opportunity["fees_coin"]
         total_profit = opportunity["profit"]
+        potential_profit = opportunity["potential_profit"]
         exchange = opportunity["exchange"]
 
         # 1. Buy step (USD -> Coin1)
@@ -361,7 +369,7 @@ class ArbitrageHandler:
 
         # Calculate the waterfall data
         waterfall_data = {
-            "Potential Profit": total_profit + fees1_usd + fees2_usd + fees3_usd,
+            "Potential Profit": potential_profit,
             "Buy Fees": -fees1_usd,
             "Transfer Fees": -fees2_usd,
             "Sell Fees": -fees3_usd,

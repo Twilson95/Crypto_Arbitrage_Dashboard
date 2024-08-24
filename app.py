@@ -198,11 +198,16 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, n_intervals):
         )
 
     elif arbitrage == "triangular":
-        prices = data_manager.get_live_prices_for_all_exchanges(exchange)
-        currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(exchange)
-        exchange_fees = data_manager.get_withdrawal_deposit_fees_for_all_exchanges()
+        prices, currency_fees = (
+            data_manager.get_live_prices_and_fees_for_single_exchange(exchange)
+        )
 
-        return {}
+        if not prices:
+            return {}
+
+        return price_chart.create_line_charts(
+            prices, mark_limit=20, title="Live Coin Prices"
+        )
     elif arbitrage == "statistical":
         return {}
 
@@ -235,6 +240,8 @@ def update_arbitrage_instructions(arbitrage, exchange, currency, n_intervals):
         prices, currency_fees = (
             data_manager.get_live_prices_and_fees_for_single_exchange(exchange)
         )
+        prices = {currency: price.close[-1] for currency, price in prices.items()}
+
         if prices and currency_fees:
             return arbitrage_handler.return_triangle_arbitrage_instructions(
                 prices, currency_fees, exchange
