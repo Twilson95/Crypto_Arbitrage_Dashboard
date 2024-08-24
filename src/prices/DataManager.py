@@ -186,8 +186,7 @@ class DataManager:
 
     def get_live_prices_and_fees_for_single_exchange(self, exchange_name):
         exchange = self.exchanges[exchange_name]
-        prices = exchange.get_all_live_prices()
+        prices = exchange.get_live_data()
         # exchange_fees = exchange.get_all_exchange_fees()
         currency_fees = exchange.get_all_currency_fees()
         return prices, currency_fees
-

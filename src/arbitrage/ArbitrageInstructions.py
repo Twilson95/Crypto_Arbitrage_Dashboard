@@ -1,4 +1,5 @@
 import plotly.graph_objects as go
+import numpy as np
 from dash import html, dcc
 
 
@@ -109,7 +110,11 @@ class ArbitrageInstructions:
     @staticmethod
     def build_waterfall_panel(waterfall_data):
         categories = list(waterfall_data.keys())
-        values = [round(value, 2) for value in waterfall_data.values()]
+        # values = [value for value in waterfall_data.values()]
+        values = [
+            ArbitrageInstructions.round_to_significant_figures(value, 3)
+            for value in waterfall_data.values()
+        ]
 
         # Create a Waterfall chart
         fig = go.Figure()
@@ -490,3 +495,10 @@ class ArbitrageInstructions:
             return f"{abs(value):,.2f} {unit}"
         else:
             return f"{abs(value):.3g} {unit}"
+
+    @staticmethod
+    def round_to_significant_figures(value, sig_figs):
+        if value == 0:
+            return 0
+        else:
+            return round(value, sig_figs - int(np.floor(np.log10(abs(value)))) - 1)
