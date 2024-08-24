@@ -84,15 +84,9 @@ class DataFetcher:
         self.inter_coin_symbols = self.generate_inter_coin_symbols(
             self.currencies, self.market_symbols
         )
-
         self.extract_exchange_fees()
-        print(self.exchange_name, "added exchange fees")
-
         await self.extract_currency_fees()
-        print(self.exchange_name, "added currency fees")
-
         await self.update_all_historical_prices()
-        print(self.exchange_name, "added historic prices")
 
     def initialize_ohlc_data(self, currency):
         self.historical_data[currency] = OHLCData()
@@ -235,9 +229,7 @@ class DataFetcher:
         self.live_data[currency].open.append(current_price)
 
     async def fetch_live_price_multiple(self, currencies):
-        print("symbols to query", self.exchange_name, currencies)
         symbols = list(currencies.values())
-        print("Symbols to fetch:", symbols)
 
         try:
             tickers = await asyncio.wait_for(
@@ -252,7 +244,6 @@ class DataFetcher:
             )
             return
 
-        print("ticker results", self.exchange_name, tickers.keys())
         for key, ticker in tickers.items():
             currency = key.split(":")[0]
             currency = currency.replace("USDT", "USD")
