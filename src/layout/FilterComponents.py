@@ -25,7 +25,7 @@ class FilterComponent:
         return [
             {"label": "Bitmex", "value": "Bitmex"},
             {"label": "Coinbase", "value": "Coinbase"},
-            # {"label": "Binance", "value": "Binance"},
+            {"label": "Binance", "value": "Binance"},
             {"label": "Huobi", "value": "HTX"},
             {"label": "Kraken", "value": "Kraken"},
             {"label": "Bybit", "value": "Bybit"},

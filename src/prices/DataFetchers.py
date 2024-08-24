@@ -1,16 +1,12 @@
-from abc import abstractmethod
 from datetime import datetime, timedelta
-from dateutil.tz import tzutc
-import time
+from itertools import permutations
 import pytz
+import re
 
 import pandas as pd
-
-import ccxt.async_support as ccxt
 from ccxt.base.errors import RateLimitExceeded
 
 from src.prices.OHLCData import OHLCData
-import logging
 import asyncio
 
 
@@ -19,6 +15,7 @@ class DataFetcher:
         self.client = client
         self.exchange_name = exchange_name
         self.currencies = pairs_mapping
+        self.inter_coin_symbols = None
         self.currency_fees = {}
         self.exchange_fees = {}
         self.historical_data = {}
@@ -83,6 +80,10 @@ class DataFetcher:
     async def async_init(self):
         # await self.fetch_all_initial_live_prices(count=10)
         self.market_symbols = self.client.symbols
+
+        self.inter_coin_symbols = self.generate_inter_coin_symbols(
+            self.currencies, self.market_symbols
+        )
         self.extract_exchange_fees()
         await self.extract_currency_fees()
         await self.update_all_historical_prices()
@@ -177,12 +178,23 @@ class DataFetcher:
         return ohlcv
 
     async def fetch_all_live_prices(self):
-        tasks = [self.fetch_live_price(currency) for currency in self.currencies.keys()]
+        all_currencies = self.currencies | self.inter_coin_symbols
+        if all_currencies is None:
+            return None
+
+        if self.client.has.get("fetchTickers"):
+            # print(self.exchange_name, "querying multiple at once")
+            tasks = [self.fetch_live_price_multiple(all_currencies)]
+        else:
+            tasks = [
+                self.fetch_live_price(currency, symbol)
+                for currency, symbol in all_currencies.items()
+            ]
         await self._gather_with_timeout(tasks, "fetch_all_live_prices")
 
-    async def fetch_live_price(self, currency):
+    async def fetch_live_price(self, currency, symbol):
         # print("fetching", currency)
-        symbol = self.currencies[currency]
+        # symbol = self.currencies[currency]
 
         try:
             ticker = await asyncio.wait_for(
@@ -215,6 +227,43 @@ class DataFetcher:
         self.live_data[currency].low.append(current_price)
         self.live_data[currency].close.append(current_price)
         self.live_data[currency].open.append(current_price)
+
+    async def fetch_live_price_multiple(self, currencies):
+        symbols = list(currencies.values())
+
+        try:
+            tickers = await asyncio.wait_for(
+                self.client.fetch_tickers(symbols), timeout=self.timeout
+            )
+        except asyncio.TimeoutError:
+            print(f"{self.exchange_name}: Timeout while fetching live price multiple")
+            return
+        except Exception as e:
+            print(
+                f"{self.exchange_name}: Error while fetching live price multiple: {e}"
+            )
+            return
+
+        for key, ticker in tickers.items():
+            currency = key.split(":")[0]
+            currency = currency.replace("USDT", "USD")
+
+            timestamp_ms = ticker["timestamp"]
+            if timestamp_ms is None:
+                datetime_obj = datetime.now()
+            else:
+                timestamp_s = timestamp_ms / 1000
+                datetime_obj = datetime.fromtimestamp(timestamp_s)
+
+            if currency not in self.live_data.keys():
+                self.initialize_ohlc_data(currency)
+
+            current_price = ticker["last"]
+            self.live_data[currency].datetime.append(datetime_obj)
+            self.live_data[currency].high.append(current_price)
+            self.live_data[currency].low.append(current_price)
+            self.live_data[currency].close.append(current_price)
+            self.live_data[currency].open.append(current_price)
 
     async def update_historical_prices(self, currency):
         symbol = self.currencies[currency]
@@ -253,3 +302,80 @@ class DataFetcher:
         #     print(f"{self.exchange_name}: Timeout during {task_name}")
         # except Exception as e:
         #     print(f"{self.exchange_name}: Error during {task_name}: {e}")
+
+    @staticmethod
+    def generate_inter_coin_symbols(currencies, market_symbols):
+        # Determine if symbols in the dictionary use a delimiter (like "/")
+        delimiter = "/" if any("/" in symbol for symbol in currencies.values()) else ""
+
+        # Extract base currencies and the quote currency
+        base_currencies = []
+        quote_currency = None
+        for key in currencies.keys():
+            base, quote = key.split("/")
+            base_currencies.append(base)
+            quote_currency = quote  # Assuming all have the same quote currency
+
+        # Generate all permutations of the base currencies for inter-coin pairs
+        inter_coin_pairs = list(permutations(base_currencies, 2))
+
+        # Create a new dictionary to hold the synthetic pairs and include the original pairs
+        inter_coin_symbols = dict(currencies)  # Start with the original pairs
+
+        # Generate synthetic symbols based on permutations
+        for base1, base2 in inter_coin_pairs:
+            pair1 = f"{base1}/{base2}"
+            pair2 = f"{base2}/{base1}"
+
+            # Extract the exchange-specific symbols for base1 and base2
+            symbol1_base = currencies.get(f"{base1}/{quote_currency}")
+            symbol2_base = currencies.get(f"{base2}/{quote_currency}")
+
+            # Construct the inter-coin symbols in the same style as the original dictionary
+            if delimiter:
+                # Use the delimiter style (e.g., "btc/usd")
+                synthetic_symbol1 = f"{symbol1_base.split(delimiter)[0]}{delimiter}{symbol2_base.split(delimiter)[0]}"
+                synthetic_symbol2 = f"{symbol2_base.split(delimiter)[0]}{delimiter}{symbol1_base.split(delimiter)[0]}"
+            else:
+                # No delimiter style (e.g., "btcusd")
+                # Remove the 'usd' part from the symbols
+                symbol1_base = re.sub(
+                    r"usdt|usd", "", symbol1_base, flags=re.IGNORECASE
+                )
+                symbol2_base = re.sub(
+                    r"usdt|usd", "", symbol2_base, flags=re.IGNORECASE
+                )
+                synthetic_symbol1 = f"{symbol1_base}{symbol2_base}"
+                synthetic_symbol2 = f"{symbol2_base}{symbol1_base}"
+
+            matched_symbol1 = DataFetcher.find_matching_symbol(
+                market_symbols, synthetic_symbol1
+            )
+            matched_symbol2 = DataFetcher.find_matching_symbol(
+                market_symbols, synthetic_symbol2
+            )
+
+            if matched_symbol1:
+                inter_coin_symbols[pair1] = matched_symbol1
+            if matched_symbol2:
+                inter_coin_symbols[pair2] = matched_symbol2
+
+        return inter_coin_symbols
+
+        return inter_coin_symbols
+
+    @staticmethod
+    def find_matching_symbol(market_symbols, synthetic_symbol):
+        """
+        Find the matching symbol in the market symbols list.
+        Returns the exact match or the first match with additional suffixes.
+        """
+        # Loop through the market symbols to find a match
+        for market_symbol in market_symbols:
+            # Exact match
+            if market_symbol == synthetic_symbol:
+                return market_symbol
+            # Match with suffix, ignoring case
+            if market_symbol.startswith(synthetic_symbol + ":"):
+                return market_symbol.split("-")[0]
+        return None
