@@ -97,7 +97,7 @@ class ArbitrageInstructions:
                 instruction["to_exchange"],
                 instruction["to_currency"],
                 instruction["to_amount"],
-                instruction["total_fees"],
+                instruction["change_in_usd"],
                 from_usd=instruction["from_usd"],
                 to_usd=instruction["to_usd"],
                 instruction=instruction["instruction"],
@@ -110,24 +110,33 @@ class ArbitrageInstructions:
 
     @staticmethod
     def build_waterfall_panel(waterfall_data):
+        # Convert waterfall_data into categories and values
         categories = list(waterfall_data.keys())
-        # values = [value for value in waterfall_data.values()]
-        values = [
-            round_to_significant_figures(value, 3) for value in waterfall_data.values()
-        ]
+        values = list(waterfall_data.values())
+
+        # Calculate the final total
+        final_total = sum(values)
+
+        # Append 'Total' to categories and final_total to values
+        categories.append("Total")
+        values.append(final_total)
+
+        # Determine the measure for each category
+        measure = ["relative"] * (len(values) - 1) + ["total"]
 
         # Create a Waterfall chart
         fig = go.Figure()
 
-        fig.add_waterfall(
-            name="Profit Calculation",
-            orientation="v",
-            measure=["relative" for _ in values] + ["total"],
-            x=categories,
-            cliponaxis=False,
-            text=[f"${val}" for val in values],
-            y=values,
-            connector=dict(line=dict(color="rgba(63, 63, 63, 0.5)")),
+        fig.add_trace(
+            go.Waterfall(
+                name="Profit Calculation",
+                orientation="v",
+                measure=measure,
+                x=categories,
+                y=values,
+                text=[f"${format_amount(val)}" for val in values],
+                connector=dict(line=dict(color="rgba(63, 63, 63, 0.5)")),
+            )
         )
 
         # Update layout for better visualization
@@ -135,7 +144,6 @@ class ArbitrageInstructions:
             title="Profit and Fees",
             showlegend=False,
             margin=dict(l=10, r=0, b=10, t=50),
-            # xaxis_title="Components",
             yaxis_title="Amount (USD)",
             yaxis=dict(tickprefix="$"),
             template="plotly_dark",
@@ -292,7 +300,7 @@ class ArbitrageInstructions:
         to_exchange,
         to_unit,
         to_amount,
-        total_fees,
+        change_in_usd,
         from_usd=None,
         to_usd=None,
         instruction=None,
@@ -320,11 +328,11 @@ class ArbitrageInstructions:
         fig.add_annotation(
             x=0.5,
             y=0.4,
-            text=format_amount(total_fees, "USD"),
+            text=format_amount(change_in_usd, "USD"),
             showarrow=False,
             xref="paper",
             yref="paper",
-            font=dict(color="red" if total_fees > 0 else "green", size=14),
+            font=dict(color="red" if change_in_usd < 0 else "green", size=14),
         )
 
         # Exchange names
