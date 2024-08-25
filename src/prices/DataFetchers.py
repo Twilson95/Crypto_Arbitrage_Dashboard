@@ -43,7 +43,6 @@ class DataFetcher:
                 trading_fee = await self.extract_currency_fee_complex(options)
 
             self.update_currency_fee(currency, trading_fee)
-        # print(self.exchange_name, self.currency_fees)
 
     def extract_currency_fee_simple(self, options):
         for option in options:
@@ -84,8 +83,12 @@ class DataFetcher:
         self.inter_coin_symbols = self.generate_inter_coin_symbols(
             self.currencies, self.market_symbols
         )
+
         self.extract_exchange_fees()
         await self.extract_currency_fees()
+        self.currency_fees = DataFetcher.generate_crypto_to_crypto_fees(
+            self.currency_fees, self.inter_coin_symbols
+        )
         await self.update_all_historical_prices()
 
     def initialize_ohlc_data(self, currency):
@@ -154,7 +157,6 @@ class DataFetcher:
             }
             for trade in trades
         ]
-        # print(data)
         df = pd.DataFrame(data)
         df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
         return df
@@ -182,8 +184,17 @@ class DataFetcher:
         if all_currencies is None:
             return None
 
+        if self.exchange_name == "Bybit":
+            tasks = []
+            tasks += [self.fetch_live_price_multiple(self.currencies)]
+            tasks += [
+                self.fetch_live_price(currency, symbol)
+                for currency, symbol in self.inter_coin_symbols.items()
+            ]
+            await self._gather_with_timeout(tasks, "fetch_all_live_prices")
+            return None
+
         if self.client.has.get("fetchTickers"):
-            # print(self.exchange_name, "querying multiple at once")
             tasks = [self.fetch_live_price_multiple(all_currencies)]
         else:
             tasks = [
@@ -193,9 +204,6 @@ class DataFetcher:
         await self._gather_with_timeout(tasks, "fetch_all_live_prices")
 
     async def fetch_live_price(self, currency, symbol):
-        # print("fetching", currency)
-        # symbol = self.currencies[currency]
-
         try:
             ticker = await asyncio.wait_for(
                 self.client.fetch_ticker(symbol), timeout=self.timeout
@@ -296,13 +304,6 @@ class DataFetcher:
     async def _gather_with_timeout(self, tasks, task_name):
         await asyncio.wait_for(asyncio.gather(*tasks), self.timeout)
 
-        # try:
-        #     await asyncio.wait_for(asyncio.gather(*tasks), self.timeout)
-        # except asyncio.TimeoutError:
-        #     print(f"{self.exchange_name}: Timeout during {task_name}")
-        # except Exception as e:
-        #     print(f"{self.exchange_name}: Error during {task_name}: {e}")
-
     @staticmethod
     def generate_inter_coin_symbols(currencies, market_symbols):
         # Determine if symbols in the dictionary use a delimiter (like "/")
@@ -320,7 +321,7 @@ class DataFetcher:
         inter_coin_pairs = list(permutations(base_currencies, 2))
 
         # Create a new dictionary to hold the synthetic pairs and include the original pairs
-        inter_coin_symbols = dict(currencies)  # Start with the original pairs
+        inter_coin_symbols = {}  # Start with the original pairs
 
         # Generate synthetic symbols based on permutations
         for base1, base2 in inter_coin_pairs:
@@ -356,26 +357,67 @@ class DataFetcher:
             )
 
             if matched_symbol1:
+                if DataFetcher.get_inverse_pair(pair1) in inter_coin_symbols.keys():
+                    continue
                 inter_coin_symbols[pair1] = matched_symbol1
             if matched_symbol2:
+                if DataFetcher.get_inverse_pair(pair2) in inter_coin_symbols.keys():
+                    continue
                 inter_coin_symbols[pair2] = matched_symbol2
 
-        return inter_coin_symbols
+            # inter_coin_symbols.pop("ETHXBT")
+            # all_currencies.pop("XBTETH")
 
         return inter_coin_symbols
 
     @staticmethod
+    def get_inverse_pair(pair):
+        return pair.split("/")[1] + "/" + pair.split("/")[0]
+
+    @staticmethod
     def find_matching_symbol(market_symbols, synthetic_symbol):
         """
-        Find the matching symbol in the market symbols list.
-        Returns the exact match or the first match with additional suffixes.
+        Find the matching symbol in the market symbols list using the format with a delimiter.
+        Returns the version without the delimiter if a match is found.
         """
         # Loop through the market symbols to find a match
+        normalized_synthetic_symbol = (
+            synthetic_symbol.replace("/", "").lower().replace("xbt", "btc")
+        )
+
         for market_symbol in market_symbols:
-            # Exact match
-            if market_symbol == synthetic_symbol:
+            # skip futures
+            if "-" in market_symbol:
+                continue
+            # Remove delimiter for matching
+            base_market_symbol = market_symbol.split(":")[0]
+            normalized_market_symbol = (
+                base_market_symbol.replace("/", "").lower().replace("xbt", "btc")
+            )
+            # Exact match without delimiter
+            if normalized_market_symbol == normalized_synthetic_symbol:
                 return market_symbol
+                # return synthetic_symbol
+
             # Match with suffix, ignoring case
-            if market_symbol.startswith(synthetic_symbol + ":"):
-                return market_symbol.split("-")[0]
+            if normalized_market_symbol.startswith(normalized_synthetic_symbol):
+                return market_symbol
+                # return synthetic_symbol
+
         return None
+
+    @staticmethod
+    def generate_crypto_to_crypto_fees(currency_fees, inter_coin_dict):
+        """Generate synthetic crypto-to-crypto pairs' fees based on the inter_coin_dict."""
+        # Loop through the inter_coin_dict to generate synthetic fees
+        for pair, synthetic_symbol in inter_coin_dict.items():
+            crypto1, crypto2 = pair.split("/")
+
+            # Generate fees for the synthetic pairs
+            # Assuming fees are similar to the corresponding USD pairs
+            if f"{crypto1}/USD" in currency_fees:
+                currency_fees[pair] = currency_fees[f"{crypto1}/USD"]
+            if f"{crypto2}/USD" in currency_fees:
+                currency_fees[pair] = currency_fees[f"{crypto2}/USD"]
+
+        return currency_fees

@@ -1,6 +1,7 @@
 import plotly.graph_objects as go
 import numpy as np
 from dash import html, dcc
+from src.prices.helper_functions import format_amount, round_to_significant_figures
 
 
 class ArbitrageInstructions:
@@ -112,8 +113,7 @@ class ArbitrageInstructions:
         categories = list(waterfall_data.keys())
         # values = [value for value in waterfall_data.values()]
         values = [
-            ArbitrageInstructions.round_to_significant_figures(value, 3)
-            for value in waterfall_data.values()
+            round_to_significant_figures(value, 3) for value in waterfall_data.values()
         ]
 
         # Create a Waterfall chart
@@ -320,7 +320,7 @@ class ArbitrageInstructions:
         fig.add_annotation(
             x=0.5,
             y=0.4,
-            text=ArbitrageInstructions.format_amount(total_fees, "USD"),
+            text=format_amount(total_fees, "USD"),
             showarrow=False,
             xref="paper",
             yref="paper",
@@ -352,7 +352,7 @@ class ArbitrageInstructions:
         fig.add_annotation(
             x=0.05,
             y=0.5,
-            text=ArbitrageInstructions.format_amount(from_amount, from_unit),
+            text=format_amount(from_amount, from_unit),
             showarrow=False,
             xref="paper",
             yref="paper",
@@ -363,7 +363,7 @@ class ArbitrageInstructions:
         fig.add_annotation(
             x=0.95,
             y=0.5,
-            text=ArbitrageInstructions.format_amount(to_amount, to_unit),
+            text=format_amount(to_amount, to_unit),
             showarrow=False,
             xref="paper",
             yref="paper",
@@ -385,7 +385,7 @@ class ArbitrageInstructions:
             fig.add_annotation(
                 x=0.05,
                 y=0.20,
-                text="(" + ArbitrageInstructions.format_amount(from_usd, "USD") + ")",
+                text="(" + format_amount(from_usd, "USD") + ")",
                 showarrow=False,
                 xref="paper",
                 yref="paper",
@@ -396,7 +396,7 @@ class ArbitrageInstructions:
             fig.add_annotation(
                 x=0.95,
                 y=0.20,
-                text="(" + ArbitrageInstructions.format_amount(to_usd, "USD") + ")",
+                text="(" + format_amount(to_usd, "USD") + ")",
                 showarrow=False,
                 xref="paper",
                 yref="paper",
@@ -484,21 +484,3 @@ class ArbitrageInstructions:
         )
 
         return fig
-
-    @staticmethod
-    def format_amount(value, unit):
-        if value == 0:
-            return f"0 {unit}"
-        elif abs(value) >= 10000:
-            return f"{abs(value):,.1f} {unit}"
-        elif abs(value) >= 1:
-            return f"{abs(value):,.2f} {unit}"
-        else:
-            return f"{abs(value):.3g} {unit}"
-
-    @staticmethod
-    def round_to_significant_figures(value, sig_figs):
-        if value == 0:
-            return 0
-        else:
-            return round(value, sig_figs - int(np.floor(np.log10(abs(value)))) - 1)
