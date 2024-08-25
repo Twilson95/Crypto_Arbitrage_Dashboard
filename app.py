@@ -11,6 +11,7 @@ from src.prices.DataManager import DataManager
 from src.arbitrage.ArbitrageHandler import ArbitrageHandler
 from src.news.NewsFetcher import NewsFetcher
 from src.news.NewsChart import NewsChart
+from src.prices.NetworkGraph import create_network_graph
 
 
 from time import time
@@ -204,10 +205,11 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, n_intervals):
 
         if not prices:
             return {}
-
-        return price_chart.create_line_charts(
-            prices, mark_limit=20, title="Live Coin Prices"
-        )
+        arbitrage_route = [("BTC", "USD"), ("USD", "ETH"), ("ETH", "BTC")]
+        return create_network_graph(prices, arbitrage_route)
+        # return price_chart.create_line_charts(
+        #     prices, mark_limit=20, title="Live Coin Prices"
+        # )
     elif arbitrage == "statistical":
         return {}
 

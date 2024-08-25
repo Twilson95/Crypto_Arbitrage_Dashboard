@@ -124,9 +124,12 @@ class ArbitrageHandler:
             return [closest_opportunity]
 
     def return_triangle_arbitrage_instructions(self, prices, currency_fees, exchange):
-        all_prices, all_fees = self.generate_crypto_to_crypto_pairs(
-            prices, currency_fees
-        )
+        all_prices = prices
+        all_fees = currency_fees
+        # )
+        # all_prices, all_fees = self.generate_crypto_to_crypto_pairs(
+        #     prices, currency_fees
+        # )
 
         arbitrages = self.identify_triangle_arbitrage(all_prices, all_fees, exchange)
 
@@ -225,7 +228,7 @@ class ArbitrageHandler:
             amount3 = amount2 * rate2
 
             # rate2_breakeven = rate1 *
-            rate2_breakeven = 1 / (rate3 * rate1)
+            rate2_breakeven = rate3 * rate1
             print(pair1, rate1, pair2, rate2, pair3, rate3, rate2_breakeven)
             # Potential profit before fees based on difference between actual rate2 and rate2_breakeven
             potential_profit_before_fees = (rate2 - rate2_breakeven) / rate3
