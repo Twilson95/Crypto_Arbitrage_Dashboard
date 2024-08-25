@@ -416,8 +416,8 @@ class DataFetcher:
             # Generate fees for the synthetic pairs
             # Assuming fees are similar to the corresponding USD pairs
             if f"{crypto1}/USD" in currency_fees:
-                currency_fees[synthetic_symbol] = currency_fees[f"{crypto1}/USD"]
+                currency_fees[pair] = currency_fees[f"{crypto1}/USD"]
             if f"{crypto2}/USD" in currency_fees:
-                currency_fees[synthetic_symbol[::-1]] = currency_fees[f"{crypto2}/USD"]
+                currency_fees[pair] = currency_fees[f"{crypto2}/USD"]
 
         return currency_fees

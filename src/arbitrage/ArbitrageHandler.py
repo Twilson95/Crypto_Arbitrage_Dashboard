@@ -222,53 +222,56 @@ class ArbitrageHandler:
             if rate1 is None or rate2 is None or rate3 is None:
                 continue
 
-            # Start with enough for 1 unit of crypto
-            amount1 = 1 / rate1
-            amount2 = amount1 * rate1
-            amount3 = amount2 * rate2
-            amount4 = amount3 * rate3
+            # Start with enough USD to buy 1 unit of Coin1
+            usd_start = 1 / rate1  # USD needed to buy 1 unit of Coin1
+            amount1 = 1  # 1 unit of Coin1
 
-            # rate2_breakeven = rate1 *
-            rate2_breakeven = rate3 * rate1
-            potential_profit_before_fees = amount4 - amount1
-            print("potential profit", potential_profit_before_fees)
-
-            # Apply fees in terms of the relevant currency
-            # Fee calculation in the respective coin
-            fees1_coin = ArbitrageHandler.calculate_fees(
-                currency_fees, pair1, amount1 * rate1, fee_type="taker"
+            # Calculate fees and convert USD to Coin1
+            fees1_usd = ArbitrageHandler.calculate_fees(
+                currency_fees, pair1, usd_start, fee_type="taker"
             )
-            amount2 -= fees1_coin
 
+            usd_after_fees1 = usd_start - fees1_usd
+            amount1 = (
+                usd_after_fees1 * rate1
+            )  # Amount of Coin1 obtained after deducting USD fees
+
+            # Calculate fees and convert Coin1 to Coin2
             fees2_coin = ArbitrageHandler.calculate_fees(
-                currency_fees, pair2, amount2, fee_type="taker"
+                currency_fees, pair2, amount1, fee_type="taker"
             )
-            amount3 -= fees2_coin
+            print("fees2", fees2_coin, pair2, ["USD", coin1, coin2, "USD"])
+            coin1_after_fees2 = amount1 - fees2_coin
+            amount2 = (
+                coin1_after_fees2 * rate2
+            )  # Amount of Coin2 obtained after deducting Coin1 fees
 
-            # Convert to USD for final profit calculation
-            final_amount = amount3 * rate3
-
-            # Apply final fees in terms of USD
-            fees3_usd = ArbitrageHandler.calculate_fees(
-                currency_fees, pair3, final_amount, fee_type="taker"
+            # Calculate fees and convert Coin2 back to USD
+            fees3_coin = ArbitrageHandler.calculate_fees(
+                currency_fees, pair3, amount2, fee_type="taker"
             )
-            final_amount -= fees3_usd
+            print("fees3", fees3_coin)
+            coin2_after_fees3 = amount2 - fees3_coin
+            usd_end = (
+                coin2_after_fees3 * rate3
+            )  # Final USD amount after converting back
 
-            # Convert all fees to USD for profit calculation
-            fees1_usd = fees1_coin / rate1  # Convert Coin1 fees back to USD
-            fees2_usd = (fees2_coin / rate3) * rate2  # Convert Coin2 fees back to USD
-
+            # Calculate total fees in USD for reporting
+            fees1_coin = fees1_usd
+            fees2_usd = fees2_coin / rate1
+            fees3_usd = fees3_coin * rate3
             total_fees_usd = fees1_usd + fees2_usd + fees3_usd
-            profit = final_amount - (amount1 + total_fees_usd)
+
+            # Calculate profit
+            profit = usd_end - usd_start
 
             arbitrage_opportunity = {
                 "path": ["USD", coin1, coin2, "USD"],
                 "conversion_rates": [rate1, rate2, rate3],
                 "fees_coin": [fees1_coin, fees2_coin, fees3_usd],
                 "fees_usd": [fees1_usd, fees2_usd, fees3_usd],
-                "final_amount": final_amount,
                 "profit": profit,
-                "potential_profit": potential_profit_before_fees,
+                "potential_profit_before_fees": usd_start * (rate1 * rate2 * rate3 - 1),
                 "exchange": exchange,
             }
 
@@ -305,12 +308,12 @@ class ArbitrageHandler:
         fees1_usd, fees2_usd, fees3_usd = opportunity["fees_usd"]
         fees1_coin, fees2_coin, fees3_coin = opportunity["fees_coin"]
         total_profit = opportunity["profit"]
-        potential_profit = opportunity["potential_profit"]
+        potential_profit = opportunity["potential_profit_before_fees"]
         exchange = opportunity["exchange"]
 
         # 1. Buy step (USD -> Coin1)
         from_amount = rate1
-        to_amount = (rate1 - fees1_coin) / rate1  # Convert USD to Coin1
+        to_amount = (rate1 - fees1_coin) * rate1  # Convert USD to Coin1
         to_usd = rate1 - fees1_usd
 
         instructions.append(
@@ -332,8 +335,8 @@ class ArbitrageHandler:
         from_usd = to_usd
 
         from_amount = to_amount
-        to_amount = (from_amount - fees2_coin) / rate2  # Convert USD to Coin1
-        to_usd = to_amount / rate3
+        to_amount = (from_amount - fees2_coin) * rate2  # Convert USD to Coin1
+        to_usd = to_amount * rate3
 
         instructions.append(
             {
@@ -354,7 +357,7 @@ class ArbitrageHandler:
         from_usd = to_usd
 
         from_amount = to_amount
-        to_amount = (from_amount - fees3_coin) / rate3  # Convert USD to Coin1
+        to_amount = (from_amount - fees3_coin) * rate3  # Convert USD to Coin1
         instructions.append(
             {
                 "instruction": "sell",
@@ -389,6 +392,7 @@ class ArbitrageHandler:
             "summary_header": summary_header,
             "waterfall_data": waterfall_data,
             "instructions": instructions,
+            "path": [("USD", coin1), (coin1, coin2), (coin2, "USD")],
         }
 
     @staticmethod

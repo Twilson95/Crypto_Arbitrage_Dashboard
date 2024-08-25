@@ -202,6 +202,7 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, n_intervals):
         prices, currency_fees = (
             data_manager.get_live_prices_and_fees_for_single_exchange(exchange)
         )
+        print(currency_fees)
 
         if not prices:
             return {}
