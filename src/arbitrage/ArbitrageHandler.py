@@ -123,16 +123,8 @@ class ArbitrageHandler:
         else:
             return [closest_opportunity]
 
-    def return_triangle_arbitrage_instructions(self, prices, currency_fees, exchange):
-        all_prices = prices
-        all_fees = currency_fees
-        # )
-        # all_prices, all_fees = self.generate_crypto_to_crypto_pairs(
-        #     prices, currency_fees
-        # )
-
-        arbitrages = self.identify_triangle_arbitrage(all_prices, all_fees, exchange)
-
+    @staticmethod
+    def return_triangle_arbitrage_instructions(arbitrages):
         instruction_diagrams = []
         for arbitrage in arbitrages:
             arbitrage_instructions = ArbitrageInstructions(arbitrage)
@@ -240,7 +232,7 @@ class ArbitrageHandler:
             fees2_coin = ArbitrageHandler.calculate_fees(
                 currency_fees, pair2, amount1, fee_type="taker"
             )
-            # print("fees2", fees2_coin, pair2, ["USD", coin1, coin2, "USD"])
+
             coin1_after_fees2 = amount1 - fees2_coin
             amount2 = (
                 coin1_after_fees2 * rate2
@@ -250,7 +242,7 @@ class ArbitrageHandler:
             fees3_coin = ArbitrageHandler.calculate_fees(
                 currency_fees, pair3, amount2, fee_type="taker"
             )
-            print("fees3", fees3_coin)
+
             coin2_after_fees3 = amount2 - fees3_coin
             usd_end = (
                 coin2_after_fees3 * rate3

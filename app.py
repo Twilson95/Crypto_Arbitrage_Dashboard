@@ -176,7 +176,10 @@ def update_live_price_chart(currency, exchange_name, n_intervals, indicator):
 
 
 @app.callback(
-    Output("arbitrage_main_view", "figure"),
+    [
+        Output("arbitrage_main_view", "figure"),
+        Output("arbitrage_instructions_container", "children"),
+    ],
     [
         Input("arbitrage-selector", "value"),
         Input("exchange-selector", "value"),
@@ -190,69 +193,56 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, n_intervals):
 
     if arbitrage == "simple":
         prices = data_manager.get_live_prices_for_all_exchanges(currency)
+        currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(currency)
+        exchange_fees = data_manager.get_withdrawal_deposit_fees_for_all_exchanges()
+        network_fees = data_manager.get_network_fees(currency)
 
         if not prices:
             return {}
 
-        return price_chart.create_line_charts(
+        price_charts = price_chart.create_line_charts(
             prices, mark_limit=20, title="Live Exchange Prices"
         )
+        arbitrage_instructions = {}
+        if prices and currency_fees and exchange_fees and network_fees:
+            arbitrage_instructions = (
+                arbitrage_handler.return_simple_arbitrage_instructions(
+                    currency, prices, currency_fees, exchange_fees, network_fees
+                )
+            )
+
+        return price_charts, arbitrage_instructions
 
     elif arbitrage == "triangular":
         prices, currency_fees = (
             data_manager.get_live_prices_and_fees_for_single_exchange(exchange)
         )
+        prices = {currency: price.close[-1] for currency, price in prices.items()}
 
-        if not prices:
-            return {}
-        arbitrage_route = [("BTC", "USD"), ("USD", "ETH"), ("ETH", "BTC")]
-        return create_network_graph(prices, arbitrage_route)
-        # return price_chart.create_line_charts(
-        #     prices, mark_limit=20, title="Live Coin Prices"
-        # )
+        arbitrage_opportunities = None
+        if prices and currency_fees:
+            arbitrage_opportunities = arbitrage_handler.identify_triangle_arbitrage(
+                prices, currency_fees, exchange
+            )
+
+        exchange_network_graph = create_network_graph(prices, arbitrage_opportunities)
+
+        arbitrage_instructions = {}
+        if prices and currency_fees:
+            arbitrage_opportunities = arbitrage_handler.identify_triangle_arbitrage(
+                prices, currency_fees, exchange
+            )
+            arbitrage_instructions = (
+                arbitrage_handler.return_triangle_arbitrage_instructions(
+                    arbitrage_opportunities
+                )
+            )
+        return exchange_network_graph, arbitrage_instructions
+
     elif arbitrage == "statistical":
         return {}
 
     return {}
-
-
-@app.callback(
-    Output("arbitrage_instructions_container", "children"),
-    [
-        Input("arbitrage-selector", "value"),
-        Input("exchange-selector", "value"),
-        Input("currency-selector", "value"),
-        Input("interval-component", "n_intervals"),
-    ],
-)
-def update_arbitrage_instructions(arbitrage, exchange, currency, n_intervals):
-
-    if arbitrage == "simple":
-        prices = data_manager.get_live_prices_for_all_exchanges(currency)
-        currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(currency)
-        exchange_fees = data_manager.get_withdrawal_deposit_fees_for_all_exchanges()
-        network_fees = data_manager.get_network_fees(currency)
-
-        if prices and currency_fees and exchange_fees and network_fees:
-            return arbitrage_handler.return_simple_arbitrage_instructions(
-                currency, prices, currency_fees, exchange_fees, network_fees
-            )
-
-    if arbitrage == "triangular":
-        prices, currency_fees = (
-            data_manager.get_live_prices_and_fees_for_single_exchange(exchange)
-        )
-        prices = {currency: price.close[-1] for currency, price in prices.items()}
-
-        if prices and currency_fees:
-            return arbitrage_handler.return_triangle_arbitrage_instructions(
-                prices, currency_fees, exchange
-            )
-        pass
-    #     get
-
-    return {}
-    # return plots
 
 
 if __name__ == "__main__":
