@@ -210,9 +210,9 @@ class ArbitrageHandler:
         coins.discard("USD")
 
         for coin1, coin2 in itertools.permutations(coins, 2):
-            pair1 = f"{coin1}/USD"  # USD to Coin1
-            pair2 = f"{coin2}/{coin1}"  # Coin1 to Coin2
-            pair3 = f"USD/{coin2}"  # Coin2 back to USD
+            pair1 = f"USD/{coin1}"  # USD to Coin1
+            pair2 = f"{coin1}/{coin2}"  # Coin1 to Coin2
+            pair3 = f"{coin2}/USD"  # Coin2 back to USD
 
             # Calculate conversion rates
             rate1 = ArbitrageHandler.calculate_conversion_rate(prices, pair1)
@@ -222,16 +222,16 @@ class ArbitrageHandler:
             if rate1 is None or rate2 is None or rate3 is None:
                 continue
 
-            # Start with 1 unit of USD
-            amount1 = 1
+            # Start with enough for 1 unit of crypto
+            amount1 = 1 / rate1
             amount2 = amount1 * rate1
             amount3 = amount2 * rate2
+            amount4 = amount3 * rate3
 
             # rate2_breakeven = rate1 *
             rate2_breakeven = rate3 * rate1
-            print(pair1, rate1, pair2, rate2, pair3, rate3, rate2_breakeven)
-            # Potential profit before fees based on difference between actual rate2 and rate2_breakeven
-            potential_profit_before_fees = (rate2 - rate2_breakeven) / rate3
+            potential_profit_before_fees = amount4 - amount1
+            print("potential profit", potential_profit_before_fees)
 
             # Apply fees in terms of the relevant currency
             # Fee calculation in the respective coin

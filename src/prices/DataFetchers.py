@@ -357,14 +357,22 @@ class DataFetcher:
             )
 
             if matched_symbol1:
+                if DataFetcher.get_inverse_pair(pair1) in inter_coin_symbols.keys():
+                    continue
                 inter_coin_symbols[pair1] = matched_symbol1
             if matched_symbol2:
+                if DataFetcher.get_inverse_pair(pair2) in inter_coin_symbols.keys():
+                    continue
                 inter_coin_symbols[pair2] = matched_symbol2
 
             # inter_coin_symbols.pop("ETHXBT")
             # all_currencies.pop("XBTETH")
 
         return inter_coin_symbols
+
+    @staticmethod
+    def get_inverse_pair(pair):
+        return pair.split("/")[1] + "/" + pair.split("/")[0]
 
     @staticmethod
     def find_matching_symbol(market_symbols, synthetic_symbol):
