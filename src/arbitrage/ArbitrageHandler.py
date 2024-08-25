@@ -240,7 +240,7 @@ class ArbitrageHandler:
             fees2_coin = ArbitrageHandler.calculate_fees(
                 currency_fees, pair2, amount1, fee_type="taker"
             )
-            print("fees2", fees2_coin, pair2, ["USD", coin1, coin2, "USD"])
+            # print("fees2", fees2_coin, pair2, ["USD", coin1, coin2, "USD"])
             coin1_after_fees2 = amount1 - fees2_coin
             amount2 = (
                 coin1_after_fees2 * rate2
