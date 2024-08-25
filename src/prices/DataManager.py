@@ -57,6 +57,8 @@ class DataManager:
                     # "enable_time_sync": True,
                     "options": {
                         "recvWindow": 10000,  # Increase recv_window to 10 seconds
+                        # "defaultType": "spot",  # Ensure we're using the spot market
+                        # "fetchMarkets": ["spot"],
                     },
                 }
             )
