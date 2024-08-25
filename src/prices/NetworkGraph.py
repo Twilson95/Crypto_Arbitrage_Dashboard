@@ -52,24 +52,24 @@ def create_network_graph(live_prices, arbitrage_opportunities=None):
                 last_node = arbitrage_route[-1][1]
 
                 # Add profit annotation near the last node in the arbitrage route
-                profit_annotation = go.Scatter(
-                    x=[pos[last_node][0]],  # Access single node
-                    y=[pos[last_node][1]],  # Access single node
-                    text=[
-                        (
-                            f"Profit: ${total_profit:.2f}"
-                            if total_profit is not None
-                            else ""
-                        )
-                    ],
-                    mode="text",
-                    showlegend=False,
-                )
+                # profit_annotation = go.Scatter(
+                #     x=[pos[last_node][0]],  # Access single node
+                #     y=[pos[last_node][1]],  # Access single node
+                #     text=[
+                #         (
+                #             f"Profit: ${total_profit:.2f}"
+                #             if total_profit is not None
+                #             else ""
+                #         )
+                #     ],
+                #     mode="text",
+                #     showlegend=False,
+                # )
 
                 # Append the arbitrage traces
                 traces.append(arb_edge_trace)
                 traces.append(arb_edge_labels)
-                traces.append(profit_annotation)
+                # traces.append(profit_annotation)
 
     base_traces = [
         create_edge_trace(edge_x, edge_y),
@@ -195,16 +195,37 @@ def create_arbitrage_edge_trace(arb_edge_x, arb_edge_y, total_profit):
     )
 
 
-def create_arbitrage_edge_labels(arb_edge_x, arb_edge_y, arb_edge_text):
-    edge_label_x = [
-        (arb_edge_x[i] + arb_edge_x[i + 1]) / 2
-        for i in range(0, len(arb_edge_x) - 2, 3)
-    ]
-    edge_label_y = [
-        (arb_edge_y[i] + arb_edge_y[i + 1]) / 2
-        for i in range(0, len(arb_edge_y) - 2, 3)
-    ]
+def create_arbitrage_edge_labels(
+    arb_edge_x, arb_edge_y, arb_edge_text, offset=0.05, min_distance=0.1
+):
+    edge_label_x = []
+    edge_label_y = []
+    last_label_position = None
 
+    for i in range(0, len(arb_edge_x) - 2, 3):
+        x0, y0 = arb_edge_x[i], arb_edge_y[i]
+        x1, y1 = arb_edge_x[i + 1], arb_edge_y[i + 1]
+
+        # Calculate label position with the default offset
+        offset_x, offset_y = compute_perpendicular_offset(x0, y0, x1, y1, offset)
+
+        # Check the distance from the last label position
+        if last_label_position:
+            last_x, last_y = last_label_position
+            distance = np.sqrt((offset_x - last_x) ** 2 + (offset_y - last_y) ** 2)
+            if distance < min_distance:
+                # If too close, apply offset in the opposite direction
+                offset_x, offset_y = compute_perpendicular_offset(
+                    x0, y0, x1, y1, -offset
+                )
+
+        # Update last label position
+        last_label_position = (offset_x, offset_y)
+
+        edge_label_x.append(offset_x)
+        edge_label_y.append(offset_y)
+
+    # Create a Plotly scatter plot for edge labels
     return go.Scatter(
         x=edge_label_x,
         y=edge_label_y,
@@ -213,6 +234,26 @@ def create_arbitrage_edge_labels(arb_edge_x, arb_edge_y, arb_edge_text):
         textposition="middle center",
         hoverinfo="text",
     )
+
+
+# def create_arbitrage_edge_labels(arb_edge_x, arb_edge_y, arb_edge_text):
+#     edge_label_x = [
+#         (arb_edge_x[i] + arb_edge_x[i + 1]) / 2
+#         for i in range(0, len(arb_edge_x) - 2, 3)
+#     ]
+#     edge_label_y = [
+#         (arb_edge_y[i] + arb_edge_y[i + 1]) / 2
+#         for i in range(0, len(arb_edge_y) - 2, 3)
+#     ]
+#
+#     return go.Scatter(
+#         x=edge_label_x,
+#         y=edge_label_y,
+#         text=arb_edge_text,
+#         mode="text",
+#         textposition="middle center",
+#         hoverinfo="text",
+#     )
 
 
 def create_edge_labels(G, pos, edge_text):
@@ -279,3 +320,30 @@ def create_figure(traces):
             yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         ),
     )
+
+
+def compute_perpendicular_offset(x0, y0, x1, y1, offset=0.05):
+    """
+    Computes a perpendicular offset for a point on a line.
+    """
+    # Calculate the direction vector of the line
+    dx = x1 - x0
+    dy = y1 - y0
+
+    # Normalize the direction vector
+    length = np.sqrt(dx**2 + dy**2)
+    if length == 0:  # Prevent division by zero
+        return 0, 0
+
+    dx /= length
+    dy /= length
+
+    # Compute the perpendicular vector (rotate 90 degrees)
+    perp_dx = -dy
+    perp_dy = dx
+
+    # Apply the offset
+    offset_x = x0 + dx * 0.5 + perp_dx * offset
+    offset_y = y0 + dy * 0.5 + perp_dy * offset
+
+    return offset_x, offset_y

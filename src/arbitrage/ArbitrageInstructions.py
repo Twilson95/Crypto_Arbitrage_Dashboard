@@ -112,9 +112,7 @@ class ArbitrageInstructions:
     def build_waterfall_panel(waterfall_data):
         # Convert waterfall_data into categories and values
         categories = list(waterfall_data.keys())
-        values = [
-            round_to_significant_figures(value, 3) for value in waterfall_data.values()
-        ]
+        values = list(waterfall_data.values())
 
         # Calculate the final total
         final_total = sum(values)
@@ -136,7 +134,7 @@ class ArbitrageInstructions:
                 measure=measure,
                 x=categories,
                 y=values,
-                text=[f"${val:.2f}" for val in values],
+                text=[f"${format_amount(val)}" for val in values],
                 connector=dict(line=dict(color="rgba(63, 63, 63, 0.5)")),
             )
         )

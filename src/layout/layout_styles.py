@@ -4,7 +4,6 @@ container_style = {
     "height": "100vh",  # Use full viewport height
     # "margin": "5px",
     "overflow": "hidden",
-    # "overflowY": "hidden",
 }
 
 filter_container_style = {
@@ -20,6 +19,7 @@ filter_style = {
     "flex": "1 1 auto",
     "padding-left": "1%",
     "padding-right": "1%",
+    # "padding-top": "50%",
     # "outline": "2px solid green",
 }
 grid_container_style = {
@@ -30,6 +30,7 @@ grid_container_style = {
     "align-items": "center",
     "width": "100%",
     "padding": "5px",
+    "padding-bottom": "1%",
     "overflowY": "hidden",
     # "outline": "2px solid blue",
 }

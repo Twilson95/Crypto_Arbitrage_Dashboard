@@ -64,19 +64,21 @@ price_chart = PriceChart()
     [
         Output("grid-container", "style"),
         Output("arbitrage-container", "style"),
-        Output("exchange-selector", "style"),
-        Output("currency-selector", "style"),
-        Output("indicator-selector", "style"),
-        Output("arbitrage-selector", "style"),
+        Output("exchange-filter-container", "style"),
+        Output("currency-filter-container", "style"),
+        Output("indicator-selector-container", "style"),
+        Output("arbitrage-filter-container", "style"),
+        Output("funds-input-container", "style"),
     ],
     [Input("tabs", "value")],
     [
         State("grid-container", "style"),
         State("arbitrage-container", "style"),
-        State("exchange-selector", "style"),
-        State("currency-selector", "style"),
-        State("indicator-selector", "style"),
-        State("arbitrage-selector", "style"),
+        State("exchange-filter-container", "style"),
+        State("currency-filter-container", "style"),
+        State("indicator-selector-container", "style"),
+        State("arbitrage-filter-container", "style"),
+        State("funds-input-container", "style"),
         Input("arbitrage-selector", "value"),
     ],
 )
@@ -88,6 +90,7 @@ def render_tab_content(
     currency_filter_style,
     indicator_filter_style,
     arbitrage_filter_style,
+    funds_input_style,
     arbitrage_filter_value,
 ):
     if active_tab == "tab-1":
@@ -97,6 +100,7 @@ def render_tab_content(
         currency_filter_style["display"] = "block"
         indicator_filter_style["display"] = "block"
         arbitrage_filter_style["display"] = "none"
+        funds_input_style["display"] = "none"
     elif active_tab == "tab-2":
         grid_style["display"] = "none"
         arbitrage_style["display"] = "flex"
@@ -106,8 +110,11 @@ def render_tab_content(
         else:
             exchange_filter_style["display"] = "none"
             currency_filter_style["display"] = "block"
+
         indicator_filter_style["display"] = "none"
         arbitrage_filter_style["display"] = "block"
+        funds_input_style["display"] = "block"
+
     return (
         grid_style,
         arbitrage_style,
@@ -115,6 +122,7 @@ def render_tab_content(
         currency_filter_style,
         indicator_filter_style,
         arbitrage_filter_style,
+        funds_input_style,
     )
 
 
@@ -184,13 +192,16 @@ def update_live_price_chart(currency, exchange_name, n_intervals, indicator):
         Input("arbitrage-selector", "value"),
         Input("exchange-selector", "value"),
         Input("currency-selector", "value"),
+        Input("funds-input", "value"),
         Input("interval-component", "n_intervals"),
     ],
 )
-def update_main_arbitrage_chart(arbitrage, exchange, currency, n_intervals):
+def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_intervals):
     if not currency:
         return {}
-
+    if not funds:
+        funds = 0.1
+    # funds = int(funds)
     if arbitrage == "simple":
         prices = data_manager.get_live_prices_for_all_exchanges(currency)
         currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(currency)
@@ -207,7 +218,7 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, n_intervals):
         if prices and currency_fees and exchange_fees and network_fees:
             arbitrage_instructions = (
                 arbitrage_handler.return_simple_arbitrage_instructions(
-                    currency, prices, currency_fees, exchange_fees, network_fees
+                    currency, prices, currency_fees, exchange_fees, network_fees, funds
                 )
             )
 
@@ -222,16 +233,13 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, n_intervals):
         arbitrage_opportunities = None
         if prices and currency_fees:
             arbitrage_opportunities = arbitrage_handler.identify_triangle_arbitrage(
-                prices, currency_fees, exchange
+                prices, currency_fees, exchange, funds
             )
 
         exchange_network_graph = create_network_graph(prices, arbitrage_opportunities)
 
         arbitrage_instructions = {}
-        if prices and currency_fees:
-            arbitrage_opportunities = arbitrage_handler.identify_triangle_arbitrage(
-                prices, currency_fees, exchange
-            )
+        if arbitrage_opportunities:
             arbitrage_instructions = (
                 arbitrage_handler.return_triangle_arbitrage_instructions(
                     arbitrage_opportunities
@@ -240,9 +248,9 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, n_intervals):
         return exchange_network_graph, arbitrage_instructions
 
     elif arbitrage == "statistical":
-        return {}
+        return {}, {}
 
-    return {}
+    return {}, {}
 
 
 if __name__ == "__main__":
