@@ -28,9 +28,9 @@ class DataManager:
         async def periodic_fetch():
             while True:
                 await self.fetch_all_live_prices()
+                await self.fetch_all_order_books()
 
                 await asyncio.sleep(10)  # Fetch every 10 seconds
-                # print("Scheduled fetch_all_live_prices executed")
 
         asyncio.run_coroutine_threadsafe(periodic_fetch(), self.loop)
 
@@ -75,20 +75,14 @@ class DataManager:
             await exchange.close()
             print(f"Unexpected error for {exchange_name}: {e}")
 
-        # print(exchange_name, "pre_market_load")
         try:
             markets = await exchange.load_markets()
         except:
             markets = None
-        # print("market loaded")
 
         data_fetcher = DataFetcher(exchange, exchange_name, pairs_mapping, markets)
-        # print(exchange_name, "data fetcher created")
         self.exchanges[exchange_name] = data_fetcher
-        # print(exchange_name, "added to exchange dict")
         await data_fetcher.async_init()
-
-        # print(exchange_name, "data fetcher initialized")
 
         print(f"{exchange_name} initialized successfully")
 
@@ -110,6 +104,12 @@ class DataManager:
     async def fetch_all_live_prices(self):
         tasks = [
             exchange.fetch_all_live_prices() for exchange in self.exchanges.values()
+        ]
+        await asyncio.gather(*tasks)
+
+    async def fetch_all_order_books(self):
+        tasks = [
+            exchange.fetch_all_order_books() for exchange in self.exchanges.values()
         ]
         await asyncio.gather(*tasks)
 
@@ -192,3 +192,15 @@ class DataManager:
         # exchange_fees = exchange.get_all_exchange_fees()
         currency_fees = exchange.get_all_currency_fees()
         return prices, currency_fees
+
+    def get_order_book(self, exchange_name, symbol):
+        future = asyncio.run_coroutine_threadsafe(
+            self._get_order_book(exchange_name, symbol), self.loop
+        )
+        return future.result()
+
+    async def _get_order_book(self, exchange_name, symbol):
+        await self.initialized_event.wait()
+        exchange = self.exchanges[exchange_name]
+        order_book = exchange.get_order_book(symbol)
+        return order_book

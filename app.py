@@ -35,15 +35,15 @@ filter_component = FilterComponent()
 technical_indicators = TechnicalIndicators()
 arbitrage_handler = ArbitrageHandler()
 
-app_layout = AppLayout(filter_component, technical_indicators)
+app_layout = AppLayout(filter_component, technical_indicators, 20)
 app.layout = app_layout.generate_layout()
 start_time = time()
 data_manager = DataManager(exchange_config, network_fees_config)
 end_time = time()
 
 print(f"finished querying data: {end_time-start_time}")
-# news_fetcher = NewsFetcher(news_config)
-# news_chart = NewsChart()
+news_fetcher = NewsFetcher(news_config)
+news_chart = NewsChart()
 
 print("data enabled")
 price_chart = PriceChart()
@@ -171,16 +171,35 @@ def update_live_price_chart(currency, exchange_name, n_intervals, indicator):
     return price_chart.create_ohlc_chart(prices, mark_limit=20, title="Live Price")
 
 
-# @app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
-# def update_news_chart(currency):
-#     if not currency:
-#         return {}
-#
-#     news = news_fetcher.get_news_data(currency)
-#     if not news:
-#         return {}
-#
-#     return news_chart.create_table(news)
+@app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
+def update_news_chart(currency):
+    if not currency:
+        return {}
+
+    news = news_fetcher.get_news_data(currency)
+    if not news:
+        return {}
+
+    return news_chart.create_table(news)
+
+
+@app.callback(
+    Output("depth-chart", "figure"),
+    [
+        Input("exchange-selector", "value"),
+        Input("currency-selector", "value"),
+        Input("interval-component", "n_intervals"),
+    ],
+)
+def update_news_chart(exchange, currency, n_intervals):
+    if not currency or not exchange:
+        return {}
+
+    order_book = data_manager.get_order_book(exchange, currency)
+    if not order_book:
+        return {}
+
+    return price_chart.plot_depth_chart(order_book)
 
 
 @app.callback(

@@ -20,6 +20,7 @@ class DataFetcher:
         self.exchange_fees = {}
         self.historical_data = {}
         self.live_data = {}
+        self.order_books = {}
         self.market_symbols = []
         self.timeout = 10
         self.markets = markets
@@ -421,3 +422,17 @@ class DataFetcher:
                 currency_fees[pair] = currency_fees[f"{crypto2}/USD"]
 
         return currency_fees
+
+    async def fetch_all_order_books(self):
+        tasks = [
+            self.fetch_order_book(currency, symbol)
+            for currency, symbol in self.currencies.items()
+        ]
+        await self._gather_with_timeout(tasks, "fetch_all_live_prices")
+
+    async def fetch_order_book(self, currency, symbol):
+        current_order_book = await self.client.fetch_order_book(symbol)
+        self.order_books[currency] = current_order_book
+
+    def get_order_book(self, currency):
+        return self.order_books.get(currency)
