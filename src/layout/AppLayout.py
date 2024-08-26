@@ -13,9 +13,10 @@ from src.prices.helper_functions import generate_log_marks
 
 
 class AppLayout:
-    def __init__(self, filter_component, technical_indicators):
+    def __init__(self, filter_component, technical_indicators, interval_rate_sec=10):
         self.filter_component = filter_component
         self.technical_indicators = technical_indicators
+        self.interval_rate = interval_rate_sec
 
     def create_filters(self):
 
@@ -185,7 +186,7 @@ class AppLayout:
                     ),
                     dbc.Col(
                         dcc.Graph(
-                            id="fourth-chart",
+                            id="depth-chart",
                             style={
                                 "height": "100%",
                                 "width": "100%",
@@ -207,7 +208,9 @@ class AppLayout:
             children=[
                 self.create_title_and_tabs(),
                 dcc.Interval(
-                    id="interval-component", interval=10 * 1000, n_intervals=0
+                    id="interval-component",
+                    interval=self.interval_rate * 1000,
+                    n_intervals=0,
                 ),
                 html.Div(
                     self.create_filters(),
