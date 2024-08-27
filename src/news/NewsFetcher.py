@@ -1,4 +1,5 @@
 from newsapi import NewsApiClient
+from datetime import datetime, timedelta
 from src.news.SentimentAllocator import SentimentAllocator
 
 
@@ -29,17 +30,36 @@ class NewsFetcher:
         search_query = self.currencies[currency]
 
         # /v2/top-headlines
-        top_headlines = self.client.get_top_headlines(
+        # top_headlines = self.client.get_top_headlines(
+        #     q=search_query,
+        #     # sources="bbc-news,the-verge",
+        #     category="business",
+        #     language="en",
+        #     # country="us",
+        # )
+
+        # Define the date range
+        today = datetime.utcnow().date()
+        days_back = 2  # Number of days back you want to fetch news for
+        start_date = today - timedelta(days=days_back)
+
+        # /v2/everything
+        everything = self.client.get_everything(
             q=search_query,
-            # sources="bbc-news,the-verge",
-            category="business",
+            from_param=start_date.isoformat(),  # Start date in ISO 8601 format
+            to=today.isoformat(),  # End date in ISO 8601 format
             language="en",
-            # country="us",
+            sort_by="publishedAt",
+            page_size=10,  # Max number of results per page
         )
 
-        for headline in top_headlines["articles"]:
-            headline["sentiment"] = self.get_sentiment(headline)
-            self.news_data[currency].append(headline)
+        for article in everything["articles"]:
+            article["sentiment"] = self.get_sentiment(article)
+            self.news_data[currency].append(article)
+
+        # for headline in top_headlines["articles"]:
+        #     headline["sentiment"] = self.get_sentiment(headline)
+        #     self.news_data[currency].append(headline)
 
         # /v2/everything
         # all_articles = self.client.get_everything(

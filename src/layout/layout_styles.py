@@ -3,7 +3,8 @@ container_style = {
     "flex-direction": "column",
     "height": "100vh",  # Use full viewport height
     # "margin": "5px",
-    "overflow": "hidden",
+    "overflowY": "hidden",
+    "overflowX": "hidden",
 }
 
 filter_container_style = {
@@ -12,6 +13,7 @@ filter_container_style = {
     "align-items": "center",
     "width": "100%",
     "padding": "10px",
+    "padding-top": "5px",
     "outline": "2px solid white",
     # "outline": "2px solid red",
 }

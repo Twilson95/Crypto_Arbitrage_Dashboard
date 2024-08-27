@@ -90,7 +90,7 @@ class AppLayout:
                     id="funds-slider",
                     min=0,
                     max=100_000,
-                    step=1,
+                    step=0.1,
                     value=1,
                     marks=None,
                     tooltip={
@@ -171,8 +171,8 @@ class AppLayout:
             dbc.Row(
                 [
                     dbc.Col(
-                        dbc.Container(
-                            id="news-table",
+                        dcc.Graph(
+                            id="depth-chart",
                             style={
                                 "height": "100%",
                                 "width": "100%",
@@ -185,8 +185,8 @@ class AppLayout:
                         style=grid_element_style,
                     ),
                     dbc.Col(
-                        dcc.Graph(
-                            id="depth-chart",
+                        dbc.Container(
+                            id="news-table",
                             style={
                                 "height": "100%",
                                 "width": "100%",

@@ -33,6 +33,10 @@ class PriceChart:
                 low=low_prices,
                 close=close_prices,
                 name="Price",
+                # increasing=dict(
+                #     line=dict(color="green")
+                # ),  # Green for increasing prices
+                # decreasing=dict(line=dict(color="red")),  # Red for decreasing prices
             )
         )
 
@@ -103,15 +107,18 @@ class PriceChart:
         return fig
 
     @staticmethod
-    def format_order_book_for_plotly(order_book, percentage_range=0.05):
+    def format_order_book_for_plotly(order_book, percentage_range=0.1):
 
         # Extract bids and asks
         bids = order_book["bids"]
         asks = order_book["asks"]
 
+        norm_bids = PriceChart.normalize_data(bids)
+        norm_ask = PriceChart.normalize_data(asks)
+
         # Convert to DataFrame for easier manipulation
-        df_bids = pd.DataFrame(bids, columns=["price", "quantity"])
-        df_asks = pd.DataFrame(asks, columns=["price", "quantity"])
+        df_bids = pd.DataFrame(norm_bids, columns=["price", "quantity"])
+        df_asks = pd.DataFrame(norm_ask, columns=["price", "quantity"])
 
         # Calculate the current price (midpoint of highest bid and lowest ask)
         current_price = (df_bids["price"].max() + df_asks["price"].min()) / 2
@@ -135,6 +142,11 @@ class PriceChart:
         return df_bids, df_asks
 
     @staticmethod
+    def normalize_data(data):
+        normalized_data = [item[:2] for item in data]
+        return normalized_data
+
+    @staticmethod
     def plot_depth_chart(order_book):
         df_bids, df_asks = PriceChart.format_order_book_for_plotly(order_book)
 
@@ -148,7 +160,8 @@ class PriceChart:
                 mode="lines",
                 name="Bids",
                 fill="tozeroy",  # Fill to the zero Y-axis
-                line=dict(color="green"),
+                # line=dict(color="green"),
+                line=dict(color="rgba(0, 204, 150, 0.6)"),
             )
         )
 
@@ -160,7 +173,8 @@ class PriceChart:
                 mode="lines",
                 name="Asks",
                 fill="tozeroy",  # Fill to the zero Y-axis
-                line=dict(color="red"),
+                # line=dict(color="red"),
+                line=dict(color="rgba(239, 85, 59, 0.6)"),
             )
         )
 

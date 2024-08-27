@@ -11,23 +11,30 @@ class NewsChart:
         }
         self.sentiment_pos_style = {
             "if": {"filter_query": "{Sentiment} = 'positive'"},
-            "backgroundColor": "#d4edda",
+            "backgroundColor": "rgba(0, 204, 150, 0.6)",
             "color": "white",
         }
         self.sentiment_neg_style = {
             "if": {"filter_query": "{Sentiment} = 'negative'"},
-            "backgroundColor": "#f8d7da",
+            "backgroundColor": "rgba(239, 85, 59, 0.6)",
             "color": "white",
         }
 
     def create_table(self, news_data):
-        table_data = self.convert_news_data(news_data)
-        return self.create_table_layout(table_data)
+        table_data, description_exists = self.convert_news_data(news_data)
+        return self.create_table_layout(table_data, description_exists)
 
     @staticmethod
     def convert_news_data(news_data):
         table_data = []
+        description_exists = False
+
         for article in news_data:
+            description = article["description"]
+
+            if description:
+                description_exists = True
+
             table_data.append(
                 {
                     "Source": article["source"]["name"],
@@ -39,17 +46,20 @@ class NewsChart:
                     "Sentiment": article["sentiment"],
                 }
             )
-        return table_data
+        return table_data, description_exists
 
-    def create_table_layout(self, table_data):
+    def create_table_layout(self, table_data, description_exists):
         columns = [
             {"name": "Source", "id": "Source"},
             # {"name": "Author", "id": "Author"},
             {"name": "Title", "id": "Title"},
-            {"name": "Description", "id": "Description"},
+            # {"name": "Description", "id": "Description"},
             {"name": "URL", "id": "URL", "presentation": "markdown"},
             {"name": "Published", "id": "Published"},
         ]
+
+        # if description_exists:
+        #     columns.insert(2, {"name": "Description", "id": "Description"})
 
         return dash_table.DataTable(
             id="news-table",
@@ -61,10 +71,10 @@ class NewsChart:
                     "selector": ".dash-spreadsheet-container",
                     "rule": "overflow: hidden !important;",  # Force hide overflow
                 },
-                #     {
-                #         "selector": ".dash-table-container .dash-spreadsheet-container",
-                #         "rule": "line-height: unset !important;",  # Override line-height
-                #     },
+                {
+                    "selector": ".dash-table-container .dash-spreadsheet-container tbody tr:hover",
+                    "rule": "background-color: inherit !important;",  # Disable hover highlighting
+                },
             ],
             style_table=style_table,
             style_cell=style_cell,
@@ -74,5 +84,7 @@ class NewsChart:
                 self.url_style,
                 self.sentiment_pos_style,
                 self.sentiment_neg_style,
+                {"if": {"column_id": "Source"}, "width": "15%", "whiteSpace": "normal"},
+                {"if": {"column_id": "Title"}, "width": "60%"},
             ],
         )
