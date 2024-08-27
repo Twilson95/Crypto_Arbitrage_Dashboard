@@ -160,7 +160,7 @@ class ArbitrageHandler:
                         "to_amount": to_usd,
                         "change_in_usd": to_usd - from_usd,
                         "from_usd": from_usd,
-                        "to_usd": funds,
+                        "to_usd": None,
                     }
                 )
 

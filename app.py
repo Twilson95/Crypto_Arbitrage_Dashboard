@@ -35,7 +35,7 @@ filter_component = FilterComponent()
 technical_indicators = TechnicalIndicators()
 arbitrage_handler = ArbitrageHandler()
 
-app_layout = AppLayout(filter_component, technical_indicators, 20)
+app_layout = AppLayout(filter_component, technical_indicators, 10)
 app.layout = app_layout.generate_layout()
 start_time = time()
 data_manager = DataManager(exchange_config, network_fees_config)

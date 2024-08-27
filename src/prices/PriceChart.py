@@ -33,6 +33,10 @@ class PriceChart:
                 low=low_prices,
                 close=close_prices,
                 name="Price",
+                # increasing=dict(
+                #     line=dict(color="green")
+                # ),  # Green for increasing prices
+                # decreasing=dict(line=dict(color="red")),  # Red for decreasing prices
             )
         )
 
@@ -148,7 +152,8 @@ class PriceChart:
                 mode="lines",
                 name="Bids",
                 fill="tozeroy",  # Fill to the zero Y-axis
-                line=dict(color="green"),
+                # line=dict(color="green"),
+                line=dict(color="rgba(0, 204, 150, 0.6)"),
             )
         )
 
@@ -160,7 +165,8 @@ class PriceChart:
                 mode="lines",
                 name="Asks",
                 fill="tozeroy",  # Fill to the zero Y-axis
-                line=dict(color="red"),
+                # line=dict(color="red"),
+                line=dict(color="rgba(239, 85, 59, 0.6)"),
             )
         )
 
