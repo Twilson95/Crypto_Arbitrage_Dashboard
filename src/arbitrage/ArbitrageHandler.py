@@ -169,7 +169,8 @@ class ArbitrageHandler:
 
                 amount_bought = input_funds / buy_price
                 potential_revenue = amount_bought * sell_price
-                price_delta = potential_revenue - funds
+                price_delta = potential_revenue - input_funds
+                # price_delta = input_funds * (sell_price - buy_price) / buy_price
 
                 # Calculate the waterfall data with fees reflecting the funds at each step
                 waterfall_data = {

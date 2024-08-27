@@ -107,15 +107,18 @@ class PriceChart:
         return fig
 
     @staticmethod
-    def format_order_book_for_plotly(order_book, percentage_range=0.05):
+    def format_order_book_for_plotly(order_book, percentage_range=0.1):
 
         # Extract bids and asks
         bids = order_book["bids"]
         asks = order_book["asks"]
 
+        norm_bids = PriceChart.normalize_data(bids)
+        norm_ask = PriceChart.normalize_data(asks)
+
         # Convert to DataFrame for easier manipulation
-        df_bids = pd.DataFrame(bids, columns=["price", "quantity"])
-        df_asks = pd.DataFrame(asks, columns=["price", "quantity"])
+        df_bids = pd.DataFrame(norm_bids, columns=["price", "quantity"])
+        df_asks = pd.DataFrame(norm_ask, columns=["price", "quantity"])
 
         # Calculate the current price (midpoint of highest bid and lowest ask)
         current_price = (df_bids["price"].max() + df_asks["price"].min()) / 2
@@ -137,6 +140,11 @@ class PriceChart:
         df_asks["cumulative_quantity"] = df_asks["quantity"].cumsum()
 
         return df_bids, df_asks
+
+    @staticmethod
+    def normalize_data(data):
+        normalized_data = [item[:2] for item in data]
+        return normalized_data
 
     @staticmethod
     def plot_depth_chart(order_book):
