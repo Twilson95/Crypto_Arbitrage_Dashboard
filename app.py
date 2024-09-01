@@ -12,12 +12,14 @@ from src.arbitrage.ArbitrageHandler import ArbitrageHandler
 from src.news.NewsFetcher import NewsFetcher
 from src.news.NewsChart import NewsChart
 from src.prices.NetworkGraph import create_network_graph
+from src.arbitrage.CointegrationCalculator import CointegrationCalculator
 
-
+from dash_bootstrap_templates import load_figure_template
 from time import time
 
 import yaml
 
+# load_figure_template("DARKLY")
 
 app = Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
 app.title = "Crypto Dashboard"
@@ -105,6 +107,9 @@ def render_tab_content(
         grid_style["display"] = "none"
         arbitrage_style["display"] = "flex"
         if arbitrage_filter_value == "triangular":
+            exchange_filter_style["display"] = "block"
+            currency_filter_style["display"] = "none"
+        if arbitrage_filter_value == "statistical":
             exchange_filter_style["display"] = "block"
             currency_filter_style["display"] = "none"
         else:
@@ -220,6 +225,8 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_interval
         return {}
     if not funds:
         funds = 0.1
+    arbitrage_opportunities = None
+
     # funds = int(funds)
     if arbitrage == "simple":
         prices = data_manager.get_live_prices_for_all_exchanges(currency)
@@ -267,6 +274,30 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_interval
         return exchange_network_graph, arbitrage_instructions
 
     elif arbitrage == "statistical":
+        prices = data_manager.get_historical_prices_for_all_currencies(exchange)
+        spreads = data_manager.get_cointegration_spreads(exchange)
+        _, currency_fees = data_manager.get_live_prices_and_fees_for_single_exchange(
+            exchange
+        )
+        if spreads:
+            arbitrage_opportunities = (
+                ArbitrageHandler.identify_all_statistical_arbitrage(
+                    prices, spreads, currency_fees, exchange, funds, window=30
+                )
+            )
+        if arbitrage_opportunities:
+            arbitrage_instructions = (
+                arbitrage_handler.return_statistical_arbitrage_instructions(
+                    arbitrage_opportunities
+                )
+            )
+            pair, spread = list(spreads.items())[0]
+            return (
+                price_chart.plot_spread(spread["spread"], pair, 30),
+                arbitrage_instructions,
+            )
+
+        # print(cointegration_pairs)
         return {}, {}
 
     return {}, {}

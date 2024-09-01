@@ -217,110 +217,6 @@ class ArbitrageHandler:
         else:
             return [closest_opportunity]
 
-    # @staticmethod
-    # def identify_simple_arbitrage(
-    #     currency, exchange_prices, currency_fees, exchange_fees, network_fees, funds
-    # ):
-    #     """
-    #     Returns a list of arbitrage opportunities, if none exist return the closest opportunity.
-    #     Includes deposit/withdrawal fees, and network fees only when transferring between exchanges.
-    #     Network fee is in the cryptocurrency being traded, with an estimate of its value in USD.
-    #     """
-    #     arbitrage_opportunities = []
-    #     closest_opportunity = None
-    #     closest_difference = float("inf")
-    #
-    #     # Iterate over all pairs of exchanges
-    #     for buy_exchange, prices_buy in exchange_prices.items():
-    #         buy_taker_fee = currency_fees.get(buy_exchange, {}).get("taker", 0)
-    #         withdraw_fee = exchange_fees.get(buy_exchange, {}).get("withdraw", 0)
-    #
-    #         close_price_buy = prices_buy.close
-    #         if len(close_price_buy) == 0:
-    #             print(buy_exchange, "has no prices")
-    #             continue
-    #         buy_price = close_price_buy[-1]
-    #         price_plus_fee_buy = buy_price * (1 + buy_taker_fee + withdraw_fee)
-    #
-    #         for sell_exchange, prices_sell in exchange_prices.items():
-    #             if sell_exchange == buy_exchange:
-    #                 continue
-    #
-    #             sell_taker_fee = currency_fees.get(sell_exchange, {}).get("taker", 0)
-    #             deposit_fee = exchange_fees.get(sell_exchange, {}).get("deposit", 0)
-    #
-    #             close_price_sell = prices_sell.close
-    #             if len(close_price_sell) == 0:
-    #                 print(sell_exchange, "has no prices")
-    #                 continue
-    #             sell_price = close_price_sell[-1]
-    #
-    #             # Calculate the network fee only if a transfer is needed
-    #             network_fee_crypto = (
-    #                 network_fees if buy_exchange != sell_exchange else 0
-    #             )
-    #
-    #             # Adjust the amount of cryptocurrency after the network fee
-    #             effective_crypto_amount = (
-    #                 1 - network_fee_crypto
-    #             )  # Assuming starting with 1 unit of crypto
-    #             effective_sell_price = sell_price * effective_crypto_amount
-    #
-    #             # Adjust the fees based on the reduced amount of cryptocurrency
-    #             price_minus_fee_sell = effective_sell_price * (
-    #                 1 - sell_taker_fee - deposit_fee
-    #             )
-    #
-    #             network_fee_usd = network_fee_crypto * sell_price
-    #
-    #             # Calculate potential arbitrage opportunity
-    #             arbitrage_profit = price_minus_fee_sell - price_plus_fee_buy
-    #
-    #             # Calculate total fees excluding network_fee_usd since it's already accounted in effective_sell_price
-    #             total_fees = (buy_price * (buy_taker_fee + withdraw_fee)) + (
-    #                 effective_sell_price * (sell_taker_fee + deposit_fee)
-    #             )
-    #             # arbitrage_profit = sell_price - buy_price - total_fees
-    #
-    #             arbitrage_details = {
-    #                 "currency": currency.split("/"),
-    #                 "buy_exchange": buy_exchange,
-    #                 "buy_price": buy_price,
-    #                 "buy_taker_fee": buy_taker_fee,
-    #                 "buy_withdraw_fee": withdraw_fee,
-    #                 "sell_exchange": sell_exchange,
-    #                 "sell_price": sell_price,
-    #                 "effective_sell_price": effective_sell_price,
-    #                 "sell_taker_fee": sell_taker_fee,
-    #                 "sell_deposit_fee": deposit_fee,
-    #                 "profit": arbitrage_profit,
-    #                 "network_fees_crypto": network_fee_crypto,
-    #                 "network_fees_usd": network_fee_usd,
-    #                 "change_in_usd": total_fees,
-    #             }
-    #
-    #             if arbitrage_profit > 0:
-    #                 arbitrage_opportunities.append(
-    #                     ArbitrageHandler.create_arbitrage_simple_instructions_data(
-    #                         arbitrage_details, funds
-    #                     )
-    #                 )
-    #
-    #             else:
-    #                 difference = abs(arbitrage_profit)
-    #                 if difference < closest_difference:
-    #                     closest_difference = difference
-    #                     closest_opportunity = (
-    #                         ArbitrageHandler.create_arbitrage_simple_instructions_data(
-    #                             arbitrage_details, funds
-    #                         )
-    #                     )
-    #
-    #     if arbitrage_opportunities:
-    #         return arbitrage_opportunities
-    #     else:
-    #         return [closest_opportunity]
-
     @staticmethod
     def create_arbitrage_simple_instructions_data(opportunity, input_funds):
         # Extract data
@@ -573,7 +469,7 @@ class ArbitrageHandler:
                     "to_currency": coin1,
                     "to_amount": coin1_after_fees,
                     "change_in_usd": change_in_usd_buy,
-                    "from_usd": usd_start,
+                    "from_usd": None,
                     "to_usd": usd_after_buy,
                 }
             )
@@ -606,7 +502,7 @@ class ArbitrageHandler:
                     "to_amount": usd_end,
                     "change_in_usd": change_in_usd_sell,
                     "from_usd": usd_after_transfer,
-                    "to_usd": usd_end,
+                    "to_usd": None,
                 }
             )
 
@@ -651,110 +547,6 @@ class ArbitrageHandler:
         else:
             # Return the closest non-profitable opportunity
             return [closest_opportunity]
-
-    # @staticmethod
-    # def identify_triangle_arbitrage(prices, currency_fees, exchange):
-    #     coins = set()
-    #     for pair in prices.keys():
-    #         coin1, coin2 = pair.split("/")
-    #         coins.add(coin1)
-    #         coins.add(coin2)
-    #
-    #     arbitrage_opportunities = []
-    #     closest_opportunity = None
-    #     smallest_loss = float("inf")
-    #
-    #     # Fix USD as the start and end currency
-    #     coins.discard("USD")
-    #
-    #     for coin1, coin2 in itertools.permutations(coins, 2):
-    #         pair1 = f"USD/{coin1}"  # USD to Coin1
-    #         pair2 = f"{coin1}/{coin2}"  # Coin1 to Coin2
-    #         pair3 = f"{coin2}/USD"  # Coin2 back to USD
-    #
-    #         # Calculate conversion rates
-    #         rate1 = ArbitrageHandler.calculate_conversion_rate(prices, pair1)
-    #         rate2 = ArbitrageHandler.calculate_conversion_rate(prices, pair2)
-    #         rate3 = ArbitrageHandler.calculate_conversion_rate(prices, pair3)
-    #
-    #         if rate1 is None or rate2 is None or rate3 is None:
-    #             continue
-    #
-    #         # Start with enough USD to buy 1 unit of Coin1
-    #         usd_start = 1 / rate1  # USD needed to buy 1 unit of Coin1
-    #         amount1 = 1  # 1 unit of Coin1
-    #
-    #         # Calculate fees and convert USD to Coin1
-    #         fees1_usd = ArbitrageHandler.calculate_fees(
-    #             currency_fees, pair1, usd_start, fee_type="taker"
-    #         )
-    #
-    #         usd_after_fees1 = usd_start - fees1_usd
-    #         amount1 = (
-    #             usd_after_fees1 * rate1
-    #         )  # Amount of Coin1 obtained after deducting USD fees
-    #
-    #         # Calculate fees and convert Coin1 to Coin2
-    #         fees2_coin = ArbitrageHandler.calculate_fees(
-    #             currency_fees, pair2, amount1, fee_type="taker"
-    #         )
-    #
-    #         coin1_after_fees2 = amount1 - fees2_coin
-    #         amount2 = (
-    #             coin1_after_fees2 * rate2
-    #         )  # Amount of Coin2 obtained after deducting Coin1 fees
-    #
-    #         # Calculate fees and convert Coin2 back to USD
-    #         fees3_coin = ArbitrageHandler.calculate_fees(
-    #             currency_fees, pair3, amount2, fee_type="taker"
-    #         )
-    #
-    #         coin2_after_fees3 = amount2 - fees3_coin
-    #         usd_end = (
-    #             coin2_after_fees3 * rate3
-    #         )  # Final USD amount after converting back
-    #
-    #         # Calculate total fees in USD for reporting
-    #         fees1_coin = fees1_usd
-    #         fees2_usd = fees2_coin / rate1
-    #         fees3_usd = fees3_coin * rate3
-    #         total_fees_usd = fees1_usd + fees2_usd + fees3_usd
-    #
-    #         # Calculate profit
-    #         profit = usd_end - usd_start
-    #
-    #         arbitrage_opportunity = {
-    #             "path": ["USD", coin1, coin2, "USD"],
-    #             "conversion_rates": [rate1, rate2, rate3],
-    #             "fees_coin": [fees1_coin, fees2_coin, fees3_usd],
-    #             "fees_usd": [fees1_usd, fees2_usd, fees3_usd],
-    #             "profit": profit,
-    #             "potential_profit_before_fees": usd_start * (rate1 * rate2 * rate3 - 1),
-    #             "exchange": exchange,
-    #         }
-    #
-    #         if profit > 0:
-    #             arbitrage_opportunities.append(
-    #                 ArbitrageHandler.create_arbitrage_triangular_instructions_data(
-    #                     arbitrage_opportunity
-    #                 )
-    #             )
-    #         else:
-    #             # Track the closest non-profitable opportunity
-    #             if abs(profit) < smallest_loss:
-    #                 smallest_loss = abs(profit)
-    #                 closest_opportunity = (
-    #                     ArbitrageHandler.create_arbitrage_triangular_instructions_data(
-    #                         arbitrage_opportunity
-    #                     )
-    #                 )
-    #
-    #     if arbitrage_opportunities:
-    #         # Return the most profitable opportunity
-    #         return arbitrage_opportunities
-    #     else:
-    #         # Return the closest non-profitable opportunity
-    #         return [closest_opportunity]
 
     @staticmethod
     def create_arbitrage_triangular_instructions_data(opportunity):
@@ -856,3 +648,379 @@ class ArbitrageHandler:
             "instructions": instructions,
             "path": [("USD", coin1), (coin1, coin2), (coin2, "USD")],
         }
+
+    @staticmethod
+    def identify_all_statistical_arbitrage(
+        prices, spreads, currency_fees, exchange, funds, window=30
+    ):
+        arbitrage_instructions = []
+        for pair, spread_details in spreads.items():
+            spread = spread_details["spread"]
+            hedge_ratio = spread_details["hedge_ratio"]
+            drawing_instructions = ArbitrageHandler.get_statistical_arbitrage_trades(
+                spread, window
+            )
+            arbitrage_instruction = ArbitrageHandler.identify_statistical_arbitrage(
+                drawing_instructions,
+                pair,
+                currency_fees,
+                exchange,
+                funds,
+                prices,
+                hedge_ratio,
+            )
+            arbitrage_instructions.extend(arbitrage_instruction)
+        return arbitrage_instructions
+
+    @staticmethod
+    def get_statistical_arbitrage_trades(spread, window=30):
+        spread_mean = spread.rolling(window=window).mean()
+        spread_std = spread.rolling(window=window).std()
+
+        # Define thresholds for entry and exit signals
+        upper_threshold = spread_mean + 2 * spread_std
+        lower_threshold = spread_mean - 2 * spread_std
+
+        # Align all data
+        spread = spread.align(upper_threshold)[0]
+        spread = spread.align(lower_threshold)[0]
+
+        # Mask the initial period where thresholds are not yet available
+        spread = spread[spread_mean.notna()]
+        spread_mean = spread_mean[spread_mean.notna()]
+        upper_threshold = upper_threshold[upper_threshold.notna()]
+        lower_threshold = lower_threshold[lower_threshold.notna()]
+
+        # Determine entry and exit points
+        entry_points = []
+        exit_points = []
+        above_upper = False
+        below_lower = False
+
+        for i in range(1, len(spread)):
+            # Check for entry points
+            if spread.iloc[i] > upper_threshold.iloc[i] and not above_upper:
+                entry_points.append((spread.index[i], spread.iloc[i], "short"))
+                above_upper = True
+                below_lower = False
+            elif spread.iloc[i] < lower_threshold.iloc[i] and not below_lower:
+                entry_points.append((spread.index[i], spread.iloc[i], "long"))
+                below_lower = True
+                above_upper = False
+
+            # Check for exit points
+            if spread.iloc[i] < spread_mean.iloc[i] and above_upper:
+                exit_points.append((spread.index[i], spread.iloc[i]))
+                above_upper = False
+            elif spread.iloc[i] > spread_mean.iloc[i] and below_lower:
+                exit_points.append((spread.index[i], spread.iloc[i]))
+                below_lower = False
+
+        drawing_instructions = {
+            "entry_points": entry_points,
+            "exit_points": exit_points,
+            "spread_mean": spread_mean,
+            "lower_threshold": lower_threshold,
+            "upper_threshold": upper_threshold,
+        }
+        return drawing_instructions
+
+    @staticmethod
+    def identify_statistical_arbitrage(
+        drawing_instructions,
+        pairs,
+        currency_fees,
+        exchange,
+        funds,
+        price_df,
+        hedge_ratio,
+    ):
+        entry_points = drawing_instructions["entry_points"]
+        exit_points = drawing_instructions["exit_points"]
+
+        # List to store each arbitrage opportunity separately
+        arbitrage_opportunities = []
+
+        # Extract coins from the pair
+        pair1, pair2 = pairs
+        coin1 = pair1.split("/")[0]
+        coin2 = pair2.split("/")[0]
+
+        # Iterate over each entry and exit pair
+        for entry, exit in zip(entry_points, exit_points):
+            entry_time, entry_spread, entry_type = entry
+            exit_time, exit_spread = exit
+
+            # Look up the actual prices for the entry and exit times
+            entry_price_coin1 = price_df.loc[entry_time, pair1]
+            entry_price_coin2 = price_df.loc[entry_time, pair2]
+            exit_price_coin1 = price_df.loc[exit_time, pair1]
+            exit_price_coin2 = price_df.loc[exit_time, pair2]
+
+            # Define initial amounts (assuming a starting capital in USD)
+            usd_start = funds  # Example starting capital in USD
+
+            # Get fees from currency_fees
+            buy_fee_coin1 = currency_fees[pair1]["taker"]
+            sell_fee_coin2 = currency_fees[pair2]["taker"]
+
+            if entry_type == "short":
+                # Short the spread: Sell short Coin1, Buy Coin2
+                amount_sell_coin1 = usd_start / entry_price_coin1
+                # Use hedge ratio to calculate the amount of Coin2 to buy
+                amount_buy_coin2 = amount_sell_coin1 * hedge_ratio
+
+                # Calculate fees for short entry
+                fees_sell_coin1 = amount_sell_coin1 * sell_fee_coin2
+                fees_buy_coin2 = amount_buy_coin2 * buy_fee_coin1
+
+                net_sell_coin1 = amount_sell_coin1 - fees_sell_coin1
+                net_buy_coin2 = amount_buy_coin2 - fees_buy_coin2
+
+                # Calculate the USD changes for each trade
+                change_in_usd_buy = -fees_buy_coin2
+                change_in_usd_sell_short = -fees_sell_coin1
+
+                entry_instructions = [
+                    {
+                        "instruction": "buy",
+                        "from_exchange": exchange,
+                        "from_currency": "USD",
+                        "from_amount": usd_start,
+                        "to_exchange": exchange,
+                        "to_currency": coin2,
+                        "to_amount": net_buy_coin2,
+                        "change_in_usd": change_in_usd_buy,
+                        "from_usd": None,
+                        "to_usd": usd_start + change_in_usd_buy,
+                    },
+                    {
+                        "instruction": "sell short",
+                        "from_exchange": exchange,
+                        "from_currency": coin1,
+                        "from_amount": amount_sell_coin1,
+                        "to_exchange": exchange,
+                        "to_currency": "USD",
+                        "to_amount": usd_start + change_in_usd_sell_short,
+                        "change_in_usd": change_in_usd_sell_short,
+                        "from_usd": amount_sell_coin1 * entry_price_coin1,
+                        "to_usd": None,
+                    },
+                ]
+
+                # Update fees1_usd for waterfall data
+                fees1_usd = fees_sell_coin1 + fees_buy_coin2
+
+            else:  # entry_type == "long"
+                # Long the spread: Buy Coin1, Sell short Coin2
+                amount_buy_coin1 = usd_start / entry_price_coin1
+                # Use hedge ratio to calculate the amount of Coin2 to sell short
+                amount_sell_coin2 = amount_buy_coin1 * hedge_ratio
+
+                # Calculate fees for long entry
+                fees_buy_coin1 = amount_buy_coin1 * buy_fee_coin1
+                fees_sell_coin2 = amount_sell_coin2 * sell_fee_coin2
+
+                net_buy_coin1 = amount_buy_coin1 - fees_buy_coin1
+                net_sell_coin2 = amount_sell_coin2 - fees_sell_coin2
+
+                # Calculate the USD changes for each trade
+                change_in_usd_buy = -fees_buy_coin1
+                change_in_usd_sell_short = -fees_sell_coin2
+
+                entry_instructions = [
+                    {
+                        "instruction": "buy",
+                        "from_exchange": exchange,
+                        "from_currency": "USD",
+                        "from_amount": usd_start,
+                        "to_exchange": exchange,
+                        "to_currency": coin1,
+                        "to_amount": net_buy_coin1,
+                        "change_in_usd": change_in_usd_buy,
+                        "from_usd": None,
+                        "to_usd": usd_start + change_in_usd_buy,
+                    },
+                    {
+                        "instruction": "sell short",
+                        "from_exchange": exchange,
+                        "from_currency": coin2,
+                        "from_amount": amount_sell_coin2,
+                        "to_exchange": exchange,
+                        "to_currency": "USD",
+                        "to_amount": usd_start + change_in_usd_sell_short,
+                        "change_in_usd": change_in_usd_sell_short,
+                        "from_usd": amount_sell_coin2 * entry_price_coin2,
+                        "to_usd": None,
+                    },
+                ]
+
+                # Update fees1_usd for waterfall data
+                fees1_usd = fees_buy_coin1 + fees_sell_coin2
+
+            # Add a "wait" instruction to separate entry and exit
+            entry_instructions.append(
+                {
+                    "instruction": "wait",
+                    "details": "Hold positions until exit signal",
+                }
+            )
+
+            if entry_type == "short":
+                # Closing short position: Buy back Coin1, Sell Coin2
+                amount_buy_to_cover_coin1 = net_sell_coin1
+                amount_sell_coin2 = net_buy_coin2
+
+                # Calculate fees for closing the short position
+                fees_buy_to_cover_coin1 = amount_buy_to_cover_coin1 * buy_fee_coin1
+                fees_sell_coin2 = amount_sell_coin2 * sell_fee_coin2
+
+                # Calculate the USD changes for each trade
+                usd_from_sell_coin2 = (
+                    amount_sell_coin2 * exit_price_coin2
+                ) - fees_sell_coin2
+                usd_for_buy_to_cover_coin1 = (
+                    amount_buy_to_cover_coin1 * exit_price_coin1
+                ) + fees_buy_to_cover_coin1
+
+                change_in_usd_sell = usd_from_sell_coin2
+                change_in_usd_close_short = -usd_for_buy_to_cover_coin1
+
+                exit_instructions = [
+                    {
+                        "instruction": "sell",
+                        "from_exchange": exchange,
+                        "from_currency": coin2,
+                        "from_amount": amount_sell_coin2,
+                        "to_exchange": exchange,
+                        "to_currency": "USD",
+                        "to_amount": usd_from_sell_coin2,
+                        "change_in_usd": change_in_usd_sell,
+                        "from_usd": amount_sell_coin2 * exit_price_coin2,
+                        "to_usd": None,
+                    },
+                    {
+                        "instruction": "buy to cover",
+                        "from_exchange": exchange,
+                        "from_currency": "USD",
+                        "from_amount": usd_for_buy_to_cover_coin1,
+                        "to_exchange": exchange,
+                        "to_currency": coin1,
+                        "to_amount": amount_buy_to_cover_coin1,
+                        "change_in_usd": change_in_usd_close_short,
+                        "from_usd": None,
+                        "to_usd": amount_buy_to_cover_coin1 * exit_price_coin1,
+                    },
+                ]
+                usd_after_close = (
+                    usd_from_sell_coin2 + amount_buy_to_cover_coin1 * exit_price_coin1
+                )
+
+                # Update fees2_usd for waterfall data
+                fees2_usd = fees_buy_to_cover_coin1 + fees_sell_coin2
+
+            else:  # entry_type == "long"
+                # Closing long position: Sell Coin1, Buy back Coin2
+                amount_sell_coin1 = net_buy_coin1
+                amount_buy_to_cover_coin2 = net_sell_coin2
+
+                # Calculate fees for closing the long position
+                fees_sell_coin1 = amount_sell_coin1 * sell_fee_coin2
+                fees_buy_to_cover_coin2 = amount_buy_to_cover_coin2 * buy_fee_coin1
+
+                # Calculate the USD changes for each trade
+                usd_from_sell_coin1 = (
+                    amount_sell_coin1 * exit_price_coin1
+                ) - fees_sell_coin1
+                usd_for_buy_to_cover_coin2 = (
+                    amount_buy_to_cover_coin2 * exit_price_coin2
+                ) + fees_buy_to_cover_coin2
+
+                change_in_usd_sell = usd_from_sell_coin1
+                change_in_usd_close_short = -usd_for_buy_to_cover_coin2
+
+                exit_instructions = [
+                    {
+                        "instruction": "sell",
+                        "from_exchange": exchange,
+                        "from_currency": coin1,
+                        "from_amount": amount_sell_coin1,
+                        "to_exchange": exchange,
+                        "to_currency": "USD",
+                        "to_amount": usd_from_sell_coin1,
+                        "change_in_usd": change_in_usd_sell,
+                        "from_usd": amount_sell_coin1 / exit_price_coin1,
+                        "to_usd": None,
+                    },
+                    {
+                        "instruction": "buy to cover",
+                        "from_exchange": exchange,
+                        "from_currency": "USD",
+                        "from_amount": usd_for_buy_to_cover_coin2,
+                        "to_exchange": exchange,
+                        "to_currency": coin2,
+                        "to_amount": amount_buy_to_cover_coin2,
+                        "change_in_usd": change_in_usd_close_short,
+                        "from_usd": None,
+                        "to_usd": amount_buy_to_cover_coin2 * exit_price_coin2,
+                    },
+                ]
+                usd_after_close = (
+                    amount_buy_to_cover_coin2 / exit_price_coin2 + usd_from_sell_coin1
+                )
+
+                # Update fees2_usd for waterfall data
+                fees2_usd = fees_sell_coin1 + fees_buy_to_cover_coin2
+
+            # Calculate total profit and potential profit
+            total_profit = usd_after_close - usd_start
+
+            if entry_type == "short":
+                potential_profit = (usd_start / entry_price_coin1) * (
+                    entry_price_coin1 - exit_price_coin1
+                ) + (usd_start / entry_price_coin2) * (
+                    exit_price_coin2 - entry_price_coin2
+                )
+            else:
+                potential_profit = (usd_start / entry_price_coin1) * (
+                    exit_price_coin1 - entry_price_coin1
+                ) + (usd_start / entry_price_coin2) * (
+                    entry_price_coin2 - exit_price_coin2
+                )
+
+            # Waterfall Plot Data
+            waterfall_data = {
+                "Potential Profit": potential_profit,
+                "Buy Fees": -fees1_usd,
+                "Sell Fees": -fees2_usd,
+            }
+
+            # Create the summary header
+            summary_header = {
+                "total_profit": total_profit,
+                "coins_used": [pair1, pair2],
+                "exchanges_used": exchange,
+            }
+
+            # Combine all data into a single dictionary for this opportunity
+            arbitrage_opportunity = {
+                "summary_header": summary_header,
+                "waterfall_data": waterfall_data,
+                "instructions": entry_instructions + exit_instructions,
+                "path": [("USD", pair1), (pair1, pair2), (pair2, "USD")],
+            }
+
+            # Append the arbitrage opportunity to the list
+            arbitrage_opportunities.append(arbitrage_opportunity)
+
+        return arbitrage_opportunities
+
+    @staticmethod
+    def return_statistical_arbitrage_instructions(arbitrages):
+        instruction_diagrams = []
+
+        for arbitrage in arbitrages:
+            arbitrage_instructions = ArbitrageInstructions(arbitrage)
+            instructions = arbitrage_instructions.return_statistical_arbitrage_panels()
+            instruction_diagrams.append(instructions)
+        return instruction_diagrams

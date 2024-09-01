@@ -60,6 +60,25 @@ class ArbitrageInstructions:
             panels += instruction_panels
         return html.Div(panels)
 
+    def return_statistical_arbitrage_panels(self):
+        panels = []
+        if "summary_header" in self.arbitrage.keys():
+            header_panel = self.build_statistical_summary_panel(
+                self.arbitrage["summary_header"]
+            )
+            panels.append(header_panel)
+        if "waterfall_data" in self.arbitrage.keys():
+            waterfall_panel = self.build_waterfall_panel(
+                self.arbitrage["waterfall_data"]
+            )
+            panels.append(waterfall_panel)
+        if "instructions" in self.arbitrage.keys():
+            instruction_panels = self.build_all_instruction_panels(
+                self.arbitrage["instructions"]
+            )
+            panels += instruction_panels
+        return html.Div(panels)
+
     @staticmethod
     def build_simple_summary_panel(summary_data):
         exchanges = summary_data["exchanges_used"]
@@ -81,6 +100,16 @@ class ArbitrageInstructions:
         return html.P(summary_text, style={"margin-bottom": "2px"})
 
     @staticmethod
+    def build_statistical_summary_panel(summary_data):
+        coins = summary_data["coins_used"]
+        total_profit = summary_data["total_profit"]
+        summary_text = (
+            f"Arbitrage Opportunity: Buy {coins[0]}, convert to {coins[1]} and sell for an "
+            f"expected profit of ${total_profit:.2f} after fees."
+        )
+        return html.P(summary_text, style={"margin-bottom": "2px"})
+
+    @staticmethod
     def build_all_instruction_panels(instructions):
         return [
             ArbitrageInstructions.build_instruction_panel(instructions)
@@ -91,16 +120,16 @@ class ArbitrageInstructions:
     def build_instruction_panel(instruction):
         return dcc.Graph(
             figure=ArbitrageInstructions._generate_exchange_flow(
-                instruction["from_exchange"],
-                instruction["from_currency"],
-                instruction["from_amount"],
-                instruction["to_exchange"],
-                instruction["to_currency"],
-                instruction["to_amount"],
-                instruction["change_in_usd"],
-                from_usd=instruction["from_usd"],
-                to_usd=instruction["to_usd"],
-                instruction=instruction["instruction"],
+                from_exchange=instruction.get("from_exchange"),
+                from_unit=instruction.get("from_currency"),
+                from_amount=instruction.get("from_amount"),
+                to_exchange=instruction.get("to_exchange"),
+                to_unit=instruction.get("to_currency"),
+                to_amount=instruction.get("to_amount"),
+                change_in_usd=instruction.get("change_in_usd"),
+                from_usd=instruction.get("from_usd"),
+                to_usd=instruction.get("to_usd"),
+                instruction=instruction.get("instruction"),
             ),
             style={
                 "height": str(ArbitrageInstructions.instruction_height) + "px",
@@ -175,13 +204,13 @@ class ArbitrageInstructions:
 
         return dcc.Graph(
             figure=self._generate_exchange_flow(
-                "Wallet",
-                self.arbitrage["currency"][1],
-                from_amount,
-                self.arbitrage["buy_exchange"],
-                self.arbitrage["currency"][0],
-                to_amount,
-                total_fees,
+                from_exchange="Wallet",
+                from_unit=self.arbitrage["currency"][1],
+                from_amount=from_amount,
+                to_exchange=self.arbitrage["buy_exchange"],
+                to_unit=self.arbitrage["currency"][0],
+                to_amount=to_amount,
+                change_in_usd=total_fees,
                 from_usd=None,
                 to_usd=to_usd,
                 instruction="buy",
@@ -211,13 +240,13 @@ class ArbitrageInstructions:
 
         return dcc.Graph(
             figure=self._generate_exchange_flow(
-                self.arbitrage["buy_exchange"],
-                self.arbitrage["currency"][0],
-                from_amount,
-                self.arbitrage["sell_exchange"],
-                self.arbitrage["currency"][0],
-                to_amount,
-                total_fees,
+                from_exchange=self.arbitrage["buy_exchange"],
+                from_unit=self.arbitrage["currency"][0],
+                from_amount=from_amount,
+                to_exchange=self.arbitrage["sell_exchange"],
+                to_unit=self.arbitrage["currency"][0],
+                to_amount=to_amount,
+                change_in_usd=total_fees,
                 from_usd=start_funds,
                 to_usd=end_funds,
                 instruction="transfer",
@@ -240,13 +269,13 @@ class ArbitrageInstructions:
 
         return dcc.Graph(
             figure=self._generate_exchange_flow(
-                self.arbitrage["sell_exchange"],
-                self.arbitrage["currency"][0],
-                from_amount,
-                "Wallet",
-                self.arbitrage["currency"][1],
-                to_amount,
-                funds_change,
+                from_exchange=self.arbitrage["sell_exchange"],
+                from_unit=self.arbitrage["currency"][0],
+                from_amount=from_amount,
+                to_exchange="Wallet",
+                to_unit=self.arbitrage["currency"][1],
+                to_amount=to_amount,
+                change_in_usd=funds_change,
                 from_usd=start_funds,
                 instruction="sell",
             ),
@@ -294,13 +323,13 @@ class ArbitrageInstructions:
 
     @staticmethod
     def _generate_exchange_flow(
-        from_exchange,
-        from_unit,
-        from_amount,
-        to_exchange,
-        to_unit,
-        to_amount,
-        change_in_usd,
+        from_exchange=None,
+        from_unit=None,
+        from_amount=None,
+        to_exchange=None,
+        to_unit=None,
+        to_amount=None,
+        change_in_usd=None,
         from_usd=None,
         to_usd=None,
         instruction=None,
@@ -324,59 +353,64 @@ class ArbitrageInstructions:
             arrowcolor="white",
         )
 
-        # transfer fees
-        fig.add_annotation(
-            x=0.5,
-            y=0.4,
-            text=format_amount(change_in_usd, "USD"),
-            showarrow=False,
-            xref="paper",
-            yref="paper",
-            font=dict(color="red" if change_in_usd < 0 else "green", size=14),
-        )
+        if change_in_usd:
+            # transfer fees
+            fig.add_annotation(
+                x=0.5,
+                y=0.4,
+                text=format_amount(change_in_usd, "USD"),
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                font=dict(color="red" if change_in_usd < 0 else "green", size=14),
+            )
 
-        # Exchange names
-        fig.add_annotation(
-            x=0.05,
-            y=0.8,
-            text=from_exchange,
-            showarrow=False,
-            xref="paper",
-            yref="paper",
-            font=dict(color="white", size=14),
-        )
+        if from_exchange:
+            # Exchange names
+            fig.add_annotation(
+                x=0.05,
+                y=0.8,
+                text=from_exchange,
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                font=dict(color="white", size=14),
+            )
 
-        fig.add_annotation(
-            x=0.95,
-            y=0.8,
-            text=to_exchange,
-            showarrow=False,
-            xref="paper",
-            yref="paper",
-            font=dict(color="white", size=14),
-        )
+        if to_exchange:
+            fig.add_annotation(
+                x=0.95,
+                y=0.8,
+                text=to_exchange,
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                font=dict(color="white", size=14),
+            )
 
-        # from amount
-        fig.add_annotation(
-            x=0.05,
-            y=0.5,
-            text=format_amount(from_amount, from_unit),
-            showarrow=False,
-            xref="paper",
-            yref="paper",
-            font=dict(color="white", size=14),
-        )
+        if from_amount:
+            # from amount
+            fig.add_annotation(
+                x=0.05,
+                y=0.5,
+                text=format_amount(from_amount, from_unit),
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                font=dict(color="white", size=14),
+            )
 
-        # to amount
-        fig.add_annotation(
-            x=0.95,
-            y=0.5,
-            text=format_amount(to_amount, to_unit),
-            showarrow=False,
-            xref="paper",
-            yref="paper",
-            font=dict(color="white", size=14),
-        )
+        if to_amount:
+            # to amount
+            fig.add_annotation(
+                x=0.95,
+                y=0.5,
+                text=format_amount(to_amount, to_unit),
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                font=dict(color="white", size=14),
+            )
 
         if instruction:
             fig.add_annotation(

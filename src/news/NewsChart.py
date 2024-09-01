@@ -85,6 +85,6 @@ class NewsChart:
                 self.sentiment_pos_style,
                 self.sentiment_neg_style,
                 {"if": {"column_id": "Source"}, "width": "15%", "whiteSpace": "normal"},
-                {"if": {"column_id": "Title"}, "width": "60%"},
+                {"if": {"column_id": "Title"}, "width": "50%"},
             ],
         )
