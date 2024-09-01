@@ -188,3 +188,116 @@ class PriceChart:
         )
 
         return fig
+
+    @staticmethod
+    def plot_spread(spread, pair, window=30):
+        """Plot the spread and indicate potential arbitrage opportunities using Plotly."""
+        # Calculate rolling mean and standard deviation for the spread
+        spread_mean = spread.rolling(window=window).mean()
+        spread_std = spread.rolling(window=window).std()
+
+        # Define thresholds for entry and exit signals
+        upper_threshold = spread_mean + 2 * spread_std
+        lower_threshold = spread_mean - 2 * spread_std
+
+        # Align all data
+        spread = spread.align(upper_threshold)[0]
+        spread = spread.align(lower_threshold)[0]
+
+        # Mask the initial period where thresholds are not yet available
+        spread = spread[spread_mean.notna()]
+        spread_mean = spread_mean[spread_mean.notna()]
+        upper_threshold = upper_threshold[upper_threshold.notna()]
+        lower_threshold = lower_threshold[lower_threshold.notna()]
+
+        # Determine entry and exit points
+        entry_points = []
+        exit_points = []
+        above_upper = False
+        below_lower = False
+
+        # Track entry and exit points based on the threshold conditions
+        for i in range(1, len(spread)):
+            if spread.iloc[i] > upper_threshold.iloc[i] and not above_upper:
+                entry_points.append((spread.index[i], spread.iloc[i]))
+                above_upper = True
+            elif spread.iloc[i] < lower_threshold.iloc[i] and not below_lower:
+                entry_points.append((spread.index[i], spread.iloc[i]))
+                below_lower = True
+
+            if spread.iloc[i] < spread_mean.iloc[i] and above_upper:
+                exit_points.append((spread.index[i], spread.iloc[i]))
+                above_upper = False
+            elif spread.iloc[i] > spread_mean.iloc[i] and below_lower:
+                exit_points.append((spread.index[i], spread.iloc[i]))
+                below_lower = False
+
+        # Create traces for the plot
+        spread_trace = go.Scatter(
+            x=spread.index,
+            y=spread,
+            mode="lines",
+            name="Spread",
+            line=dict(color="blue"),
+        )
+
+        mean_trace = go.Scatter(
+            x=spread_mean.index,
+            y=spread_mean,
+            mode="lines",
+            name="Mean",
+            line=dict(color="white", dash="dash"),
+        )
+
+        upper_trace = go.Scatter(
+            x=upper_threshold.index,
+            y=upper_threshold,
+            mode="lines",
+            name="Upper Threshold",
+            line=dict(color="red", dash="dot"),
+        )
+
+        lower_trace = go.Scatter(
+            x=lower_threshold.index,
+            y=lower_threshold,
+            mode="lines",
+            name="Lower Threshold",
+            line=dict(color="green", dash="dot"),
+        )
+
+        entry_trace = go.Scatter(
+            x=[point[0] for point in entry_points],
+            y=[point[1] for point in entry_points],
+            mode="markers",
+            name="Entry Point",
+            marker=dict(color="red", size=10, symbol="triangle-up"),
+        )
+
+        exit_trace = go.Scatter(
+            x=[point[0] for point in exit_points],
+            y=[point[1] for point in exit_points],
+            mode="markers",
+            name="Exit Point",
+            marker=dict(color="green", size=10, symbol="triangle-down"),
+        )
+
+        # Create the figure and add all traces
+        fig = go.Figure(
+            data=[
+                spread_trace,
+                mean_trace,
+                upper_trace,
+                lower_trace,
+                entry_trace,
+                exit_trace,
+            ]
+        )
+
+        # Update layout
+        fig.update_layout(
+            title=f"Spread and Arbitrage Opportunities, {pair[0]} and {pair[1]}",
+            xaxis_title=None,
+            yaxis_title="Spread",
+            template="plotly_dark",
+        )
+        return fig

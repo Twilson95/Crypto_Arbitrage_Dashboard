@@ -6,6 +6,7 @@ from threading import Thread
 
 class DataManager:
     def __init__(self, config, network_fees_config):
+        self.sleep_time = 2
         self.config = config
         self.network_fees_config = network_fees_config
         self.exchanges = {}
@@ -30,7 +31,7 @@ class DataManager:
                 await self.fetch_all_live_prices()
                 await self.fetch_all_order_books()
 
-                await asyncio.sleep(10)  # Fetch every 10 seconds
+                await asyncio.sleep(self.sleep_time)  # Fetch every 10 seconds
 
         asyncio.run_coroutine_threadsafe(periodic_fetch(), self.loop)
 
@@ -204,3 +205,31 @@ class DataManager:
         exchange = self.exchanges[exchange_name]
         order_book = exchange.get_order_book(symbol)
         return order_book
+
+    def get_historical_prices_for_all_currencies(self, exchange_name):
+        future = asyncio.run_coroutine_threadsafe(
+            self._get_historical_prices_for_all_currencies(exchange_name), self.loop
+        )
+        return future.result()
+
+    async def _get_historical_prices_for_all_currencies(self, exchange_name):
+        await self.initialized_event.wait()  # Wait for initialization to complete
+        data_fetcher = self.exchanges.get(exchange_name)
+        if not data_fetcher:
+            return None
+        prices = data_fetcher.get_df_of_all_historical_prices()
+        return prices
+
+    def get_cointegration_spreads(self, exchange_name):
+        future = asyncio.run_coroutine_threadsafe(
+            self._get_cointegration_spreads(exchange_name), self.loop
+        )
+        return future.result()
+
+    async def _get_cointegration_spreads(self, exchange_name):
+        await self.initialized_event.wait()  # Wait for initialization to complete
+        data_fetcher = self.exchanges.get(exchange_name)
+        if not data_fetcher:
+            return None
+        cointegration_pairs = data_fetcher.get_cointegration_spreads()
+        return cointegration_pairs

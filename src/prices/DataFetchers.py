@@ -7,6 +7,7 @@ import pandas as pd
 from ccxt.base.errors import RateLimitExceeded
 
 from src.prices.OHLCData import OHLCData
+from src.arbitrage.CointegrationCalculator import CointegrationCalculator
 import asyncio
 
 
@@ -20,6 +21,7 @@ class DataFetcher:
         self.exchange_fees = {}
         self.historical_data = {}
         self.live_data = {}
+        self.cointegration_spreads = None
         self.order_books = {}
         self.market_symbols = []
         self.timeout = 10
@@ -91,6 +93,14 @@ class DataFetcher:
             self.currency_fees, self.inter_coin_symbols
         )
         await self.update_all_historical_prices()
+        self.update_cointegration_pairs()
+
+    def update_cointegration_pairs(self):
+        df = self.get_df_of_all_historical_prices()
+        cointegration_pairs = CointegrationCalculator.find_cointegration_pairs(df)
+        self.cointegration_spreads = CointegrationCalculator.calculate_all_spreads(
+            df, cointegration_pairs
+        )
 
     def initialize_ohlc_data(self, currency):
         self.historical_data[currency] = OHLCData()
@@ -436,3 +446,29 @@ class DataFetcher:
 
     def get_order_book(self, currency):
         return self.order_books.get(currency)
+
+    def get_df_of_all_historical_prices(self):
+        dataframes = []
+
+        # Loop through each currency to create a DataFrame with datetime as index
+        for currency in self.currencies:
+            datetime_values = self.historical_data[currency].datetime
+            closing_prices = self.historical_data[currency].close
+
+            # Create a DataFrame for each currency with datetime as index
+            df_currency = pd.DataFrame(
+                data={currency: closing_prices}, index=pd.to_datetime(datetime_values)
+            )
+
+            # Append the DataFrame to the list
+            dataframes.append(df_currency)
+
+        # Concatenate all DataFrames along the datetime index
+        df_combined = pd.concat(dataframes, axis=1, join="outer")
+
+        # Sort the index to ensure proper chronological order
+        df_combined = df_combined.sort_index()
+        return df_combined
+
+    def get_cointegration_spreads(self):
+        return self.cointegration_spreads
