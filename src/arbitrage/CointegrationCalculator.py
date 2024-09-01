@@ -52,8 +52,10 @@ class CointegrationCalculator:
     def calculate_all_spreads(df, pairs):
         spreads = {}
         for pair in pairs:
-            spread = CointegrationCalculator.calculate_spread(df, pair[0], pair[1])
-            spreads[pair] = spread
+            spread, hedge_ratio = CointegrationCalculator.calculate_spread(
+                df, pair[0], pair[1]
+            )
+            spreads[pair] = {"spread": spread, "hedge_ratio": hedge_ratio}
 
         return spreads
 
@@ -71,7 +73,7 @@ class CointegrationCalculator:
         spread = prices1 - hedge_ratio * prices2
         spread = spread.dropna()
 
-        return spread
+        return spread, hedge_ratio
 
     @staticmethod
     def identify_arbitrage_opportunities(spread, threshold=2):

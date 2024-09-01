@@ -654,12 +654,20 @@ class ArbitrageHandler:
         prices, spreads, currency_fees, exchange, funds, window=30
     ):
         arbitrage_instructions = []
-        for pair, spread in spreads.items():
+        for pair, spread_details in spreads.items():
+            spread = spread_details["spread"]
+            hedge_ratio = spread_details["hedge_ratio"]
             drawing_instructions = ArbitrageHandler.get_statistical_arbitrage_trades(
                 spread, window
             )
             arbitrage_instruction = ArbitrageHandler.identify_statistical_arbitrage(
-                drawing_instructions, pair, currency_fees, exchange, funds, prices
+                drawing_instructions,
+                pair,
+                currency_fees,
+                exchange,
+                funds,
+                prices,
+                hedge_ratio,
             )
             arbitrage_instructions.extend(arbitrage_instruction)
         return arbitrage_instructions
@@ -719,7 +727,13 @@ class ArbitrageHandler:
 
     @staticmethod
     def identify_statistical_arbitrage(
-        drawing_instructions, pairs, currency_fees, exchange, funds, price_df
+        drawing_instructions,
+        pairs,
+        currency_fees,
+        exchange,
+        funds,
+        price_df,
+        hedge_ratio,
     ):
         entry_points = drawing_instructions["entry_points"]
         exit_points = drawing_instructions["exit_points"]
@@ -750,18 +764,11 @@ class ArbitrageHandler:
             buy_fee_coin1 = currency_fees[pair1]["taker"]
             sell_fee_coin2 = currency_fees[pair2]["taker"]
 
-            # Initialize variables for summary and waterfall data
-            total_profit = 0
-            potential_profit = 0
-            fees1_usd, fees2_usd, fees3_usd = 0, 0, 0
-
-            # Entry Instructions
-            entry_instructions = []
-
             if entry_type == "short":
                 # Short the spread: Sell short Coin1, Buy Coin2
                 amount_sell_coin1 = usd_start / entry_price_coin1
-                amount_buy_coin2 = usd_start / entry_price_coin2
+                # Use hedge ratio to calculate the amount of Coin2 to buy
+                amount_buy_coin2 = amount_sell_coin1 * hedge_ratio
 
                 # Calculate fees for short entry
                 fees_sell_coin1 = amount_sell_coin1 * sell_fee_coin2
@@ -770,19 +777,11 @@ class ArbitrageHandler:
                 net_sell_coin1 = amount_sell_coin1 - fees_sell_coin1
                 net_buy_coin2 = amount_buy_coin2 - fees_buy_coin2
 
+                # Calculate the USD changes for each trade
+                change_in_usd_buy = -fees_buy_coin2
+                change_in_usd_sell_short = -fees_sell_coin1
+
                 entry_instructions = [
-                    {
-                        "instruction": "sell short",
-                        "from_exchange": exchange,
-                        "from_currency": coin1,
-                        "from_amount": amount_sell_coin1,
-                        "to_exchange": exchange,
-                        "to_currency": "USD",
-                        "to_amount": usd_start - fees_sell_coin1,
-                        "change_in_usd": -fees_sell_coin1,
-                        "from_usd": amount_sell_coin1 / entry_price_coin1,
-                        "to_usd": None,
-                    },
                     {
                         "instruction": "buy",
                         "from_exchange": exchange,
@@ -791,9 +790,21 @@ class ArbitrageHandler:
                         "to_exchange": exchange,
                         "to_currency": coin2,
                         "to_amount": net_buy_coin2,
-                        "change_in_usd": -fees_buy_coin2,
+                        "change_in_usd": change_in_usd_buy,
                         "from_usd": None,
-                        "to_usd": usd_start - fees_buy_coin2,
+                        "to_usd": usd_start + change_in_usd_buy,
+                    },
+                    {
+                        "instruction": "sell short",
+                        "from_exchange": exchange,
+                        "from_currency": coin1,
+                        "from_amount": amount_sell_coin1,
+                        "to_exchange": exchange,
+                        "to_currency": "USD",
+                        "to_amount": usd_start + change_in_usd_sell_short,
+                        "change_in_usd": change_in_usd_sell_short,
+                        "from_usd": amount_sell_coin1 * entry_price_coin1,
+                        "to_usd": None,
                     },
                 ]
 
@@ -803,7 +814,8 @@ class ArbitrageHandler:
             else:  # entry_type == "long"
                 # Long the spread: Buy Coin1, Sell short Coin2
                 amount_buy_coin1 = usd_start / entry_price_coin1
-                amount_sell_coin2 = usd_start / entry_price_coin2
+                # Use hedge ratio to calculate the amount of Coin2 to sell short
+                amount_sell_coin2 = amount_buy_coin1 * hedge_ratio
 
                 # Calculate fees for long entry
                 fees_buy_coin1 = amount_buy_coin1 * buy_fee_coin1
@@ -811,6 +823,10 @@ class ArbitrageHandler:
 
                 net_buy_coin1 = amount_buy_coin1 - fees_buy_coin1
                 net_sell_coin2 = amount_sell_coin2 - fees_sell_coin2
+
+                # Calculate the USD changes for each trade
+                change_in_usd_buy = -fees_buy_coin1
+                change_in_usd_sell_short = -fees_sell_coin2
 
                 entry_instructions = [
                     {
@@ -821,9 +837,9 @@ class ArbitrageHandler:
                         "to_exchange": exchange,
                         "to_currency": coin1,
                         "to_amount": net_buy_coin1,
-                        "change_in_usd": -fees_buy_coin1,
+                        "change_in_usd": change_in_usd_buy,
                         "from_usd": None,
-                        "to_usd": usd_start - fees_buy_coin1,
+                        "to_usd": usd_start + change_in_usd_buy,
                     },
                     {
                         "instruction": "sell short",
@@ -832,9 +848,9 @@ class ArbitrageHandler:
                         "from_amount": amount_sell_coin2,
                         "to_exchange": exchange,
                         "to_currency": "USD",
-                        "to_amount": usd_start - fees_sell_coin2,
-                        "change_in_usd": -fees_sell_coin2,
-                        "from_usd": usd_start,
+                        "to_amount": usd_start + change_in_usd_sell_short,
+                        "change_in_usd": change_in_usd_sell_short,
+                        "from_usd": amount_sell_coin2 * entry_price_coin2,
                         "to_usd": None,
                     },
                 ]
@@ -850,108 +866,132 @@ class ArbitrageHandler:
                 }
             )
 
-            # Exit Instructions
-            exit_instructions = []
-
             if entry_type == "short":
-                # Closing short position
-                close_buy_coin1 = net_sell_coin1 * exit_price_coin1
-                close_sell_coin2 = net_buy_coin2 * exit_price_coin2
+                # Closing short position: Buy back Coin1, Sell Coin2
+                amount_buy_to_cover_coin1 = net_sell_coin1
+                amount_sell_coin2 = net_buy_coin2
 
-                fees_close_buy_coin1 = close_buy_coin1 * buy_fee_coin1
-                fees_close_sell_coin2 = close_sell_coin2 * sell_fee_coin2
+                # Calculate fees for closing the short position
+                fees_buy_to_cover_coin1 = amount_buy_to_cover_coin1 * buy_fee_coin1
+                fees_sell_coin2 = amount_sell_coin2 * sell_fee_coin2
 
-                usd_after_close = (
-                    net_sell_coin1 - fees_close_buy_coin1
-                ) * exit_price_coin1 + (
-                    net_buy_coin2 - fees_close_sell_coin2
-                ) * exit_price_coin2
+                # Calculate the USD changes for each trade
+                usd_from_sell_coin2 = (
+                    amount_sell_coin2 * exit_price_coin2
+                ) - fees_sell_coin2
+                usd_for_buy_to_cover_coin1 = (
+                    amount_buy_to_cover_coin1 * exit_price_coin1
+                ) + fees_buy_to_cover_coin1
+
+                change_in_usd_sell = usd_from_sell_coin2
+                change_in_usd_close_short = -usd_for_buy_to_cover_coin1
 
                 exit_instructions = [
-                    {
-                        "instruction": "buy to cover",
-                        "from_exchange": exchange,
-                        "from_currency": coin1,
-                        "from_amount": close_buy_coin1,
-                        "to_exchange": exchange,
-                        "to_currency": "USD",
-                        "to_amount": usd_after_close,
-                        "change_in_usd": -fees_close_buy_coin1,
-                        "from_usd": close_buy_coin1 * exit_price_coin1,
-                        "to_usd": None,
-                    },
                     {
                         "instruction": "sell",
                         "from_exchange": exchange,
                         "from_currency": coin2,
-                        "from_amount": close_sell_coin2,
+                        "from_amount": amount_sell_coin2,
                         "to_exchange": exchange,
                         "to_currency": "USD",
-                        "to_amount": usd_after_close,
-                        "change_in_usd": -fees_close_sell_coin2,
-                        "from_usd": close_sell_coin2 * exit_price_coin2,
+                        "to_amount": usd_from_sell_coin2,
+                        "change_in_usd": change_in_usd_sell,
+                        "from_usd": amount_sell_coin2 * exit_price_coin2,
                         "to_usd": None,
                     },
+                    {
+                        "instruction": "buy to cover",
+                        "from_exchange": exchange,
+                        "from_currency": "USD",
+                        "from_amount": usd_for_buy_to_cover_coin1,
+                        "to_exchange": exchange,
+                        "to_currency": coin1,
+                        "to_amount": amount_buy_to_cover_coin1,
+                        "change_in_usd": change_in_usd_close_short,
+                        "from_usd": None,
+                        "to_usd": amount_buy_to_cover_coin1 * exit_price_coin1,
+                    },
                 ]
+                usd_after_close = (
+                    usd_from_sell_coin2 + amount_buy_to_cover_coin1 * exit_price_coin1
+                )
 
                 # Update fees2_usd for waterfall data
-                fees2_usd = fees_close_buy_coin1 + fees_close_sell_coin2
+                fees2_usd = fees_buy_to_cover_coin1 + fees_sell_coin2
 
             else:  # entry_type == "long"
-                # Closing long position
-                close_sell_coin1 = net_buy_coin1 * exit_price_coin1
-                close_buy_coin2 = net_sell_coin2 * exit_price_coin2
+                # Closing long position: Sell Coin1, Buy back Coin2
+                amount_sell_coin1 = net_buy_coin1
+                amount_buy_to_cover_coin2 = net_sell_coin2
 
-                fees_close_sell_coin1 = close_sell_coin1 * sell_fee_coin2
-                fees_close_buy_coin2 = close_buy_coin2 * buy_fee_coin1
+                # Calculate fees for closing the long position
+                fees_sell_coin1 = amount_sell_coin1 * sell_fee_coin2
+                fees_buy_to_cover_coin2 = amount_buy_to_cover_coin2 * buy_fee_coin1
 
-                usd_after_close = (
-                    net_buy_coin1 - fees_close_sell_coin1
-                ) * exit_price_coin1 + (
-                    net_sell_coin2 - fees_close_buy_coin2
-                ) * exit_price_coin2
+                # Calculate the USD changes for each trade
+                usd_from_sell_coin1 = (
+                    amount_sell_coin1 * exit_price_coin1
+                ) - fees_sell_coin1
+                usd_for_buy_to_cover_coin2 = (
+                    amount_buy_to_cover_coin2 * exit_price_coin2
+                ) + fees_buy_to_cover_coin2
+
+                change_in_usd_sell = usd_from_sell_coin1
+                change_in_usd_close_short = -usd_for_buy_to_cover_coin2
 
                 exit_instructions = [
                     {
                         "instruction": "sell",
                         "from_exchange": exchange,
                         "from_currency": coin1,
-                        "from_amount": close_sell_coin1,
+                        "from_amount": amount_sell_coin1,
                         "to_exchange": exchange,
                         "to_currency": "USD",
-                        "to_amount": usd_after_close,
-                        "change_in_usd": -fees_close_sell_coin1,
-                        "from_usd": close_sell_coin1 * exit_price_coin1,
+                        "to_amount": usd_from_sell_coin1,
+                        "change_in_usd": change_in_usd_sell,
+                        "from_usd": amount_sell_coin1 / exit_price_coin1,
                         "to_usd": None,
                     },
                     {
                         "instruction": "buy to cover",
                         "from_exchange": exchange,
-                        "from_currency": coin2,
-                        "from_amount": close_buy_coin2,
+                        "from_currency": "USD",
+                        "from_amount": usd_for_buy_to_cover_coin2,
                         "to_exchange": exchange,
-                        "to_currency": "USD",
-                        "to_amount": usd_after_close,
-                        "change_in_usd": -fees_close_buy_coin2,
-                        "from_usd": close_buy_coin2 * exit_price_coin2,
-                        "to_usd": None,
+                        "to_currency": coin2,
+                        "to_amount": amount_buy_to_cover_coin2,
+                        "change_in_usd": change_in_usd_close_short,
+                        "from_usd": None,
+                        "to_usd": amount_buy_to_cover_coin2 * exit_price_coin2,
                     },
                 ]
+                usd_after_close = (
+                    amount_buy_to_cover_coin2 / exit_price_coin2 + usd_from_sell_coin1
+                )
 
                 # Update fees2_usd for waterfall data
-                fees2_usd = fees_close_sell_coin1 + fees_close_buy_coin2
+                fees2_usd = fees_sell_coin1 + fees_buy_to_cover_coin2
 
             # Calculate total profit and potential profit
             total_profit = usd_after_close - usd_start
-            potential_profit = (
-                usd_start * (entry_price_coin1 - exit_price_coin1) / entry_price_coin1
-            )
+
+            if entry_type == "short":
+                potential_profit = (usd_start / entry_price_coin1) * (
+                    entry_price_coin1 - exit_price_coin1
+                ) + (usd_start / entry_price_coin2) * (
+                    exit_price_coin2 - entry_price_coin2
+                )
+            else:
+                potential_profit = (usd_start / entry_price_coin1) * (
+                    exit_price_coin1 - entry_price_coin1
+                ) + (usd_start / entry_price_coin2) * (
+                    entry_price_coin2 - exit_price_coin2
+                )
 
             # Waterfall Plot Data
             waterfall_data = {
                 "Potential Profit": potential_profit,
                 "Buy Fees": -fees1_usd,
-                "Transfer Fees": 0,  # No transfer fee in this context
                 "Sell Fees": -fees2_usd,
             }
 

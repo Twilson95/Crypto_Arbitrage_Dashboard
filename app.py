@@ -292,7 +292,10 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_interval
                 )
             )
             pair, spread = list(spreads.items())[0]
-            return price_chart.plot_spread(spread, pair, 30), arbitrage_instructions
+            return (
+                price_chart.plot_spread(spread["spread"], pair, 30),
+                arbitrage_instructions,
+            )
 
         # print(cointegration_pairs)
         return {}, {}
