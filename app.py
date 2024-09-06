@@ -12,7 +12,6 @@ from src.arbitrage.ArbitrageHandler import ArbitrageHandler
 from src.news.NewsFetcher import NewsFetcher
 from src.news.NewsChart import NewsChart
 from src.prices.NetworkGraph import create_network_graph
-from src.arbitrage.CointegrationCalculator import CointegrationCalculator
 
 from dash_bootstrap_templates import load_figure_template
 from time import time
@@ -275,27 +274,33 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_interval
 
     elif arbitrage == "statistical":
         prices = data_manager.get_historical_prices_for_all_currencies(exchange)
+
         spreads = data_manager.get_cointegration_spreads(exchange)
+
         _, currency_fees = data_manager.get_live_prices_and_fees_for_single_exchange(
             exchange
         )
+
         if spreads:
             arbitrage_opportunities = (
                 ArbitrageHandler.identify_all_statistical_arbitrage(
                     prices, spreads, currency_fees, exchange, funds, window=30
                 )
             )
+
         if arbitrage_opportunities:
             arbitrage_instructions = (
                 arbitrage_handler.return_statistical_arbitrage_instructions(
                     arbitrage_opportunities
                 )
             )
+
             pair, spread = list(spreads.items())[0]
-            return (
-                price_chart.plot_spread(spread["spread"], pair, 30),
-                arbitrage_instructions,
+            statistical_arbitrage_chart = price_chart.plot_spread(
+                spread["spread"], pair, 30
             )
+
+            return statistical_arbitrage_chart, arbitrage_instructions
 
         # print(cointegration_pairs)
         return {}, {}

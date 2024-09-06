@@ -1,11 +1,11 @@
 import plotly.graph_objects as go
-import numpy as np
 from dash import html, dcc
 from src.prices.helper_functions import format_amount, round_to_significant_figures
+from time import time
 
 
 class ArbitrageInstructions:
-    instruction_height = 130
+    instruction_height = 110
 
     def __init__(self, arbitrage):
         self.arbitrage = arbitrage
@@ -62,21 +62,28 @@ class ArbitrageInstructions:
 
     def return_statistical_arbitrage_panels(self):
         panels = []
+        start_time = time()
         if "summary_header" in self.arbitrage.keys():
             header_panel = self.build_statistical_summary_panel(
                 self.arbitrage["summary_header"]
             )
             panels.append(header_panel)
+        summary_time = time()
+        print("summary time", summary_time - start_time)
         if "waterfall_data" in self.arbitrage.keys():
             waterfall_panel = self.build_waterfall_panel(
                 self.arbitrage["waterfall_data"]
             )
             panels.append(waterfall_panel)
+        waterfall_time = time()
+        print("waterfall time", waterfall_time - summary_time)
         if "instructions" in self.arbitrage.keys():
             instruction_panels = self.build_all_instruction_panels(
                 self.arbitrage["instructions"]
             )
             panels += instruction_panels
+        instructions_time = time()
+        print("instructions time", instructions_time - waterfall_time)
         return html.Div(panels)
 
     @staticmethod
@@ -130,6 +137,7 @@ class ArbitrageInstructions:
                 from_usd=instruction.get("from_usd"),
                 to_usd=instruction.get("to_usd"),
                 instruction=instruction.get("instruction"),
+                details=instruction.get("details"),
             ),
             style={
                 "height": str(ArbitrageInstructions.instruction_height) + "px",
@@ -140,6 +148,9 @@ class ArbitrageInstructions:
     @staticmethod
     def build_waterfall_panel(waterfall_data):
         # Convert waterfall_data into categories and values
+        waterfall_data = {
+            key: value for key, value in waterfall_data.items() if value != 0
+        }
         categories = list(waterfall_data.keys())
         values = list(waterfall_data.values())
 
@@ -161,6 +172,7 @@ class ArbitrageInstructions:
                 name="Profit Calculation",
                 orientation="v",
                 measure=measure,
+                cliponaxis=False,
                 x=categories,
                 y=values,
                 text=[f"${format_amount(val)}" for val in values],
@@ -333,25 +345,27 @@ class ArbitrageInstructions:
         from_usd=None,
         to_usd=None,
         instruction=None,
+        details=None,
     ):
         fig = go.Figure()
 
-        # arrow
-        fig.add_annotation(
-            x=3.5,
-            y=2,
-            xref="x",
-            yref="y",
-            text="",
-            showarrow=True,
-            axref="x",
-            ayref="y",
-            ax=1.5,
-            ay=2,
-            arrowhead=3,
-            arrowwidth=1.5,
-            arrowcolor="white",
-        )
+        if not details:
+            # arrow
+            fig.add_annotation(
+                x=3.5,
+                y=2,
+                xref="x",
+                yref="y",
+                text="",
+                showarrow=True,
+                axref="x",
+                ayref="y",
+                ax=1.5,
+                ay=2,
+                arrowhead=3,
+                arrowwidth=1.5,
+                arrowcolor="white",
+            )
 
         if change_in_usd:
             # transfer fees
@@ -369,7 +383,7 @@ class ArbitrageInstructions:
             # Exchange names
             fig.add_annotation(
                 x=0.05,
-                y=0.8,
+                y=0.85,
                 text=from_exchange,
                 showarrow=False,
                 xref="paper",
@@ -380,7 +394,7 @@ class ArbitrageInstructions:
         if to_exchange:
             fig.add_annotation(
                 x=0.95,
-                y=0.8,
+                y=0.85,
                 text=to_exchange,
                 showarrow=False,
                 xref="paper",
@@ -415,7 +429,7 @@ class ArbitrageInstructions:
         if instruction:
             fig.add_annotation(
                 x=0.5,
-                y=0.75,
+                y=0.8,
                 text=instruction,
                 showarrow=False,
                 xref="paper",
@@ -426,7 +440,7 @@ class ArbitrageInstructions:
         if from_usd:
             fig.add_annotation(
                 x=0.05,
-                y=0.20,
+                y=0.15,
                 text="(" + format_amount(from_usd, "USD") + ")",
                 showarrow=False,
                 xref="paper",
@@ -437,12 +451,23 @@ class ArbitrageInstructions:
         if to_usd:
             fig.add_annotation(
                 x=0.95,
-                y=0.20,
+                y=0.15,
                 text="(" + format_amount(to_usd, "USD") + ")",
                 showarrow=False,
                 xref="paper",
                 yref="paper",
                 font=dict(color="white", size=12),
+            )
+
+        if details:
+            fig.add_annotation(
+                x=0.5,
+                y=0.5,
+                text=details,
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                font=dict(color="white", size=14),
             )
 
         # Update layout to hide axes and grid lines

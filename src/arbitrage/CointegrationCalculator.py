@@ -8,7 +8,7 @@ class CointegrationCalculator:
     @staticmethod
     def find_cointegration_pairs(df):
         cointegration_pairs = []
-        df = df.iloc[:100]  # Limit data to the first 100 rows for analysis
+        # df = df.iloc[:100]  # Limit data to the first 100 rows for analysis
 
         # To keep track of pairs we've already considered
         considered_pairs = set()
