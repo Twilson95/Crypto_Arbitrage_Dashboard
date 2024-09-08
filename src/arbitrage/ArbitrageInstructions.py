@@ -62,28 +62,21 @@ class ArbitrageInstructions:
 
     def return_statistical_arbitrage_panels(self):
         panels = []
-        start_time = time()
         if "summary_header" in self.arbitrage.keys():
             header_panel = self.build_statistical_summary_panel(
                 self.arbitrage["summary_header"]
             )
             panels.append(header_panel)
-        summary_time = time()
-        print("summary time", summary_time - start_time)
         if "waterfall_data" in self.arbitrage.keys():
             waterfall_panel = self.build_waterfall_panel(
                 self.arbitrage["waterfall_data"]
             )
             panels.append(waterfall_panel)
-        waterfall_time = time()
-        print("waterfall time", waterfall_time - summary_time)
         if "instructions" in self.arbitrage.keys():
             instruction_panels = self.build_all_instruction_panels(
                 self.arbitrage["instructions"]
             )
             panels += instruction_panels
-        instructions_time = time()
-        print("instructions time", instructions_time - waterfall_time)
         return html.Div(panels)
 
     @staticmethod
@@ -125,7 +118,7 @@ class ArbitrageInstructions:
 
     @staticmethod
     def build_instruction_panel(instruction):
-        return dcc.Graph(
+        instruction_graph = dcc.Graph(
             figure=ArbitrageInstructions._generate_exchange_flow(
                 from_exchange=instruction.get("from_exchange"),
                 from_unit=instruction.get("from_currency"),
@@ -144,6 +137,8 @@ class ArbitrageInstructions:
                 "margin-bottom": "2px",
             },
         )
+
+        return instruction_graph
 
     @staticmethod
     def build_waterfall_panel(waterfall_data):
@@ -333,6 +328,155 @@ class ArbitrageInstructions:
 
         return fig
 
+    # @staticmethod
+    # def _generate_exchange_flow(
+    #     from_exchange=None,
+    #     from_unit=None,
+    #     from_amount=None,
+    #     to_exchange=None,
+    #     to_unit=None,
+    #     to_amount=None,
+    #     change_in_usd=None,
+    #     from_usd=None,
+    #     to_usd=None,
+    #     instruction=None,
+    #     details=None,
+    # ):
+    #     fig = go.Figure()
+    #
+    #     if not details:
+    #         # arrow
+    #         fig.add_annotation(
+    #             x=3.5,
+    #             y=2,
+    #             xref="x",
+    #             yref="y",
+    #             text="",
+    #             showarrow=True,
+    #             axref="x",
+    #             ayref="y",
+    #             ax=1.5,
+    #             ay=2,
+    #             arrowhead=3,
+    #             arrowwidth=1.5,
+    #             arrowcolor="white",
+    #         )
+    #
+    #     if change_in_usd:
+    #         # transfer fees
+    #         fig.add_annotation(
+    #             x=0.5,
+    #             y=0.4,
+    #             text=format_amount(change_in_usd, "USD"),
+    #             showarrow=False,
+    #             xref="paper",
+    #             yref="paper",
+    #             font=dict(color="red" if change_in_usd < 0 else "green", size=14),
+    #         )
+    #
+    #     if from_exchange:
+    #         # Exchange names
+    #         fig.add_annotation(
+    #             x=0.05,
+    #             y=0.85,
+    #             text=from_exchange,
+    #             showarrow=False,
+    #             xref="paper",
+    #             yref="paper",
+    #             font=dict(color="white", size=14),
+    #         )
+    #
+    #     if to_exchange:
+    #         fig.add_annotation(
+    #             x=0.95,
+    #             y=0.85,
+    #             text=to_exchange,
+    #             showarrow=False,
+    #             xref="paper",
+    #             yref="paper",
+    #             font=dict(color="white", size=14),
+    #         )
+    #
+    #     if from_amount:
+    #         # from amount
+    #         fig.add_annotation(
+    #             x=0.05,
+    #             y=0.5,
+    #             text=format_amount(from_amount, from_unit),
+    #             showarrow=False,
+    #             xref="paper",
+    #             yref="paper",
+    #             font=dict(color="white", size=14),
+    #         )
+    #
+    #     if to_amount:
+    #         # to amount
+    #         fig.add_annotation(
+    #             x=0.95,
+    #             y=0.5,
+    #             text=format_amount(to_amount, to_unit),
+    #             showarrow=False,
+    #             xref="paper",
+    #             yref="paper",
+    #             font=dict(color="white", size=14),
+    #         )
+    #
+    #     if instruction:
+    #         fig.add_annotation(
+    #             x=0.5,
+    #             y=0.8,
+    #             text=instruction,
+    #             showarrow=False,
+    #             xref="paper",
+    #             yref="paper",
+    #             font=dict(color="white", size=12),
+    #         )
+    #
+    #     if from_usd:
+    #         fig.add_annotation(
+    #             x=0.05,
+    #             y=0.15,
+    #             text="(" + format_amount(from_usd, "USD") + ")",
+    #             showarrow=False,
+    #             xref="paper",
+    #             yref="paper",
+    #             font=dict(color="white", size=12),
+    #         )
+    #
+    #     if to_usd:
+    #         fig.add_annotation(
+    #             x=0.95,
+    #             y=0.15,
+    #             text="(" + format_amount(to_usd, "USD") + ")",
+    #             showarrow=False,
+    #             xref="paper",
+    #             yref="paper",
+    #             font=dict(color="white", size=12),
+    #         )
+    #
+    #     if details:
+    #         fig.add_annotation(
+    #             x=0.5,
+    #             y=0.5,
+    #             text=details,
+    #             showarrow=False,
+    #             xref="paper",
+    #             yref="paper",
+    #             font=dict(color="white", size=14),
+    #         )
+    #
+    #     # Update layout to hide axes and grid lines
+    #     fig.update_layout(
+    #         showlegend=False,
+    #         margin=dict(l=0, r=0, t=0, b=0),
+    #         height=ArbitrageInstructions.instruction_height,
+    #         xaxis=dict(visible=False),
+    #         yaxis=dict(visible=False),
+    #         template="plotly_dark",
+    #     )
+    #
+    #     return fig
+
     @staticmethod
     def _generate_exchange_flow(
         from_exchange=None,
@@ -349,126 +493,150 @@ class ArbitrageInstructions:
     ):
         fig = go.Figure()
 
+        # Combine all annotations into a single step to reduce redundant fig.add_annotation calls
+        annotations = []
+
+        # Arrow for general flow if no details provided
         if not details:
-            # arrow
-            fig.add_annotation(
-                x=3.5,
-                y=2,
-                xref="x",
-                yref="y",
-                text="",
-                showarrow=True,
-                axref="x",
-                ayref="y",
-                ax=1.5,
-                ay=2,
-                arrowhead=3,
-                arrowwidth=1.5,
-                arrowcolor="white",
+            annotations.append(
+                dict(
+                    x=3.5,
+                    y=2,
+                    xref="x",
+                    yref="y",
+                    showarrow=True,
+                    axref="x",
+                    ayref="y",
+                    ax=1.5,
+                    ay=2,
+                    arrowhead=3,
+                    arrowwidth=1.5,
+                    arrowcolor="white",
+                )
             )
 
+        # Transfer fees or change in USD (with color conditional)
         if change_in_usd:
-            # transfer fees
-            fig.add_annotation(
-                x=0.5,
-                y=0.4,
-                text=format_amount(change_in_usd, "USD"),
-                showarrow=False,
-                xref="paper",
-                yref="paper",
-                font=dict(color="red" if change_in_usd < 0 else "green", size=14),
+            annotations.append(
+                dict(
+                    x=0.5,
+                    y=0.4,
+                    text=format_amount(change_in_usd, "USD"),
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    font=dict(color="red" if change_in_usd < 0 else "green", size=14),
+                )
             )
 
+        # Add the exchange names
         if from_exchange:
-            # Exchange names
-            fig.add_annotation(
-                x=0.05,
-                y=0.85,
-                text=from_exchange,
-                showarrow=False,
-                xref="paper",
-                yref="paper",
-                font=dict(color="white", size=14),
+            annotations.append(
+                dict(
+                    x=0.05,
+                    y=0.85,
+                    text=from_exchange,
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    font=dict(color="white", size=14),
+                )
             )
-
         if to_exchange:
-            fig.add_annotation(
-                x=0.95,
-                y=0.85,
-                text=to_exchange,
-                showarrow=False,
-                xref="paper",
-                yref="paper",
-                font=dict(color="white", size=14),
+            annotations.append(
+                dict(
+                    x=0.95,
+                    y=0.85,
+                    text=to_exchange,
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    font=dict(color="white", size=14),
+                )
             )
 
+        # Add amounts for the from and to currencies
         if from_amount:
-            # from amount
-            fig.add_annotation(
-                x=0.05,
-                y=0.5,
-                text=format_amount(from_amount, from_unit),
-                showarrow=False,
-                xref="paper",
-                yref="paper",
-                font=dict(color="white", size=14),
+            annotations.append(
+                dict(
+                    x=0.05,
+                    y=0.5,
+                    text=format_amount(from_amount, from_unit),
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    font=dict(color="white", size=14),
+                )
             )
-
         if to_amount:
-            # to amount
-            fig.add_annotation(
-                x=0.95,
-                y=0.5,
-                text=format_amount(to_amount, to_unit),
-                showarrow=False,
-                xref="paper",
-                yref="paper",
-                font=dict(color="white", size=14),
+            annotations.append(
+                dict(
+                    x=0.95,
+                    y=0.5,
+                    text=format_amount(to_amount, to_unit),
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    font=dict(color="white", size=14),
+                )
             )
 
+        # Add instructions
         if instruction:
-            fig.add_annotation(
-                x=0.5,
-                y=0.8,
-                text=instruction,
-                showarrow=False,
-                xref="paper",
-                yref="paper",
-                font=dict(color="white", size=12),
+            annotations.append(
+                dict(
+                    x=0.5,
+                    y=0.8,
+                    text=instruction,
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    font=dict(color="white", size=12),
+                )
             )
 
+        # Add from and to USD values
         if from_usd:
-            fig.add_annotation(
-                x=0.05,
-                y=0.15,
-                text="(" + format_amount(from_usd, "USD") + ")",
-                showarrow=False,
-                xref="paper",
-                yref="paper",
-                font=dict(color="white", size=12),
+            annotations.append(
+                dict(
+                    x=0.05,
+                    y=0.15,
+                    text=f"({format_amount(from_usd, 'USD')})",
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    font=dict(color="white", size=12),
+                )
             )
-
         if to_usd:
-            fig.add_annotation(
-                x=0.95,
-                y=0.15,
-                text="(" + format_amount(to_usd, "USD") + ")",
-                showarrow=False,
-                xref="paper",
-                yref="paper",
-                font=dict(color="white", size=12),
+            annotations.append(
+                dict(
+                    x=0.95,
+                    y=0.15,
+                    text=f"({format_amount(to_usd, 'USD')})",
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    font=dict(color="white", size=12),
+                )
             )
 
+        # Add details annotation
         if details:
-            fig.add_annotation(
-                x=0.5,
-                y=0.5,
-                text=details,
-                showarrow=False,
-                xref="paper",
-                yref="paper",
-                font=dict(color="white", size=14),
+            annotations.append(
+                dict(
+                    x=0.5,
+                    y=0.5,
+                    text=details,
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    font=dict(color="white", size=14),
+                )
             )
+
+        # Apply all annotations at once to minimize multiple calls
+        fig.update_layout(annotations=annotations)
 
         # Update layout to hide axes and grid lines
         fig.update_layout(

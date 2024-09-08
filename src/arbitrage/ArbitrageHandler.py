@@ -1136,6 +1136,7 @@ class ArbitrageHandler:
         change_in_usd_cover = (
             usd_after_sell_short - usd_after_cover
         )  # Difference in USD after covering
+        to_usd = usd_after_sell_short + change_in_usd_cover
 
         buy_to_cover_instruction = {
             "instruction": "buy to cover",
@@ -1147,7 +1148,7 @@ class ArbitrageHandler:
             "to_amount": amount_buy_to_cover_coin,
             "change_in_usd": change_in_usd_cover,
             "from_usd": None,
-            "to_usd": usd_after_cover,
+            "to_usd": to_usd,
         }
 
         # Total fees are the sum of shorting and covering the coin
@@ -1155,13 +1156,13 @@ class ArbitrageHandler:
             fees_sell_coin * entry_price + fees_buy_to_cover_coin * exit_price
         )
 
-        profit = usd_after_cover - amount_sell_coin * entry_price
+        profit = to_usd - amount_sell_coin * entry_price
 
         # Return instructions and final USD amount
         return (
             [sell_short_instruction, buy_to_cover_instruction],
             usd_after_sell_short,
-            usd_after_cover,
+            to_usd,
             total_fees_usd,
             profit,
         )
