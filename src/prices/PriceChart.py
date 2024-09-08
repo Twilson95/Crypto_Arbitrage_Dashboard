@@ -299,5 +299,193 @@ class PriceChart:
             xaxis_title=None,
             yaxis_title="Spread",
             template="plotly_dark",
+            margin=dict(l=10, r=10, t=40, b=10),
         )
+        return fig
+
+    @staticmethod
+    def plot_prices_and_spread(df, pair, hedge_ratio, window=30):
+        """
+        Plot the prices of two coins with hedge ratio adjustment and arbitrage signals.
+
+        Args:
+        df: DataFrame containing price data for both coins, with coin names as column labels.
+        pair: Tuple containing the coin names, with pair[0] being the more expensive coin and pair[1] the cheaper coin.
+        hedge_ratio: The hedge ratio used to adjust the cheaper coin's price.
+        window: The rolling window size for calculating mean and standard deviation (default is 30).
+        """
+
+        # Extract price data from the DataFrame
+        more_expensive_price = df[pair[0]]
+        cheaper_price = df[pair[1]]
+
+        # Adjust the cheaper coin's price using the hedge ratio
+        adjusted_cheaper_price = cheaper_price * hedge_ratio
+
+        # Calculate the price difference (spread) between the more expensive price and the adjusted cheaper price
+        price_diff = more_expensive_price - adjusted_cheaper_price
+
+        # Calculate the rolling mean and standard deviation of the spread
+        price_diff_mean = price_diff.rolling(window=window).mean()
+        price_diff_std = price_diff.rolling(window=window).std()
+
+        # Remove the first few elements where the rolling mean is NaN
+        valid_range = price_diff_mean.notna()
+        more_expensive_price = more_expensive_price[valid_range]
+        adjusted_cheaper_price = adjusted_cheaper_price[valid_range]
+        price_diff = price_diff[valid_range]
+        price_diff_mean = price_diff_mean[valid_range]
+        price_diff_std = price_diff_std[valid_range]
+
+        # Use the datetime index from the DataFrame as the x-axis
+        x_axis = df.index[valid_range]
+
+        # Initialize lists for entry and exit points
+        buy_expensive_points = []  # Buy expensive coin
+        sell_expensive_points = []  # Sell expensive coin
+        buy_cheaper_points = []  # Buy cheaper coin
+        sell_cheaper_points = []  # Sell cheaper coin
+        exit_points = []  # Points to exit the positions
+
+        # Flags to track whether a trade is open
+        trade_open = False
+        trade_type = (
+            None  # Track whether it's a "sell expensive" or "buy expensive" trade
+        )
+
+        # Track entry and exit points based on the price spread deviation from the mean
+        for i in range(1, len(price_diff)):
+            # Check for entry points when there's a significant deviation from the mean
+            if (
+                price_diff.iloc[i]
+                > price_diff_mean.iloc[i] + 2 * price_diff_std.iloc[i]
+                and not trade_open
+            ):
+                # Spread is above the mean + 2 * std -> Sell expensive, Buy cheaper
+                sell_expensive_points.append(
+                    (x_axis[i], more_expensive_price.iloc[i])
+                )  # Sell expensive
+                buy_cheaper_points.append(
+                    (x_axis[i], adjusted_cheaper_price.iloc[i])
+                )  # Buy cheaper
+                trade_open = True
+                trade_type = "sell_expensive"  # Track trade type
+            elif (
+                price_diff.iloc[i]
+                < price_diff_mean.iloc[i] - 2 * price_diff_std.iloc[i]
+                and not trade_open
+            ):
+                # Spread is below the mean - 2 * std -> Buy expensive, Sell cheaper
+                buy_expensive_points.append(
+                    (x_axis[i], more_expensive_price.iloc[i])
+                )  # Buy expensive
+                sell_cheaper_points.append(
+                    (x_axis[i], adjusted_cheaper_price.iloc[i])
+                )  # Sell cheaper
+                trade_open = True
+                trade_type = "buy_expensive"  # Track trade type
+
+            # Check for exit points when the spread returns to the mean
+            if (
+                trade_open
+                and price_diff.iloc[i]
+                < price_diff_mean.iloc[i] + price_diff_std.iloc[i]
+                and price_diff.iloc[i]
+                > price_diff_mean.iloc[i] - price_diff_std.iloc[i]
+            ):
+                if trade_type == "sell_expensive":
+                    # Reverse the trade -> Buy back expensive, Sell cheaper
+                    buy_expensive_points.append(
+                        (x_axis[i], more_expensive_price.iloc[i])
+                    )  # Buy expensive
+                    sell_cheaper_points.append(
+                        (x_axis[i], adjusted_cheaper_price.iloc[i])
+                    )  # Sell cheaper
+                elif trade_type == "buy_expensive":
+                    # Reverse the trade -> Sell expensive, Buy back cheaper
+                    sell_expensive_points.append(
+                        (x_axis[i], more_expensive_price.iloc[i])
+                    )  # Sell expensive
+                    buy_cheaper_points.append(
+                        (x_axis[i], adjusted_cheaper_price.iloc[i])
+                    )  # Buy cheaper
+                exit_points.append(
+                    (x_axis[i], more_expensive_price.iloc[i])
+                )  # Add the exit point
+                trade_open = False  # Close the trade
+
+        # Create traces for the plot
+        more_expensive_trace = go.Scatter(
+            x=x_axis,
+            y=more_expensive_price,
+            mode="lines",
+            name=f"{pair[0]} Price",
+            line=dict(color="blue"),
+        )
+
+        adjusted_cheaper_trace = go.Scatter(
+            x=x_axis,
+            y=adjusted_cheaper_price,
+            mode="lines",
+            name=f"{pair[1]} Adjusted Price",
+            line=dict(color="orange"),
+        )
+
+        # Entry points for buying and selling both coins
+        buy_expensive_trace = go.Scatter(
+            x=[point[0] for point in buy_expensive_points],
+            y=[point[1] for point in buy_expensive_points],  # Expensive coin buy
+            mode="markers",
+            name="Buy Expensive",
+            marker=dict(color="green", size=10, symbol="triangle-up"),
+        )
+
+        sell_expensive_trace = go.Scatter(
+            x=[point[0] for point in sell_expensive_points],
+            y=[point[1] for point in sell_expensive_points],  # Expensive coin sell
+            mode="markers",
+            name="Sell Expensive",
+            marker=dict(color="red", size=10, symbol="triangle-down"),
+        )
+
+        buy_cheaper_trace = go.Scatter(
+            x=[point[0] for point in buy_cheaper_points],
+            y=[point[1] for point in buy_cheaper_points],  # Cheaper coin buy
+            mode="markers",
+            name="Buy Cheaper",
+            marker=dict(color="green", size=10, symbol="triangle-up"),
+        )
+
+        sell_cheaper_trace = go.Scatter(
+            x=[point[0] for point in sell_cheaper_points],
+            y=[point[1] for point in sell_cheaper_points],  # Cheaper coin sell
+            mode="markers",
+            name="Sell Cheaper",
+            marker=dict(color="red", size=10, symbol="triangle-down"),
+        )
+
+        # Create the figure and add all traces
+        fig = go.Figure(
+            data=[
+                more_expensive_trace,
+                adjusted_cheaper_trace,
+                buy_expensive_trace,
+                sell_expensive_trace,
+                buy_cheaper_trace,
+                sell_cheaper_trace,
+            ]
+        )
+
+        # Update layout
+        fig.update_layout(
+            title=f"Prices and Arbitrage Opportunities: {pair[0]} and {pair[1]}",
+            xaxis_title=None,
+            yaxis_title="Price",
+            template="plotly_dark",
+            margin=dict(l=10, r=10, t=40, b=10),
+            xaxis=dict(
+                type="date"
+            ),  # Ensure datetime index is properly formatted on x-axis
+        )
+
         return fig

@@ -280,7 +280,7 @@ class AppLayout:
             dbc.Row(
                 [
                     dbc.Col(
-                        dcc.Graph(
+                        html.Div(
                             id="arbitrage_main_view",
                             style={"height": "100%", "width": "100%"},
                         ),

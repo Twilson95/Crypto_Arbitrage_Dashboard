@@ -1,4 +1,5 @@
-from dash import Dash
+from dash import Dash, dcc
+
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
 
@@ -12,7 +13,6 @@ from src.arbitrage.ArbitrageHandler import ArbitrageHandler
 from src.news.NewsFetcher import NewsFetcher
 from src.news.NewsChart import NewsChart
 from src.prices.NetworkGraph import create_network_graph
-from src.arbitrage.CointegrationCalculator import CointegrationCalculator
 
 from dash_bootstrap_templates import load_figure_template
 from time import time
@@ -44,8 +44,8 @@ data_manager = DataManager(exchange_config, network_fees_config)
 end_time = time()
 
 print(f"finished querying data: {end_time-start_time}")
-news_fetcher = NewsFetcher(news_config)
-news_chart = NewsChart()
+# news_fetcher = NewsFetcher(news_config)
+# news_chart = NewsChart()
 
 print("data enabled")
 price_chart = PriceChart()
@@ -176,16 +176,16 @@ def update_live_price_chart(currency, exchange_name, n_intervals, indicator):
     return price_chart.create_ohlc_chart(prices, mark_limit=20, title="Live Price")
 
 
-@app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
-def update_news_chart(currency):
-    if not currency:
-        return {}
-
-    news = news_fetcher.get_news_data(currency)
-    if not news:
-        return {}
-
-    return news_chart.create_table(news)
+# @app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
+# def update_news_chart(currency):
+#     if not currency:
+#         return {}
+#
+#     news = news_fetcher.get_news_data(currency)
+#     if not news:
+#         return {}
+#
+#     return news_chart.create_table(news)
 
 
 @app.callback(
@@ -209,7 +209,7 @@ def update_news_chart(exchange, currency, n_intervals):
 
 @app.callback(
     [
-        Output("arbitrage_main_view", "figure"),
+        Output("arbitrage_main_view", "children"),
         Output("arbitrage_instructions_container", "children"),
     ],
     [
@@ -248,13 +248,17 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_interval
                 )
             )
 
-        return price_charts, arbitrage_instructions
+        return dcc.Graph(figure=price_charts), arbitrage_instructions
 
     elif arbitrage == "triangular":
         prices, currency_fees = (
             data_manager.get_live_prices_and_fees_for_single_exchange(exchange)
         )
-        prices = {currency: price.close[-1] for currency, price in prices.items()}
+        prices = {
+            currency: price.close[-1]
+            for currency, price in prices.items()
+            if len(price.close) > 0
+        }
 
         arbitrage_opportunities = None
         if prices and currency_fees:
@@ -271,29 +275,44 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_interval
                     arbitrage_opportunities
                 )
             )
-        return exchange_network_graph, arbitrage_instructions
+        return dcc.Graph(figure=exchange_network_graph), arbitrage_instructions
 
     elif arbitrage == "statistical":
         prices = data_manager.get_historical_prices_for_all_currencies(exchange)
+
         spreads = data_manager.get_cointegration_spreads(exchange)
+
         _, currency_fees = data_manager.get_live_prices_and_fees_for_single_exchange(
             exchange
         )
+
         if spreads:
             arbitrage_opportunities = (
                 ArbitrageHandler.identify_all_statistical_arbitrage(
                     prices, spreads, currency_fees, exchange, funds, window=30
                 )
             )
+
         if arbitrage_opportunities:
             arbitrage_instructions = (
                 arbitrage_handler.return_statistical_arbitrage_instructions(
                     arbitrage_opportunities
                 )
             )
+
             pair, spread = list(spreads.items())[0]
+            spread_chart = price_chart.plot_spread(spread["spread"], pair, 30)
+            statistical_arbitrage_chart = PriceChart.plot_prices_and_spread(
+                prices, pair, spread["hedge_ratio"]
+            )
+
             return (
-                price_chart.plot_spread(spread["spread"], pair, 30),
+                [
+                    dcc.Graph(
+                        figure=statistical_arbitrage_chart, style={"height": "285px"}
+                    ),
+                    dcc.Graph(figure=spread_chart, style={"height": "285px"}),
+                ],
                 arbitrage_instructions,
             )
 
