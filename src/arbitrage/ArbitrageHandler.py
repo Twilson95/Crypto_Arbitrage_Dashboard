@@ -1320,7 +1320,7 @@ class ArbitrageHandler:
             amount_buy_coin1,
         )
 
-        total_profit = abs(coin1_profit - coin2_profit)
+        total_profit = coin1_profit + coin2_profit
 
         # Combine instructions from both trades
         combined_instructions = [

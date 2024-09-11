@@ -171,7 +171,7 @@ def create_edge_trace(edge_x, edge_y):
     return go.Scatter(
         x=edge_x,
         y=edge_y,
-        line=dict(width=1, color="#888"),
+        line=dict(width=0.5, color="#888"),
         hoverinfo="none",
         mode="lines",
     )
@@ -234,26 +234,6 @@ def create_arbitrage_edge_labels(
         textposition="middle center",
         hoverinfo="text",
     )
-
-
-# def create_arbitrage_edge_labels(arb_edge_x, arb_edge_y, arb_edge_text):
-#     edge_label_x = [
-#         (arb_edge_x[i] + arb_edge_x[i + 1]) / 2
-#         for i in range(0, len(arb_edge_x) - 2, 3)
-#     ]
-#     edge_label_y = [
-#         (arb_edge_y[i] + arb_edge_y[i + 1]) / 2
-#         for i in range(0, len(arb_edge_y) - 2, 3)
-#     ]
-#
-#     return go.Scatter(
-#         x=edge_label_x,
-#         y=edge_label_y,
-#         text=arb_edge_text,
-#         mode="text",
-#         textposition="middle center",
-#         hoverinfo="text",
-#     )
 
 
 def create_edge_labels(G, pos, edge_text):

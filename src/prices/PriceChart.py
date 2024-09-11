@@ -190,11 +190,11 @@ class PriceChart:
         return fig
 
     @staticmethod
-    def plot_spread(spread, pair, window=30):
+    def plot_spread(spread, pair, avg_window=30, view_window=70):
         """Plot the spread and indicate potential arbitrage opportunities using Plotly."""
         # Calculate rolling mean and standard deviation for the spread
-        spread_mean = spread.rolling(window=window).mean()
-        spread_std = spread.rolling(window=window).std()
+        spread_mean = spread.rolling(window=avg_window).mean()
+        spread_std = spread.rolling(window=avg_window).std()
 
         # Define thresholds for entry and exit signals
         upper_threshold = spread_mean + 2 * spread_std
@@ -210,6 +210,11 @@ class PriceChart:
         upper_threshold = upper_threshold[upper_threshold.notna()]
         lower_threshold = lower_threshold[lower_threshold.notna()]
 
+        spread = spread[-view_window:]
+        spread_mean = spread_mean[-view_window:]
+        upper_threshold = upper_threshold[-view_window:]
+        lower_threshold = lower_threshold[-view_window:]
+
         # Determine entry and exit points
         entry_points = []
         exit_points = []
@@ -219,17 +224,27 @@ class PriceChart:
         # Track entry and exit points based on the threshold conditions
         for i in range(1, len(spread)):
             if spread.iloc[i] > upper_threshold.iloc[i] and not above_upper:
-                entry_points.append((spread.index[i], spread.iloc[i]))
+                # Spread is above upper threshold -> Sell expensive, Buy cheaper
+                entry_points.append(
+                    (spread.index[i], spread.iloc[i], "sell_expensive", "buy_cheaper")
+                )
                 above_upper = True
             elif spread.iloc[i] < lower_threshold.iloc[i] and not below_lower:
-                entry_points.append((spread.index[i], spread.iloc[i]))
+                # Spread is below lower threshold -> Buy expensive, Sell cheaper
+                entry_points.append(
+                    (spread.index[i], spread.iloc[i], "buy_expensive", "sell_cheaper")
+                )
                 below_lower = True
 
             if spread.iloc[i] < spread_mean.iloc[i] and above_upper:
-                exit_points.append((spread.index[i], spread.iloc[i]))
+                exit_points.append(
+                    (spread.index[i], spread.iloc[i], "buy_expensive", "sell_cheaper")
+                )
                 above_upper = False
             elif spread.iloc[i] > spread_mean.iloc[i] and below_lower:
-                exit_points.append((spread.index[i], spread.iloc[i]))
+                exit_points.append(
+                    (spread.index[i], spread.iloc[i], "sell_expensive", "buy_cheaper")
+                )
                 below_lower = False
 
         # Create traces for the plot
@@ -301,18 +316,23 @@ class PriceChart:
             template="plotly_dark",
             margin=dict(l=10, r=10, t=40, b=10),
         )
-        return fig
+
+        # Return the figure, entry and exit points along with action indicators
+        return fig, entry_points, exit_points
 
     @staticmethod
-    def plot_prices_and_spread(df, pair, hedge_ratio, window=30):
+    def plot_prices_and_spread(
+        df, pair, hedge_ratio, entry_points, exit_points, window=70
+    ):
         """
         Plot the prices of two coins with hedge ratio adjustment and arbitrage signals.
-
         Args:
         df: DataFrame containing price data for both coins, with coin names as column labels.
         pair: Tuple containing the coin names, with pair[0] being the more expensive coin and pair[1] the cheaper coin.
         hedge_ratio: The hedge ratio used to adjust the cheaper coin's price.
-        window: The rolling window size for calculating mean and standard deviation (default is 30).
+        entry_points: List of entry points returned from plot_spread, including buy/sell indicators.
+        exit_points: List of exit points returned from plot_spread, including buy/sell indicators.
+        window: The rolling window size for calculating mean and standard deviation (default is 60).
         """
 
         # Extract price data from the DataFrame
@@ -322,112 +342,66 @@ class PriceChart:
         # Adjust the cheaper coin's price using the hedge ratio
         adjusted_cheaper_price = cheaper_price * hedge_ratio
 
-        # Calculate the price difference (spread) between the more expensive price and the adjusted cheaper price
-        price_diff = more_expensive_price - adjusted_cheaper_price
-
-        # Calculate the rolling mean and standard deviation of the spread
-        price_diff_mean = price_diff.rolling(window=window).mean()
-        price_diff_std = price_diff.rolling(window=window).std()
-
-        # Remove the first few elements where the rolling mean is NaN
-        valid_range = price_diff_mean.notna()
-        more_expensive_price = more_expensive_price[valid_range]
-        adjusted_cheaper_price = adjusted_cheaper_price[valid_range]
-        price_diff = price_diff[valid_range]
-        price_diff_mean = price_diff_mean[valid_range]
-        price_diff_std = price_diff_std[valid_range]
-
         # Use the datetime index from the DataFrame as the x-axis
-        x_axis = df.index[valid_range]
+        x_axis = df.index
 
-        # Initialize lists for entry and exit points
-        buy_expensive_points = []  # Buy expensive coin
-        sell_expensive_points = []  # Sell expensive coin
-        buy_cheaper_points = []  # Buy cheaper coin
-        sell_cheaper_points = []  # Sell cheaper coin
-        exit_points = []  # Points to exit the positions
+        # Get the latest 'window' number of dates
+        filtered_x_axis = x_axis[-window:]
+        filtered_more_expensive_price = more_expensive_price[-window:]
+        filtered_adjusted_cheaper_price = adjusted_cheaper_price[-window:]
 
-        # Flags to track whether a trade is open
-        trade_open = False
-        trade_type = (
-            None  # Track whether it's a "sell expensive" or "buy expensive" trade
-        )
+        # Initialize lists for plotting buy/sell points for both coins
+        buy_expensive_points = []
+        sell_expensive_points = []
+        buy_cheaper_points = []
+        sell_cheaper_points = []
 
-        # Track entry and exit points based on the price spread deviation from the mean
-        for i in range(1, len(price_diff)):
-            # Check for entry points when there's a significant deviation from the mean
-            if (
-                price_diff.iloc[i]
-                > price_diff_mean.iloc[i] + 2 * price_diff_std.iloc[i]
-                and not trade_open
-            ):
-                # Spread is above the mean + 2 * std -> Sell expensive, Buy cheaper
-                sell_expensive_points.append(
-                    (x_axis[i], more_expensive_price.iloc[i])
-                )  # Sell expensive
-                buy_cheaper_points.append(
-                    (x_axis[i], adjusted_cheaper_price.iloc[i])
-                )  # Buy cheaper
-                trade_open = True
-                trade_type = "sell_expensive"  # Track trade type
-            elif (
-                price_diff.iloc[i]
-                < price_diff_mean.iloc[i] - 2 * price_diff_std.iloc[i]
-                and not trade_open
-            ):
-                # Spread is below the mean - 2 * std -> Buy expensive, Sell cheaper
-                buy_expensive_points.append(
-                    (x_axis[i], more_expensive_price.iloc[i])
-                )  # Buy expensive
-                sell_cheaper_points.append(
-                    (x_axis[i], adjusted_cheaper_price.iloc[i])
-                )  # Sell cheaper
-                trade_open = True
-                trade_type = "buy_expensive"  # Track trade type
+        # Filter and plot entry points based on buy/sell actions
+        for entry_date, spread_value, action_expensive, action_cheaper in entry_points:
+            if entry_date in filtered_x_axis:
+                index = filtered_x_axis.get_loc(entry_date)
+                more_expensive_price = filtered_more_expensive_price.iloc[index]
+                cheaper_price = filtered_adjusted_cheaper_price.iloc[index]
+                if action_expensive == "buy_expensive":
+                    buy_expensive_points.append((entry_date, more_expensive_price))
+                else:
+                    sell_expensive_points.append((entry_date, more_expensive_price))
 
-            # Check for exit points when the spread returns to the mean
-            if (
-                trade_open
-                and price_diff.iloc[i]
-                < price_diff_mean.iloc[i] + price_diff_std.iloc[i]
-                and price_diff.iloc[i]
-                > price_diff_mean.iloc[i] - price_diff_std.iloc[i]
-            ):
-                if trade_type == "sell_expensive":
-                    # Reverse the trade -> Buy back expensive, Sell cheaper
-                    buy_expensive_points.append(
-                        (x_axis[i], more_expensive_price.iloc[i])
-                    )  # Buy expensive
-                    sell_cheaper_points.append(
-                        (x_axis[i], adjusted_cheaper_price.iloc[i])
-                    )  # Sell cheaper
-                elif trade_type == "buy_expensive":
-                    # Reverse the trade -> Sell expensive, Buy back cheaper
-                    sell_expensive_points.append(
-                        (x_axis[i], more_expensive_price.iloc[i])
-                    )  # Sell expensive
-                    buy_cheaper_points.append(
-                        (x_axis[i], adjusted_cheaper_price.iloc[i])
-                    )  # Buy cheaper
-                exit_points.append(
-                    (x_axis[i], more_expensive_price.iloc[i])
-                )  # Add the exit point
-                trade_open = False  # Close the trade
+                if action_cheaper == "buy_cheaper":
+                    buy_cheaper_points.append((entry_date, cheaper_price))
+                else:
+                    sell_cheaper_points.append((entry_date, cheaper_price))
 
-        # Create traces for the plot
+        # Handle exit points based on buy/sell actions
+        for exit_date, spread_value, action_expensive, action_cheaper in exit_points:
+            if exit_date in filtered_x_axis:
+                index = filtered_x_axis.get_loc(exit_date)
+                more_expensive_price = filtered_more_expensive_price.iloc[index]
+                cheaper_price = filtered_adjusted_cheaper_price.iloc[index]
+                if action_expensive == "buy_expensive":
+                    buy_expensive_points.append((exit_date, more_expensive_price))
+                else:
+                    sell_expensive_points.append((exit_date, more_expensive_price))
+
+                if action_cheaper == "buy_cheaper":
+                    buy_cheaper_points.append((exit_date, cheaper_price))
+                else:
+                    sell_cheaper_points.append((exit_date, cheaper_price))
+
+        # Create traces for the plot, using only the latest 'window' dates
         more_expensive_trace = go.Scatter(
-            x=x_axis,
-            y=more_expensive_price,
+            x=filtered_x_axis,
+            y=filtered_more_expensive_price,
             mode="lines",
-            name=f"{pair[0]} Price",
+            name=f"{pair[0].split('/')[0]} Price",
             line=dict(color="blue"),
         )
 
         adjusted_cheaper_trace = go.Scatter(
-            x=x_axis,
-            y=adjusted_cheaper_price,
+            x=filtered_x_axis,
+            y=filtered_adjusted_cheaper_price,
             mode="lines",
-            name=f"{pair[1]} Adjusted Price",
+            name=f"{pair[1].split('/')[0]} Adj Price",
             line=dict(color="orange"),
         )
 

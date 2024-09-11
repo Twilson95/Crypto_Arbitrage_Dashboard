@@ -109,7 +109,7 @@ def render_tab_content(
         if arbitrage_filter_value == "triangular":
             exchange_filter_style["display"] = "block"
             currency_filter_style["display"] = "none"
-        if arbitrage_filter_value == "statistical":
+        elif arbitrage_filter_value == "statistical":
             exchange_filter_style["display"] = "block"
             currency_filter_style["display"] = "none"
         else:
@@ -248,7 +248,10 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_interval
                 )
             )
 
-        return dcc.Graph(figure=price_charts), arbitrage_instructions
+        return (
+            dcc.Graph(figure=price_charts, style={"height": "100%"}),
+            arbitrage_instructions,
+        )
 
     elif arbitrage == "triangular":
         prices, currency_fees = (
@@ -275,7 +278,10 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_interval
                     arbitrage_opportunities
                 )
             )
-        return dcc.Graph(figure=exchange_network_graph), arbitrage_instructions
+        return (
+            dcc.Graph(figure=exchange_network_graph, style={"height": "100%"}),
+            arbitrage_instructions,
+        )
 
     elif arbitrage == "statistical":
         prices = data_manager.get_historical_prices_for_all_currencies(exchange)
@@ -301,9 +307,11 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_interval
             )
 
             pair, spread = list(spreads.items())[0]
-            spread_chart = price_chart.plot_spread(spread["spread"], pair, 30)
+            spread_chart, entry_dates, exit_dates = price_chart.plot_spread(
+                spread["spread"], pair, 30
+            )
             statistical_arbitrage_chart = PriceChart.plot_prices_and_spread(
-                prices, pair, spread["hedge_ratio"]
+                prices, pair, spread["hedge_ratio"], entry_dates, exit_dates
             )
 
             return (
