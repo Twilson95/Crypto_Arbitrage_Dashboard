@@ -21,7 +21,7 @@ class DataFetcher:
         self.exchange_fees = {}
         self.historical_data = {}
         self.live_data = {}
-        self.cointegration_spreads = None
+        self.cointegration_spreads = {}
         self.order_books = {}
         self.market_symbols = []
         self.timeout = 10

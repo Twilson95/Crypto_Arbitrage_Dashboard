@@ -652,25 +652,22 @@ class ArbitrageHandler:
 
     @staticmethod
     def identify_all_statistical_arbitrage(
-        prices, spreads, currency_fees, exchange, funds, window=30
+        prices, pair, spread_details, currency_fees, exchange, funds, window=30
     ):
-        arbitrage_instructions = []
-        for pair, spread_details in spreads.items():
-            spread = spread_details["spread"]
-            hedge_ratio = spread_details["hedge_ratio"]
-            drawing_instructions = ArbitrageHandler.get_statistical_arbitrage_trades(
-                spread, window
-            )
-            arbitrage_instruction = ArbitrageHandler.identify_statistical_arbitrage(
-                drawing_instructions,
-                pair,
-                currency_fees,
-                exchange,
-                funds,
-                prices,
-                hedge_ratio,
-            )
-            arbitrage_instructions.extend(arbitrage_instruction)
+        spread = spread_details["spread"]
+        hedge_ratio = spread_details["hedge_ratio"]
+        drawing_instructions = ArbitrageHandler.get_statistical_arbitrage_trades(
+            spread, window
+        )
+        arbitrage_instructions = ArbitrageHandler.identify_statistical_arbitrage(
+            drawing_instructions,
+            pair,
+            currency_fees,
+            exchange,
+            funds,
+            prices,
+            hedge_ratio,
+        )
         return arbitrage_instructions
 
     @staticmethod

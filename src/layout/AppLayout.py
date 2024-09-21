@@ -82,27 +82,43 @@ class AppLayout:
             style=filter_style,
         )
 
-        # log_marks = generate_log_marks()
-        funds_slider = html.Div(
+        cointegration_filter = html.Div(
             [
-                html.Label("Funds"),
-                dcc.Slider(
-                    id="funds-slider",
-                    min=0,
-                    max=100_000,
-                    step=0.1,
-                    value=1,
-                    marks=None,
-                    tooltip={
-                        "placement": "bottom",
-                        "always_visible": True,
-                    },  # Tooltip to show value
+                html.Label("Cointegration Pairs"),
+                dcc.Dropdown(
+                    id="cointegration-pairs-input",
+                    options=[],
+                    placeholder="Select Cointegration Pairs",
+                    value=None,
+                    multi=False,
                 ),
             ],
-            title="Funds",
-            id="funds-slider-container",  # New container div for the slider
-            style=filter_style,  # Initialize with display set to 'none'
+            title="Select Indicators",
+            id="cointegration-selector-container",
+            style=filter_style,
         )
+
+        # log_marks = generate_log_marks()
+        # funds_slider = html.Div(
+        #     [
+        #         html.Label("Funds"),
+        #         dcc.Slider(
+        #             id="funds-slider",
+        #             min=0,
+        #             max=100_000,
+        #             step=0.1,
+        #             value=1,
+        #             marks=None,
+        #             tooltip={
+        #                 "placement": "bottom",
+        #                 "always_visible": True,
+        #             },  # Tooltip to show value
+        #         ),
+        #     ],
+        #     title="Funds",
+        #     id="funds-slider-container",  # New container div for the slider
+        #     style=filter_style,  # Initialize with display set to 'none'
+        # )
 
         funds_input = html.Div(
             [
@@ -115,7 +131,7 @@ class AppLayout:
                         dcc.Input(
                             id="funds-input",
                             type="number",
-                            value=1,  # Default value
+                            value=100,  # Default value
                             min=0,
                             # max=1_000_000,
                             step=1,
@@ -142,6 +158,7 @@ class AppLayout:
             exchange_filter,
             currency_filter,
             indicator_filter,
+            cointegration_filter,
             # funds_slider,
             funds_input,
         ]
