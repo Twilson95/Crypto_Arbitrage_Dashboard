@@ -16,6 +16,7 @@ from src.prices.NetworkGraph import create_network_graph
 
 from dash_bootstrap_templates import load_figure_template
 from time import time
+import ast
 
 import yaml
 
@@ -43,23 +44,9 @@ start_time = time()
 data_manager = DataManager(exchange_config, network_fees_config)
 end_time = time()
 
-print(f"finished querying data: {end_time-start_time}")
 # news_fetcher = NewsFetcher(news_config)
 # news_chart = NewsChart()
-
-print("data enabled")
 price_chart = PriceChart()
-
-# @app.callback(
-#     [
-#         Input("interval-component", "n_intervals"),
-#     ]
-# )
-# def fetch_all_live_prices(n_intervals):
-# get_current_prices()
-# identify_arbitrage()
-# display_arbitrage()
-# trade_arbitrage()
 
 
 @app.callback(
@@ -70,6 +57,7 @@ price_chart = PriceChart()
         Output("currency-filter-container", "style"),
         Output("indicator-selector-container", "style"),
         Output("arbitrage-filter-container", "style"),
+        Output("cointegration-selector-container", "style"),
         Output("funds-input-container", "style"),
     ],
     [Input("tabs", "value")],
@@ -80,6 +68,7 @@ price_chart = PriceChart()
         State("currency-filter-container", "style"),
         State("indicator-selector-container", "style"),
         State("arbitrage-filter-container", "style"),
+        State("cointegration-selector-container", "style"),
         State("funds-input-container", "style"),
         Input("arbitrage-selector", "value"),
     ],
@@ -92,6 +81,7 @@ def render_tab_content(
     currency_filter_style,
     indicator_filter_style,
     arbitrage_filter_style,
+    cointegration_filter_style,
     funds_input_style,
     arbitrage_filter_value,
 ):
@@ -102,6 +92,7 @@ def render_tab_content(
         currency_filter_style["display"] = "block"
         indicator_filter_style["display"] = "block"
         arbitrage_filter_style["display"] = "none"
+        cointegration_filter_style["display"] = "none"
         funds_input_style["display"] = "none"
     elif active_tab == "tab-2":
         grid_style["display"] = "none"
@@ -109,12 +100,15 @@ def render_tab_content(
         if arbitrage_filter_value == "triangular":
             exchange_filter_style["display"] = "block"
             currency_filter_style["display"] = "none"
+            cointegration_filter_style["display"] = "none"
         elif arbitrage_filter_value == "statistical":
             exchange_filter_style["display"] = "block"
             currency_filter_style["display"] = "none"
+            cointegration_filter_style["display"] = "block"
         else:
             exchange_filter_style["display"] = "none"
             currency_filter_style["display"] = "block"
+            cointegration_filter_style["display"] = "none"
 
         indicator_filter_style["display"] = "none"
         arbitrage_filter_style["display"] = "block"
@@ -127,6 +121,7 @@ def render_tab_content(
         currency_filter_style,
         indicator_filter_style,
         arbitrage_filter_style,
+        cointegration_filter_style,
         funds_input_style,
     )
 
@@ -216,18 +211,18 @@ def update_news_chart(exchange, currency, n_intervals):
         Input("arbitrage-selector", "value"),
         Input("exchange-selector", "value"),
         Input("currency-selector", "value"),
+        Input("cointegration-pairs-input", "value"),
         Input("funds-input", "value"),
         Input("interval-component", "n_intervals"),
     ],
 )
-def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_intervals):
-    if not currency:
-        return {}
+def update_main_arbitrage_chart(
+    arbitrage, exchange, currency, cointegration_pair_str, funds, n_intervals
+):
     if not funds:
         funds = 0.1
     arbitrage_opportunities = None
 
-    # funds = int(funds)
     if arbitrage == "simple":
         prices = data_manager.get_live_prices_for_all_exchanges(currency)
         currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(currency)
@@ -236,6 +231,12 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_interval
 
         if not prices:
             return {}
+
+        prices = {
+            exchange: price_list
+            for exchange, price_list in prices.items()
+            if len(price_list.close) > 0
+        }
 
         price_charts = price_chart.create_line_charts(
             prices, mark_limit=20, title="Live Exchange Prices"
@@ -284,9 +285,11 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_interval
         )
 
     elif arbitrage == "statistical":
+        cointegration_pair = ast.literal_eval(cointegration_pair_str)
         prices = data_manager.get_historical_prices_for_all_currencies(exchange)
 
         spreads = data_manager.get_cointegration_spreads(exchange)
+        spread = spreads.get(cointegration_pair)
 
         _, currency_fees = data_manager.get_live_prices_and_fees_for_single_exchange(
             exchange
@@ -295,7 +298,13 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_interval
         if spreads:
             arbitrage_opportunities = (
                 ArbitrageHandler.identify_all_statistical_arbitrage(
-                    prices, spreads, currency_fees, exchange, funds, window=30
+                    prices,
+                    cointegration_pair,
+                    spread,
+                    currency_fees,
+                    exchange,
+                    funds,
+                    window=30,
                 )
             )
 
@@ -306,28 +315,64 @@ def update_main_arbitrage_chart(arbitrage, exchange, currency, funds, n_interval
                 )
             )
 
-            pair, spread = list(spreads.items())[0]
             spread_chart, entry_dates, exit_dates = price_chart.plot_spread(
-                spread["spread"], pair, 30
+                spread["spread"], cointegration_pair, 30
             )
             statistical_arbitrage_chart = PriceChart.plot_prices_and_spread(
-                prices, pair, spread["hedge_ratio"], entry_dates, exit_dates
+                prices,
+                cointegration_pair,
+                spread["hedge_ratio"],
+                entry_dates,
+                exit_dates,
             )
 
             return (
                 [
                     dcc.Graph(
-                        figure=statistical_arbitrage_chart, style={"height": "285px"}
+                        figure=statistical_arbitrage_chart, style={"height": "50%"}
                     ),
-                    dcc.Graph(figure=spread_chart, style={"height": "285px"}),
+                    dcc.Graph(figure=spread_chart, style={"height": "50%"}),
                 ],
                 arbitrage_instructions,
             )
 
-        # print(cointegration_pairs)
         return {}, {}
 
     return {}, {}
+
+
+@app.callback(
+    [
+        Output("currency-selector", "options"),
+        Output("currency-selector", "value"),
+        Output("cointegration-pairs-input", "options"),
+        Output("cointegration-pairs-input", "value"),
+    ],
+    [
+        Input("exchange-selector", "value"),
+        Input("currency-selector", "value"),
+        Input("cointegration-pairs-input", "value"),
+        Input("interval-component", "n_intervals"),
+    ],
+)
+def update_filter_values(exchange, currency_value, cointegration_value, n_intervals):
+    currency_data = data_manager.get_historical_prices_for_all_currencies(exchange)
+    currency_options = list(currency_data.keys())
+    if currency_value is None:
+        currency_value = currency_options[0]
+
+    spreads = data_manager.get_cointegration_spreads(exchange)
+    cointegration_pairs_str = [str(tup) for tup in spreads.keys()]
+
+    if cointegration_value is None:
+        cointegration_value = cointegration_pairs_str[0]
+
+    return (
+        currency_options,
+        currency_value,
+        cointegration_pairs_str,
+        cointegration_value,
+    )
 
 
 if __name__ == "__main__":

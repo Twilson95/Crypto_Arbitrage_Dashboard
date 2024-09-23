@@ -11,6 +11,8 @@ class ArbitrageHandler:
         arbitrages = ArbitrageHandler.identify_simple_arbitrage(
             currency, exchange_prices, currency_fees, exchange_fees, network_fees, funds
         )
+        if not arbitrages:
+            return None
         # print("arbitrages", arbitrages)
         instruction_diagrams = []
         for arbitrage in arbitrages:
@@ -652,25 +654,22 @@ class ArbitrageHandler:
 
     @staticmethod
     def identify_all_statistical_arbitrage(
-        prices, spreads, currency_fees, exchange, funds, window=30
+        prices, pair, spread_details, currency_fees, exchange, funds, window=30
     ):
-        arbitrage_instructions = []
-        for pair, spread_details in spreads.items():
-            spread = spread_details["spread"]
-            hedge_ratio = spread_details["hedge_ratio"]
-            drawing_instructions = ArbitrageHandler.get_statistical_arbitrage_trades(
-                spread, window
-            )
-            arbitrage_instruction = ArbitrageHandler.identify_statistical_arbitrage(
-                drawing_instructions,
-                pair,
-                currency_fees,
-                exchange,
-                funds,
-                prices,
-                hedge_ratio,
-            )
-            arbitrage_instructions.extend(arbitrage_instruction)
+        spread = spread_details["spread"]
+        hedge_ratio = spread_details["hedge_ratio"]
+        drawing_instructions = ArbitrageHandler.get_statistical_arbitrage_trades(
+            spread, window
+        )
+        arbitrage_instructions = ArbitrageHandler.identify_statistical_arbitrage(
+            drawing_instructions,
+            pair,
+            currency_fees,
+            exchange,
+            funds,
+            prices,
+            hedge_ratio,
+        )
         return arbitrage_instructions
 
     @staticmethod
@@ -1269,18 +1268,23 @@ class ArbitrageHandler:
         exit_price_coin1 = price_df.loc[exit_time, pair1]
         exit_price_coin2 = price_df.loc[exit_time, pair2]
 
-        # Swap coins if entry type is "short"
+        if hedge_ratio < 0:
+            # hedge_ratio = 1 / hedge_ratio
+            print(hedge_ratio)
+            pass
+
         if entry_type == "short":
-            # Swap coins so that the first coin is always the one we're buying
+            hedge_ratio = 1 / hedge_ratio
             coin1, coin2 = coin2, coin1
             pair1, pair2 = pair2, pair1
-            hedge_ratio = 1 / hedge_ratio
             coin1_fee, coin2_fee = coin2_fee, coin1_fee
             entry_price_coin1, entry_price_coin2 = (
                 entry_price_coin2,
                 entry_price_coin1,
             )
             exit_price_coin1, exit_price_coin2 = exit_price_coin2, exit_price_coin1
+
+        hedge_ratio = abs(hedge_ratio)
 
         # Handle buying and selling of the first coin
         (
