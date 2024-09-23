@@ -339,23 +339,36 @@ def update_main_arbitrage_chart(
 
 @app.callback(
     [
+        Output("currency-selector", "options"),
+        Output("currency-selector", "value"),
         Output("cointegration-pairs-input", "options"),
         Output("cointegration-pairs-input", "value"),
     ],
     [
         Input("exchange-selector", "value"),
+        Input("currency-selector", "value"),
         Input("cointegration-pairs-input", "value"),
         Input("interval-component", "n_intervals"),
     ],
 )
-def update_cointegration_pairs_filter(exchange, cointegration_value, n_intervals):
+def update_filter_values(exchange, currency_value, cointegration_value, n_intervals):
+    currency_data = data_manager.get_historical_prices_for_all_currencies(exchange)
+    currency_options = list(currency_data.keys())
+    if currency_value is None:
+        currency_value = currency_options[0]
+
     spreads = data_manager.get_cointegration_spreads(exchange)
     cointegration_pairs_str = [str(tup) for tup in spreads.keys()]
 
     if cointegration_value is None:
         cointegration_value = cointegration_pairs_str[0]
 
-    return cointegration_pairs_str, cointegration_value
+    return (
+        currency_options,
+        currency_value,
+        cointegration_pairs_str,
+        cointegration_value,
+    )
 
 
 if __name__ == "__main__":
