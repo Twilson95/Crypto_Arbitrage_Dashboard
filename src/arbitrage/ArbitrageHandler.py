@@ -1266,18 +1266,23 @@ class ArbitrageHandler:
         exit_price_coin1 = price_df.loc[exit_time, pair1]
         exit_price_coin2 = price_df.loc[exit_time, pair2]
 
-        # Swap coins if entry type is "short"
+        if hedge_ratio < 0:
+            # hedge_ratio = 1 / hedge_ratio
+            print(hedge_ratio)
+            pass
+
         if entry_type == "short":
-            # Swap coins so that the first coin is always the one we're buying
+            hedge_ratio = 1 / hedge_ratio
             coin1, coin2 = coin2, coin1
             pair1, pair2 = pair2, pair1
-            hedge_ratio = 1 / hedge_ratio
             coin1_fee, coin2_fee = coin2_fee, coin1_fee
             entry_price_coin1, entry_price_coin2 = (
                 entry_price_coin2,
                 entry_price_coin1,
             )
             exit_price_coin1, exit_price_coin2 = exit_price_coin2, exit_price_coin1
+
+        hedge_ratio = abs(hedge_ratio)
 
         # Handle buying and selling of the first coin
         (
