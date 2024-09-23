@@ -6,7 +6,12 @@ container_style = {
     "overflowY": "hidden",
     "overflowX": "hidden",
 }
-
+header_style = {
+    # "padding": "5px",
+    # "height": "80px",
+    "align-items": "center",
+    "justify-content": "center",
+}
 filter_container_style = {
     "display": "flex",
     "justify-content": "space-between",
@@ -21,26 +26,18 @@ filter_style = {
     "flex": "1 1 auto",
     "padding-left": "1%",
     "padding-right": "1%",
-    # "padding-top": "50%",
     # "outline": "2px solid green",
 }
 grid_container_style = {
     "flex": "1",  # Take the remaining space
     "display": "flex",
     "flex-direction": "column",
-    # "justify-content": "center",
     "align-items": "center",
     "width": "100%",
     "padding": "5px",
     "padding-bottom": "1%",
     "overflowY": "hidden",
     # "outline": "2px solid blue",
-}
-header_style = {
-    # "padding": "5px",
-    # "height": "80px",
-    "align-items": "center",
-    "justify-content": "center",
 }
 grid_row_style = {
     "width": "100%",

@@ -314,7 +314,7 @@ class AppLayout:
                         html.Div(
                             id="arbitrage_instructions_container",
                             style={
-                                "height": "570px",
+                                "height": "100%",
                                 "width": "100%",
                                 "overflowY": "scroll",
                             },
@@ -328,6 +328,6 @@ class AppLayout:
                         },
                     ),
                 ],
-                style=grid_row_style,
+                style={"height": "100%", "width": "100%"},
             ),
         ]

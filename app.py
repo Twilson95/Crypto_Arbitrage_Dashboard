@@ -225,7 +225,6 @@ def update_main_arbitrage_chart(
         funds = 0.1
     arbitrage_opportunities = None
 
-    # funds = int(funds)
     if arbitrage == "simple":
         prices = data_manager.get_live_prices_for_all_exchanges(currency)
         currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(currency)
@@ -326,9 +325,9 @@ def update_main_arbitrage_chart(
             return (
                 [
                     dcc.Graph(
-                        figure=statistical_arbitrage_chart, style={"height": "285px"}
+                        figure=statistical_arbitrage_chart, style={"height": "50%"}
                     ),
-                    dcc.Graph(figure=spread_chart, style={"height": "285px"}),
+                    dcc.Graph(figure=spread_chart, style={"height": "50%"}),
                 ],
                 arbitrage_instructions,
             )
