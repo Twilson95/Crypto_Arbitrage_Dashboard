@@ -195,17 +195,12 @@ class DataFetcher:
         if all_currencies is None:
             return None
 
+        # bybit cannot mix different markets into same query
         if self.exchange_name == "Bybit":
-            tasks = []
-            tasks += [self.fetch_live_price_multiple(self.currencies)]
-            tasks += [
-                self.fetch_live_price(currency, symbol)
-                for currency, symbol in self.inter_coin_symbols.items()
+            tasks = [self.fetch_live_price_multiple(self.currencies)] + [
+                self.fetch_live_price_multiple(self.inter_coin_symbols)
             ]
-            await self._gather_with_timeout(tasks, "fetch_all_live_prices")
-            return None
-
-        if self.client.has.get("fetchTickers"):
+        elif self.client.has.get("fetchTickers"):
             tasks = [self.fetch_live_price_multiple(all_currencies)]
         else:
             tasks = [

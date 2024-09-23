@@ -219,8 +219,6 @@ def update_news_chart(exchange, currency, n_intervals):
 def update_main_arbitrage_chart(
     arbitrage, exchange, currency, cointegration_pair_str, funds, n_intervals
 ):
-    if not currency:
-        return {}
     if not funds:
         funds = 0.1
     arbitrage_opportunities = None
@@ -233,6 +231,12 @@ def update_main_arbitrage_chart(
 
         if not prices:
             return {}
+
+        prices = {
+            exchange: price_list
+            for exchange, price_list in prices.items()
+            if len(price_list.close) > 0
+        }
 
         price_charts = price_chart.create_line_charts(
             prices, mark_limit=20, title="Live Exchange Prices"

@@ -11,6 +11,8 @@ class ArbitrageHandler:
         arbitrages = ArbitrageHandler.identify_simple_arbitrage(
             currency, exchange_prices, currency_fees, exchange_fees, network_fees, funds
         )
+        if not arbitrages:
+            return None
         # print("arbitrages", arbitrages)
         instruction_diagrams = []
         for arbitrage in arbitrages:
