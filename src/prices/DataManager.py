@@ -116,13 +116,6 @@ class DataManager:
         await asyncio.gather(*tasks)
 
     def get_historical_prices(self, exchange_name, currency):
-        future = asyncio.run_coroutine_threadsafe(
-            self._get_historical_prices(exchange_name, currency), self.loop
-        )
-        return future.result()
-
-    async def _get_historical_prices(self, exchange_name, currency):
-        await self.initialized_event.wait()  # Wait for initialization to complete
         data_fetcher = self.exchanges.get(exchange_name)
         if not data_fetcher:
             return None
@@ -130,13 +123,6 @@ class DataManager:
         return prices
 
     def get_live_prices(self, exchange_name, currency):
-        future = asyncio.run_coroutine_threadsafe(
-            self._get_live_prices(exchange_name, currency), self.loop
-        )
-        return future.result()
-
-    async def _get_live_prices(self, exchange_name, currency):
-        await self.initialized_event.wait()  # Wait for initialization to complete
         data_fetcher = self.exchanges.get(exchange_name)
         if not data_fetcher:
             return None
@@ -152,13 +138,6 @@ class DataManager:
         return exchange_prices
 
     def get_maker_taker_fees_for_all_exchanges(self, currency):
-        future = asyncio.run_coroutine_threadsafe(
-            self._get_maker_taker_fees_for_all_exchanges(currency), self.loop
-        )
-        return future.result()
-
-    async def _get_maker_taker_fees_for_all_exchanges(self, currency):
-        await self.initialized_event.wait()
         exchange_fees = {}
         for exchange_name, exchange in self.exchanges.items():
             fees = exchange.get_currency_fee(currency)
@@ -167,13 +146,6 @@ class DataManager:
         return exchange_fees
 
     def get_withdrawal_deposit_fees_for_all_exchanges(self):
-        future = asyncio.run_coroutine_threadsafe(
-            self._get_withdrawal_deposit_fees_for_all_exchanges(), self.loop
-        )
-        return future.result()
-
-    async def _get_withdrawal_deposit_fees_for_all_exchanges(self):
-        await self.initialized_event.wait()
         exchange_fees = {}
         for exchange_name, exchange in self.exchanges.items():
             fees = exchange.get_exchange_fees()
@@ -199,25 +171,11 @@ class DataManager:
         return prices, currency_fees
 
     def get_order_book(self, exchange_name, symbol):
-        future = asyncio.run_coroutine_threadsafe(
-            self._get_order_book(exchange_name, symbol), self.loop
-        )
-        return future.result()
-
-    async def _get_order_book(self, exchange_name, symbol):
-        await self.initialized_event.wait()
         exchange = self.exchanges[exchange_name]
         order_book = exchange.get_order_book(symbol)
         return order_book
 
     def get_historical_prices_for_all_currencies(self, exchange_name):
-        future = asyncio.run_coroutine_threadsafe(
-            self._get_historical_prices_for_all_currencies(exchange_name), self.loop
-        )
-        return future.result()
-
-    async def _get_historical_prices_for_all_currencies(self, exchange_name):
-        await self.initialized_event.wait()  # Wait for initialization to complete
         data_fetcher = self.exchanges.get(exchange_name)
         if not data_fetcher:
             return None
@@ -225,13 +183,6 @@ class DataManager:
         return prices
 
     def get_cointegration_spreads(self, exchange_name):
-        future = asyncio.run_coroutine_threadsafe(
-            self._get_cointegration_spreads(exchange_name), self.loop
-        )
-        return future.result()
-
-    async def _get_cointegration_spreads(self, exchange_name):
-        await self.initialized_event.wait()  # Wait for initialization to complete
         data_fetcher = self.exchanges.get(exchange_name)
         if not data_fetcher:
             return None

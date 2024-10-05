@@ -25,7 +25,7 @@ class DataFetcher:
         self.cointegration_spreads = {}
         self.order_books = {}
         self.market_symbols = []
-        self.timeout = 10
+        self.timeout = 60
         self.markets = markets
 
     def extract_exchange_fees(self):
@@ -106,9 +106,11 @@ class DataFetcher:
         end_time = time()
         print(end_time - start_time, "time to generate cointegrity pairs")
 
-    def initialize_ohlc_data(self, currency):
-        self.historical_data[currency] = OHLCData()
+    def initialize_live_data(self, currency):
         self.live_data[currency] = OHLCData()
+
+    def initialize_historic_data(self, currency):
+        self.historical_data[currency] = OHLCData()
 
     def get_historical_prices(self, currency):
         return self.historical_data.get(currency)
@@ -143,9 +145,9 @@ class DataFetcher:
             await self._gather_with_timeout(tasks, "update_all_historical_prices")
 
             # Add a delay if there are more batches
-            if i + batch_size < len(currencies):
-                print(f"Waiting for {wait_time} seconds before the next batch...")
-                await asyncio.sleep(wait_time)
+            # if i + batch_size < len(currencies):
+            #     print(f"Waiting for {wait_time} seconds before the next batch...")
+            #     await asyncio.sleep(wait_time)
 
     async def fetch_initial_live_prices(self, currency, count):
         symbol = self.currencies[currency]
@@ -157,7 +159,7 @@ class DataFetcher:
         ).reset_index()
 
         if currency not in self.live_data.keys():
-            self.initialize_ohlc_data(currency)
+            self.initialize_live_data(currency)
 
         self.live_data[currency].update_from_dataframe(ohlcv_df)
 
@@ -242,7 +244,7 @@ class DataFetcher:
             datetime_obj = datetime.fromtimestamp(timestamp_s)
 
         if currency not in self.live_data.keys():
-            self.initialize_ohlc_data(currency)
+            self.initialize_live_data(currency)
 
         current_price = ticker["last"]
         self.live_data[currency].datetime.append(datetime_obj)
@@ -279,7 +281,7 @@ class DataFetcher:
                 datetime_obj = datetime.fromtimestamp(timestamp_s)
 
             if currency not in self.live_data.keys():
-                self.initialize_ohlc_data(currency)
+                self.initialize_live_data(currency)
 
             current_price = ticker["last"]
             self.live_data[currency].datetime.append(datetime_obj)
@@ -296,14 +298,17 @@ class DataFetcher:
         )
         print("getting", currency)
         try:
-            data = await self.client.fetch_ohlcv(
-                symbol,
-                timeframe,
-                since,  # params={"until": 1719014400 * 1000}
+            data = await asyncio.wait_for(
+                self.client.fetch_ohlcv(symbol, timeframe, since), timeout=30
             )
+        except asyncio.TimeoutError:
+            print(f"Timeout for fetching {currency}. Skipping.")
+            return None
         except RateLimitExceeded as e:
             print(f"Rate limit exceeded: {e}")
-            # Handle the rate limit case as needed, e.g., by waiting or retrying later
+            return None
+        except Exception as e:
+            print(f"Error fetching {currency}: {e}")
             return None
 
         print("got", currency)
@@ -314,7 +319,7 @@ class DataFetcher:
         df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
 
         if currency not in self.historical_data.keys():
-            self.initialize_ohlc_data(currency)
+            self.initialize_historic_data(currency)
 
         self.historical_data[currency].update_from_dataframe(df)
 
@@ -457,9 +462,9 @@ class DataFetcher:
         dataframes = []
 
         # Loop through each currency to create a DataFrame with datetime as index
-        for currency in self.currencies:
-            datetime_values = self.historical_data[currency].datetime
-            closing_prices = self.historical_data[currency].close
+        for currency, historic_currency_data in self.historical_data.items():
+            datetime_values = historic_currency_data.datetime
+            closing_prices = historic_currency_data.close
 
             # Create a DataFrame for each currency with datetime as index
             df_currency = pd.DataFrame(
@@ -468,6 +473,9 @@ class DataFetcher:
 
             # Append the DataFrame to the list
             dataframes.append(df_currency)
+
+        if not dataframes:
+            return None
 
         # Concatenate all DataFrames along the datetime index
         df_combined = pd.concat(dataframes, axis=1, join="outer")

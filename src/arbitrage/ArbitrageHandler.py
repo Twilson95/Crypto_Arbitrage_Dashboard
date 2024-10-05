@@ -11,8 +11,9 @@ class ArbitrageHandler:
         arbitrages = ArbitrageHandler.identify_simple_arbitrage(
             currency, exchange_prices, currency_fees, exchange_fees, network_fees, funds
         )
+        # print("arbitrages", arbitrages)
         if not arbitrages:
-            return None
+            return {}
         # print("arbitrages", arbitrages)
         instruction_diagrams = []
         for arbitrage in arbitrages:
@@ -217,8 +218,10 @@ class ArbitrageHandler:
                 key=lambda x: x["summary_header"]["total_profit"],
                 reverse=True,  # Set to True for descending order, False for ascending
             )
-        else:
+        elif closest_opportunity is not None:
             return [closest_opportunity]
+        else:
+            return None
 
     @staticmethod
     def create_arbitrage_simple_instructions_data(opportunity, input_funds):

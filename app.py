@@ -233,19 +233,23 @@ def update_arbitrage_graphs(
         )
     else:
         main_chart, instructions = {}, {}
+
     # end_time = time()
     # print(end_time - start_time)
     return main_chart, instructions
 
 
 def simple_arbitrage_graphs(currency, funds):
+    if currency is None:
+        return {}, {}
+
     prices = data_manager.get_live_prices_for_all_exchanges(currency)
     currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(currency)
     exchange_fees = data_manager.get_withdrawal_deposit_fees_for_all_exchanges()
     network_fees = data_manager.get_network_fees(currency)
 
     if not prices:
-        return {}
+        return {}, {}
 
     prices = {
         exchange: price_list
@@ -269,6 +273,9 @@ def simple_arbitrage_graphs(currency, funds):
 
 
 def triangular_arbitrage_graphs(exchange, funds):
+    if exchange is None:
+        return {}, {}
+
     prices, currency_fees = data_manager.get_live_prices_and_fees_for_single_exchange(
         exchange
     )
@@ -300,6 +307,9 @@ def triangular_arbitrage_graphs(exchange, funds):
 
 
 def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
+    if exchange is None or cointegration_pair_str is None:
+        return {}, {}
+
     cointegration_pair = ast.literal_eval(cointegration_pair_str)
     start_time = time()
     prices = data_manager.get_historical_prices_for_all_currencies(exchange)
@@ -309,7 +319,7 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
         exchange
     )
     got_prices = time()
-    print("got prices", got_prices - start_time)
+    # print("got prices", got_prices - start_time)
     arbitrage_opportunities = None
 
     if spreads:
@@ -323,7 +333,7 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
             window=30,
         )
     identify_arbitrage = time()
-    print("identify arbitrage", identify_arbitrage - got_prices)
+    # print("identify arbitrage", identify_arbitrage - got_prices)
 
     if not arbitrage_opportunities:
         return {}, {}
@@ -334,13 +344,13 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
         )
     )
     returned_instructions = time()
-    print("returned_instructions", returned_instructions - identify_arbitrage)
+    # print("returned_instructions", returned_instructions - identify_arbitrage)
 
     spread_chart, entry_dates, exit_dates = price_chart.plot_spread(
         spread["spread"], cointegration_pair, 30
     )
     plot_spread = time()
-    print("plot_spread", plot_spread - returned_instructions)
+    # print("plot_spread", plot_spread - returned_instructions)
     statistical_arbitrage_chart = PriceChart.plot_prices_and_spread(
         prices,
         cointegration_pair,
@@ -349,7 +359,7 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
         exit_dates,
     )
     plot_prices = time()
-    print("plot_prices", plot_prices - plot_spread)
+    # print("plot_prices", plot_prices - plot_spread)
 
     return (
         [
@@ -396,15 +406,27 @@ def update_filter_values(
     currency_data = data_manager.get_historical_prices_for_all_currencies(
         exchange_value
     )
-    currency_options = list(currency_data.keys())
-    if currency_value is None:
+    if currency_data is None:
+        currency_options = []
+    else:
+        currency_options = list(currency_data.keys())
+
+    if not currency_options:
+        currency_value = None
+    elif currency_value is None:
         currency_value = currency_options[0]
 
     spreads = data_manager.get_cointegration_spreads(exchange_value)
-    cointegration_pairs_str_options = sorted([str(tup) for tup in spreads.keys()])
+    if spreads is None:
+        cointegration_pairs_str_options = []
+    else:
+        cointegration_pairs_str_options = sorted([str(tup) for tup in spreads.keys()])
 
     if cointegration_value is None:
-        cointegration_value = cointegration_pairs_str_options[0]
+        if not cointegration_pairs_str_options:
+            cointegration_value = None
+        else:
+            cointegration_value = cointegration_pairs_str_options[0]
 
     return (
         exchange_options,
