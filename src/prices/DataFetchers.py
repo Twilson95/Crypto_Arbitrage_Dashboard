@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from itertools import permutations
 import pytz
 import re
+from time import time
 
 import pandas as pd
 from ccxt.base.errors import RateLimitExceeded
@@ -43,6 +44,7 @@ class DataFetcher:
             trading_fee = self.extract_currency_fee_simple(options)
 
             if trading_fee is None:
+                print(self.exchange_name, "extract_complex_fees")
                 trading_fee = await self.extract_currency_fee_complex(options)
 
             self.update_currency_fee(currency, trading_fee)
@@ -89,18 +91,20 @@ class DataFetcher:
 
         self.extract_exchange_fees()
         await self.extract_currency_fees()
+
         self.currency_fees = DataFetcher.generate_crypto_to_crypto_fees(
             self.currency_fees, self.inter_coin_symbols
         )
-        await self.update_all_historical_prices()
-        self.update_cointegration_pairs()
 
     def update_cointegration_pairs(self):
+        start_time = time()
         df = self.get_df_of_all_historical_prices()
         cointegration_pairs = CointegrationCalculator.find_cointegration_pairs(df)
         self.cointegration_spreads = CointegrationCalculator.calculate_all_spreads(
             df, cointegration_pairs
         )
+        end_time = time()
+        print(end_time - start_time, "time to generate cointegrity pairs")
 
     def initialize_ohlc_data(self, currency):
         self.historical_data[currency] = OHLCData()
@@ -131,12 +135,17 @@ class DataFetcher:
         ]
         await self._gather_with_timeout(tasks, "fetch_all_initial_live_prices")
 
-    async def update_all_historical_prices(self):
-        tasks = [
-            self.update_historical_prices(currency)
-            for currency in self.currencies.keys()
-        ]
-        await self._gather_with_timeout(tasks, "update_all_historical_prices")
+    async def update_all_historical_prices(self, batch_size=6, wait_time=10):
+        currencies = list(self.currencies.keys())
+        for i in range(0, len(currencies), batch_size):
+            batch = currencies[i : i + batch_size]
+            tasks = [self.update_historical_prices(currency) for currency in batch]
+            await self._gather_with_timeout(tasks, "update_all_historical_prices")
+
+            # Add a delay if there are more batches
+            if i + batch_size < len(currencies):
+                print(f"Waiting for {wait_time} seconds before the next batch...")
+                await asyncio.sleep(wait_time)
 
     async def fetch_initial_live_prices(self, currency, count):
         symbol = self.currencies[currency]
@@ -285,7 +294,7 @@ class DataFetcher:
         since = self.client.parse8601(
             (datetime.today() - timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
         )
-
+        print("getting", currency)
         try:
             data = await self.client.fetch_ohlcv(
                 symbol,
@@ -296,6 +305,8 @@ class DataFetcher:
             print(f"Rate limit exceeded: {e}")
             # Handle the rate limit case as needed, e.g., by waiting or retrying later
             return None
+
+        print("got", currency)
 
         df = pd.DataFrame(
             data, columns=["timestamp", "open", "high", "low", "close", "volume"]

@@ -41,7 +41,7 @@ class AppLayout:
                 html.Label("Exchange"),
                 dcc.Dropdown(
                     id="exchange-selector",
-                    options=self.filter_component.get_exchange_options(),
+                    options=[],
                     placeholder="Select an exchange",
                     value="Bitmex",
                 ),
@@ -56,7 +56,7 @@ class AppLayout:
                 html.Label("Currency"),
                 dcc.Dropdown(
                     id="currency-selector",
-                    options=self.filter_component.get_currency_options(),
+                    options=[],
                     placeholder="Select a currency",
                     value="BTC/USD",
                 ),

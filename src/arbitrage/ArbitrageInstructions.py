@@ -103,6 +103,8 @@ class ArbitrageInstructions:
     def build_statistical_summary_panel(summary_data):
         coins = summary_data["coins_used"]
         total_profit = summary_data["total_profit"]
+        if total_profit is None:
+            total_profit = 0
         summary_text = (
             f"Arbitrage Opportunity: Buy {coins[0]}, convert to {coins[1]} and sell for an "
             f"expected profit of ${total_profit:.2f} after fees."

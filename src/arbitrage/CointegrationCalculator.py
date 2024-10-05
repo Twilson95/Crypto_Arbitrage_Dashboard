@@ -33,9 +33,11 @@ class CointegrationCalculator:
                     CointegrationCalculator.test_cointegration(df, pair[0], pair[1])
                 )
 
+                # if p_value < 0.1:
+                #     print(column_1, column_2, p_value)
+
                 if p_value < 0.05:
                     cointegration_pairs.append(pair)
-                    # Mark this pair as considered
                     considered_pairs.add(pair)
 
         return cointegration_pairs

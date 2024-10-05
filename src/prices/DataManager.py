@@ -30,7 +30,6 @@ class DataManager:
             while True:
                 await self.fetch_all_live_prices()
                 await self.fetch_all_order_books()
-
                 await asyncio.sleep(self.sleep_time)  # Fetch every 10 seconds
 
         asyncio.run_coroutine_threadsafe(periodic_fetch(), self.loop)
@@ -82,10 +81,12 @@ class DataManager:
             markets = None
 
         data_fetcher = DataFetcher(exchange, exchange_name, pairs_mapping, markets)
-        self.exchanges[exchange_name] = data_fetcher
         await data_fetcher.async_init()
-
+        self.exchanges[exchange_name] = data_fetcher
         print(f"{exchange_name} initialized successfully")
+
+        await data_fetcher.update_all_historical_prices()
+        data_fetcher.update_cointegration_pairs()
 
     async def extract_currency_fees(self, exchange, exchange_name, currencies):
         for currency, symbol in currencies.items():
@@ -186,6 +187,9 @@ class DataManager:
 
     def get_network_fees(self, currency):
         return self.network_fees[currency]
+
+    def get_exchanges(self):
+        return list(self.exchanges.keys())
 
     def get_live_prices_and_fees_for_single_exchange(self, exchange_name):
         exchange = self.exchanges[exchange_name]

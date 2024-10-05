@@ -716,6 +716,9 @@ class ArbitrageHandler:
                 exit_points.append((spread.index[i], spread.iloc[i]))
                 below_lower = False
 
+        while len(exit_points) < len(entry_points):
+            exit_points.append((None, None))
+
         drawing_instructions = {
             "entry_points": entry_points,
             "exit_points": exit_points,
@@ -1049,6 +1052,18 @@ class ArbitrageHandler:
             "to_usd": usd_after_buy,
         }
 
+        buy_fee_usd = fees_buy_coin * entry_price  # Convert buy fees to USD
+
+        if exit_price is None:
+            return (
+                [buy_instruction],
+                usd_after_buy,
+                None,
+                change_in_usd_buy,
+                amount_buy_coin,
+                None,
+            )
+
         # Exit: Sell Coin1
         amount_sell_coin = net_buy_coin
         fees_sell_coin = amount_sell_coin * currency_fee
@@ -1070,7 +1085,6 @@ class ArbitrageHandler:
         }
 
         # Calculate the total fees (fees in USD)
-        buy_fee_usd = fees_buy_coin * entry_price  # Convert buy fees to USD
         sell_fee_usd = fees_sell_coin * exit_price  # Convert sell fees to USD
         total_fees_usd = buy_fee_usd + sell_fee_usd  # Sum of all fees
         profit = usd_after_sell - usd_start
@@ -1119,6 +1133,15 @@ class ArbitrageHandler:
             "from_usd": amount_sell_coin * entry_price,
             "to_usd": None,  # Adjust for fee impact
         }
+
+        if exit_price is None:
+            return (
+                [sell_short_instruction],
+                usd_after_sell_short,
+                None,
+                change_in_usd_sell_short,
+                None,
+            )
 
         # Exit: Buy to cover Coin (buy back the coin to cover the short)
         # Use the hedge ratio to ensure we cover the correct amount based on the original short position
@@ -1232,6 +1255,8 @@ class ArbitrageHandler:
         exit_price_coin2,
         hedge_ratio,
     ):
+        if exit_price_coin1 is None:
+            return 0
 
         potential_profit = (usd_start / entry_price_coin1) * (
             exit_price_coin1 - entry_price_coin1
@@ -1265,8 +1290,13 @@ class ArbitrageHandler:
         # Look up the actual prices for the entry and exit times
         entry_price_coin1 = price_df.loc[entry_time, pair1]
         entry_price_coin2 = price_df.loc[entry_time, pair2]
-        exit_price_coin1 = price_df.loc[exit_time, pair1]
-        exit_price_coin2 = price_df.loc[exit_time, pair2]
+
+        if exit_time is not None:
+            exit_price_coin1 = price_df.loc[exit_time, pair1]
+            exit_price_coin2 = price_df.loc[exit_time, pair2]
+        else:
+            exit_price_coin1 = None
+            exit_price_coin2 = None
 
         if hedge_ratio < 0:
             # hedge_ratio = 1 / hedge_ratio
@@ -1324,16 +1354,20 @@ class ArbitrageHandler:
             amount_buy_coin1,
         )
 
-        total_profit = coin1_profit + coin2_profit
+        if coin1_profit is not None:
+            total_profit = coin1_profit + coin2_profit
+        else:
+            total_profit = None
 
         # Combine instructions from both trades
         combined_instructions = [
             instructions_coin1[0],
             instructions_coin2[0],
             wait_instruction,
-            instructions_coin1[1],
-            instructions_coin2[1],
         ]
+        if len(instructions_coin1) > 1:
+            combined_instructions.append(instructions_coin1[1])
+            combined_instructions.append(instructions_coin2[1])
 
         # Calculate total and potential profit
         potential_profit = ArbitrageHandler.calculate_potential_profit(
