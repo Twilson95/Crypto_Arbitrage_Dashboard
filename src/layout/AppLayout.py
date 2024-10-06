@@ -41,7 +41,7 @@ class AppLayout:
                 html.Label("Exchange"),
                 dcc.Dropdown(
                     id="exchange-selector",
-                    options=self.filter_component.get_exchange_options(),
+                    options=[],
                     placeholder="Select an exchange",
                     value="Bitmex",
                 ),
@@ -56,7 +56,7 @@ class AppLayout:
                 html.Label("Currency"),
                 dcc.Dropdown(
                     id="currency-selector",
-                    options=self.filter_component.get_currency_options(),
+                    options=[],
                     placeholder="Select a currency",
                     value="BTC/USD",
                 ),
@@ -98,27 +98,26 @@ class AppLayout:
             style=filter_style,
         )
 
-        # log_marks = generate_log_marks()
-        # funds_slider = html.Div(
-        #     [
-        #         html.Label("Funds"),
-        #         dcc.Slider(
-        #             id="funds-slider",
-        #             min=0,
-        #             max=100_000,
-        #             step=0.1,
-        #             value=1,
-        #             marks=None,
-        #             tooltip={
-        #                 "placement": "bottom",
-        #                 "always_visible": True,
-        #             },  # Tooltip to show value
-        #         ),
-        #     ],
-        #     title="Funds",
-        #     id="funds-slider-container",  # New container div for the slider
-        #     style=filter_style,  # Initialize with display set to 'none'
-        # )
+        p_value_slider = html.Div(
+            [
+                html.Label("P Value"),
+                dcc.Slider(
+                    id="p-value-slider",
+                    min=0,
+                    max=1,
+                    step=0.01,
+                    value=0.05,
+                    marks=None,
+                    tooltip={
+                        "placement": "bottom",
+                        "always_visible": True,
+                    },
+                ),
+            ],
+            title="P_Value",
+            id="p-value-slider-container",
+            style=filter_style,
+        )
 
         funds_input = html.Div(
             [
@@ -159,6 +158,7 @@ class AppLayout:
             currency_filter,
             indicator_filter,
             cointegration_filter,
+            p_value_slider,
             # funds_slider,
             funds_input,
         ]

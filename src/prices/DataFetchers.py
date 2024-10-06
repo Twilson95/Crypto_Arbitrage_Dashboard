@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from itertools import permutations
 import pytz
 import re
+from time import time
 
 import pandas as pd
 from ccxt.base.errors import RateLimitExceeded
@@ -21,10 +22,11 @@ class DataFetcher:
         self.exchange_fees = {}
         self.historical_data = {}
         self.live_data = {}
+        self.cointegration_pairs = {}
         self.cointegration_spreads = {}
         self.order_books = {}
         self.market_symbols = []
-        self.timeout = 10
+        self.timeout = 60
         self.markets = markets
 
     def extract_exchange_fees(self):
@@ -43,6 +45,7 @@ class DataFetcher:
             trading_fee = self.extract_currency_fee_simple(options)
 
             if trading_fee is None:
+                print(self.exchange_name, "extract_complex_fees")
                 trading_fee = await self.extract_currency_fee_complex(options)
 
             self.update_currency_fee(currency, trading_fee)
@@ -89,22 +92,26 @@ class DataFetcher:
 
         self.extract_exchange_fees()
         await self.extract_currency_fees()
+
         self.currency_fees = DataFetcher.generate_crypto_to_crypto_fees(
             self.currency_fees, self.inter_coin_symbols
         )
-        await self.update_all_historical_prices()
-        self.update_cointegration_pairs()
 
     def update_cointegration_pairs(self):
+        start_time = time()
         df = self.get_df_of_all_historical_prices()
-        cointegration_pairs = CointegrationCalculator.find_cointegration_pairs(df)
-        self.cointegration_spreads = CointegrationCalculator.calculate_all_spreads(
-            df, cointegration_pairs
-        )
+        self.cointegration_pairs = CointegrationCalculator.find_cointegration_pairs(df)
+        # self.cointegration_spreads = CointegrationCalculator.calculate_all_spreads(
+        #     df, cointegration_pairs
+        # )
+        end_time = time()
+        print(end_time - start_time, "time to generate cointegrity pairs")
 
-    def initialize_ohlc_data(self, currency):
-        self.historical_data[currency] = OHLCData()
+    def initialize_live_data(self, currency):
         self.live_data[currency] = OHLCData()
+
+    def initialize_historic_data(self, currency):
+        self.historical_data[currency] = OHLCData()
 
     def get_historical_prices(self, currency):
         return self.historical_data.get(currency)
@@ -131,12 +138,18 @@ class DataFetcher:
         ]
         await self._gather_with_timeout(tasks, "fetch_all_initial_live_prices")
 
-    async def update_all_historical_prices(self):
-        tasks = [
-            self.update_historical_prices(currency)
-            for currency in self.currencies.keys()
-        ]
-        await self._gather_with_timeout(tasks, "update_all_historical_prices")
+    async def update_all_historical_prices(self, batch_size=6, wait_time=10):
+        currencies = list(self.currencies.keys())
+        for i in range(0, len(currencies), batch_size):
+            batch = currencies[i : i + batch_size]
+            tasks = [self.update_historical_prices(currency) for currency in batch]
+            await self._gather_with_timeout(tasks, "update_all_historical_prices")
+            self.update_cointegration_pairs()
+
+            # Add a delay if there are more batches
+            # if i + batch_size < len(currencies):
+            #     print(f"Waiting for {wait_time} seconds before the next batch...")
+            #     await asyncio.sleep(wait_time)
 
     async def fetch_initial_live_prices(self, currency, count):
         symbol = self.currencies[currency]
@@ -148,7 +161,7 @@ class DataFetcher:
         ).reset_index()
 
         if currency not in self.live_data.keys():
-            self.initialize_ohlc_data(currency)
+            self.initialize_live_data(currency)
 
         self.live_data[currency].update_from_dataframe(ohlcv_df)
 
@@ -190,24 +203,84 @@ class DataFetcher:
 
         return ohlcv
 
-    async def fetch_all_live_prices(self):
-        all_currencies = self.currencies | self.inter_coin_symbols
-        if all_currencies is None:
-            return None
+    # async def fetch_all_live_prices(self):
+    #     all_currencies = self.currencies | self.inter_coin_symbols
+    #     if all_currencies is None:
+    #         return None
+    #
+    #     # bybit cannot mix different markets into same query
+    #     if self.exchange_name == "Bybit":
+    #         tasks = [self.fetch_live_price_multiple(self.currencies)] + [
+    #             self.fetch_live_price_multiple(self.inter_coin_symbols)
+    #         ]
+    #     elif self.client.has.get("fetchTickers"):
+    #         tasks = [self.fetch_live_price_multiple(all_currencies)]
+    #     else:
+    #         tasks = [
+    #             self.fetch_live_price(currency, symbol)
+    #             for currency, symbol in all_currencies.items()
+    #         ]
+    #     await self._gather_with_timeout(tasks, "fetch_all_live_prices")
 
-        # bybit cannot mix different markets into same query
-        if self.exchange_name == "Bybit":
-            tasks = [self.fetch_live_price_multiple(self.currencies)] + [
-                self.fetch_live_price_multiple(self.inter_coin_symbols)
-            ]
-        elif self.client.has.get("fetchTickers"):
-            tasks = [self.fetch_live_price_multiple(all_currencies)]
-        else:
+    @staticmethod
+    def create_batches(data_dict, batch_size):
+        items = list(data_dict.items())
+        return [
+            dict(items[i : i + batch_size]) for i in range(0, len(items), batch_size)
+        ]
+
+    async def fetch_all_live_prices(self, batch_size=20, delay_time=0):
+        # Collect all currencies (union of dictionaries)
+        all_currencies = {**self.currencies, **self.inter_coin_symbols}
+        if not all_currencies:
+            return
+
+        # If the exchange is not Bybit and does not support fetchTickers, handle it separately
+        if self.exchange_name != "Bybit" and not self.client.has.get("fetchTickers"):
             tasks = [
                 self.fetch_live_price(currency, symbol)
                 for currency, symbol in all_currencies.items()
             ]
-        await self._gather_with_timeout(tasks, "fetch_all_live_prices")
+            await self._gather_with_timeout(tasks, "fetch_all_live_prices_individual")
+            return
+
+        batches = []
+
+        if self.exchange_name == "Bybit":
+            # Batch self.currencies and self.inter_coin_symbols separately
+            currency_batches = DataFetcher.create_batches(self.currencies, batch_size)
+            intercoin_batches = DataFetcher.create_batches(
+                self.inter_coin_symbols, batch_size
+            )
+            batches.extend(currency_batches)
+            batches.extend(intercoin_batches)
+
+        elif self.client.has.get("fetchTickers"):
+            all_currency_batches = DataFetcher.create_batches(
+                all_currencies, batch_size
+            )
+            batches.extend(all_currency_batches)
+
+        for batch_number, batch in enumerate(batches):
+            print(
+                f"Running batch {batch_number + 1}/{len(batches)} with {len(batch)} items"
+            )
+
+            tasks = [self.fetch_live_price_multiple(batch)]
+
+            try:
+                await self._gather_with_timeout(
+                    tasks, f"fetch_all_live_prices_batch_{batch_number}"
+                )
+            except Exception as e:
+                print(f"Error occurred while processing batch {batch_number + 1}: {e}")
+
+            # Optionally, add a delay between batches to prevent overloading
+            if batch_number + 1 < len(batches):
+                print(f"Waiting {delay_time} seconds before the next batch...")
+                await asyncio.sleep(delay_time)
+
+        print("All batches completed.")
 
     async def fetch_live_price(self, currency, symbol):
         try:
@@ -233,7 +306,7 @@ class DataFetcher:
             datetime_obj = datetime.fromtimestamp(timestamp_s)
 
         if currency not in self.live_data.keys():
-            self.initialize_ohlc_data(currency)
+            self.initialize_live_data(currency)
 
         current_price = ticker["last"]
         self.live_data[currency].datetime.append(datetime_obj)
@@ -270,7 +343,7 @@ class DataFetcher:
                 datetime_obj = datetime.fromtimestamp(timestamp_s)
 
             if currency not in self.live_data.keys():
-                self.initialize_ohlc_data(currency)
+                self.initialize_live_data(currency)
 
             current_price = ticker["last"]
             self.live_data[currency].datetime.append(datetime_obj)
@@ -285,17 +358,22 @@ class DataFetcher:
         since = self.client.parse8601(
             (datetime.today() - timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
         )
-
+        # print("getting", currency)
         try:
-            data = await self.client.fetch_ohlcv(
-                symbol,
-                timeframe,
-                since,  # params={"until": 1719014400 * 1000}
+            data = await asyncio.wait_for(
+                self.client.fetch_ohlcv(symbol, timeframe, since), timeout=self.timeout
             )
+        except asyncio.TimeoutError:
+            print(f"Timeout for fetching {currency}. Skipping.")
+            return None
         except RateLimitExceeded as e:
             print(f"Rate limit exceeded: {e}")
-            # Handle the rate limit case as needed, e.g., by waiting or retrying later
             return None
+        except Exception as e:
+            print(f"Error fetching {currency}: {e}")
+            return None
+
+        # print("got", currency)
 
         df = pd.DataFrame(
             data, columns=["timestamp", "open", "high", "low", "close", "volume"]
@@ -303,12 +381,22 @@ class DataFetcher:
         df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
 
         if currency not in self.historical_data.keys():
-            self.initialize_ohlc_data(currency)
+            self.initialize_historic_data(currency)
 
         self.historical_data[currency].update_from_dataframe(df)
 
+    # async def _gather_with_timeout(self, tasks, task_name):
+    #     await asyncio.wait_for(asyncio.gather(*tasks), self.timeout)
+
     async def _gather_with_timeout(self, tasks, task_name):
-        await asyncio.wait_for(asyncio.gather(*tasks), self.timeout)
+        try:
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=self.timeout)
+        except asyncio.TimeoutError:
+            print(f"Timeout occurred while gathering tasks for {task_name}")
+            # Optionally handle the timeout, retry, or cancel tasks
+        except Exception as e:
+            print(f"Exception in {task_name}: {e}")
+            # Optionally handle other exceptions
 
     @staticmethod
     def generate_inter_coin_symbols(currencies, market_symbols):
@@ -446,9 +534,9 @@ class DataFetcher:
         dataframes = []
 
         # Loop through each currency to create a DataFrame with datetime as index
-        for currency in self.currencies:
-            datetime_values = self.historical_data[currency].datetime
-            closing_prices = self.historical_data[currency].close
+        for currency, historic_currency_data in self.historical_data.items():
+            datetime_values = historic_currency_data.datetime
+            closing_prices = historic_currency_data.close
 
             # Create a DataFrame for each currency with datetime as index
             df_currency = pd.DataFrame(
@@ -457,6 +545,9 @@ class DataFetcher:
 
             # Append the DataFrame to the list
             dataframes.append(df_currency)
+
+        if not dataframes:
+            return None
 
         # Concatenate all DataFrames along the datetime index
         df_combined = pd.concat(dataframes, axis=1, join="outer")
@@ -467,3 +558,6 @@ class DataFetcher:
 
     def get_cointegration_spreads(self):
         return self.cointegration_spreads
+
+    def get_cointegration_pairs(self):
+        return self.cointegration_pairs

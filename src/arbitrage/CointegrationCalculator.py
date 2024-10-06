@@ -7,10 +7,9 @@ class CointegrationCalculator:
 
     @staticmethod
     def find_cointegration_pairs(df):
-        cointegration_pairs = []
+        cointegration_pairs = {}
         # df = df.iloc[:100]  # Limit data to the first 100 rows for analysis
 
-        # To keep track of pairs we've already considered
         considered_pairs = set()
 
         for column_1 in df.columns:
@@ -18,7 +17,6 @@ class CointegrationCalculator:
                 if column_1 == column_2:
                     continue
 
-                # Create a sorted pair tuple
                 pair = tuple(
                     sorted(
                         [column_1, column_2], key=lambda x: df[x].mean(), reverse=True
@@ -33,10 +31,9 @@ class CointegrationCalculator:
                     CointegrationCalculator.test_cointegration(df, pair[0], pair[1])
                 )
 
-                if p_value < 0.05:
-                    cointegration_pairs.append(pair)
-                    # Mark this pair as considered
-                    considered_pairs.add(pair)
+                cointegration_pairs[pair] = p_value
+
+                considered_pairs.add(pair)
 
         return cointegration_pairs
 
@@ -73,7 +70,7 @@ class CointegrationCalculator:
         spread = prices1 - hedge_ratio * prices2
         spread = spread.dropna()
 
-        return spread, hedge_ratio
+        return {"spread": spread, "hedge_ratio": hedge_ratio}
 
     @staticmethod
     def identify_arbitrage_opportunities(spread, threshold=2):
