@@ -361,7 +361,7 @@ class DataFetcher:
         # print("getting", currency)
         try:
             data = await asyncio.wait_for(
-                self.client.fetch_ohlcv(symbol, timeframe, since), timeout=30
+                self.client.fetch_ohlcv(symbol, timeframe, since), timeout=self.timeout
             )
         except asyncio.TimeoutError:
             print(f"Timeout for fetching {currency}. Skipping.")

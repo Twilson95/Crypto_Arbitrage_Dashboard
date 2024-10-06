@@ -116,30 +116,8 @@ class AppLayout:
             ],
             title="P_Value",
             id="p-value-slider-container",
-            style=filter_style,  # Initialize with display set to 'none'
+            style=filter_style,
         )
-
-        # log_marks = generate_log_marks()
-        # funds_slider = html.Div(
-        #     [
-        #         html.Label("Funds"),
-        #         dcc.Slider(
-        #             id="funds-slider",
-        #             min=0,
-        #             max=100_000,
-        #             step=0.1,
-        #             value=1,
-        #             marks=None,
-        #             tooltip={
-        #                 "placement": "bottom",
-        #                 "always_visible": True,
-        #             },  # Tooltip to show value
-        #         ),
-        #     ],
-        #     title="Funds",
-        #     id="funds-slider-container",  # New container div for the slider
-        #     style=filter_style,  # Initialize with display set to 'none'
-        # )
 
         funds_input = html.Div(
             [

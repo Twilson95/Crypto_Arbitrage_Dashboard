@@ -434,9 +434,7 @@ def update_filter_values(
     significant_pairs = {}
     if pairs:
         significant_pairs = [
-            (pair[0], pair[1], "p_val " + str(round(value, 2)))
-            for pair, value in pairs.items()
-            if value <= p_value
+            (pair[0], pair[1]) for pair, value in pairs.items() if value <= p_value
         ]
 
     if not significant_pairs:

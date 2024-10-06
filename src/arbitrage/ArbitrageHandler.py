@@ -11,10 +11,9 @@ class ArbitrageHandler:
         arbitrages = ArbitrageHandler.identify_simple_arbitrage(
             currency, exchange_prices, currency_fees, exchange_fees, network_fees, funds
         )
-        # print("arbitrages", arbitrages)
         if not arbitrages:
             return {}
-        # print("arbitrages", arbitrages)
+
         instruction_diagrams = []
         for arbitrage in arbitrages:
             arbitrage_instructions = ArbitrageInstructions(arbitrage)
@@ -26,12 +25,10 @@ class ArbitrageHandler:
     def calculate_buy_step(
         buy_exchange, currency, buy_price, input_funds, buy_taker_fee
     ):
-        # Calculate the amount of crypto bought
         buy_fees = input_funds * buy_taker_fee
         to_crypto = (input_funds - buy_fees) / buy_price
         to_usd = to_crypto * buy_price
 
-        # Return the result in a structured format
         return {
             "instruction": "buy",
             "from_exchange": buy_exchange,
@@ -95,12 +92,9 @@ class ArbitrageHandler:
     def calculate_sell_step(
         sell_exchange, currency, from_crypto, from_usd, sell_price, sell_taker_fee
     ):
-
-        # Calculate the amount of USD received after selling the crypto
         sell_fees = from_crypto * sell_taker_fee
         to_usd = (from_crypto - sell_fees) * sell_price
 
-        # Return the result in a structured format
         return {
             "instruction": "sell",
             "from_exchange": sell_exchange,
@@ -137,12 +131,7 @@ class ArbitrageHandler:
         for buy_exchange, prices_buy in exchange_prices.items():
             buy_taker_fee = currency_fees.get(buy_exchange, {}).get("taker", 0)
             withdraw_fee = exchange_fees.get(buy_exchange, {}).get("withdraw", 0)
-
-            close_price_buy = prices_buy.close
-            # if len(close_price_buy) == 0:
-            #     print(buy_exchange, "has no prices")
-            #     continue
-            buy_price = close_price_buy[-1]
+            buy_price = prices_buy.close[-1]
 
             for sell_exchange, prices_sell in exchange_prices.items():
                 if sell_exchange == buy_exchange:
@@ -150,14 +139,7 @@ class ArbitrageHandler:
 
                 sell_taker_fee = currency_fees.get(sell_exchange, {}).get("taker", 0)
                 deposit_fee = exchange_fees.get(sell_exchange, {}).get("deposit", 0)
-
-                close_price_sell = prices_sell.close
-                # if len(close_price_sell) == 0:
-                #     print(sell_exchange, "has no prices")
-                #     continue
-
-                sell_price = close_price_sell[-1]
-                network_fee_usd = network_fees * sell_price
+                sell_price = prices_sell.close[-1]
 
                 # Calculate the Buy Step
                 buy_instruction = ArbitrageHandler.calculate_buy_step(
@@ -199,7 +181,6 @@ class ArbitrageHandler:
                 potential_revenue = amount_bought * sell_price
                 price_delta = potential_revenue - input_funds
 
-                # Calculate the waterfall data with fees reflecting the funds at each step
                 waterfall_data = {
                     "Price Delta": price_delta,
                     "Buy Fees": -buy_instruction["buy_fees"],
@@ -211,7 +192,6 @@ class ArbitrageHandler:
                     "Sell Fees": -sell_instruction["sell_fees"],
                 }
 
-                # Create the summary header
                 summary_header = {
                     "total_profit": arbitrage_profit,
                     "currency": currency.split("/"),
@@ -249,114 +229,6 @@ class ArbitrageHandler:
             return [closest_opportunity]
         else:
             return None
-
-    @staticmethod
-    def create_arbitrage_simple_instructions_data(opportunity, input_funds):
-        # Extract data
-        currency_pair = opportunity["currency"]
-        buy_exchange = opportunity["buy_exchange"]
-        sell_exchange = opportunity["sell_exchange"]
-        total_profit = opportunity["profit"]
-
-        # Summary Header
-        summary_header = {
-            "total_profit": total_profit,
-            "currency": currency_pair,
-            "exchanges_used": [buy_exchange, sell_exchange],
-        }
-
-        # Waterfall Plot Data
-        waterfall_data = {
-            "Price Delta": opportunity["sell_price"] - opportunity["buy_price"],
-            "Buy Fees": -opportunity["buy_price"] * opportunity["buy_taker_fee"],
-            "Withdraw Fee": -opportunity["buy_withdraw_fee"],
-            "Network Fee": -opportunity["network_fees_usd"],
-            "Deposit Fee": -opportunity["effective_sell_price"]
-            * opportunity["sell_deposit_fee"],
-            "Sell Fees": -opportunity["effective_sell_price"]
-            * opportunity["sell_taker_fee"],
-        }
-
-        # Instructions
-        instructions = []
-
-        # Buy Step
-        from_usd = input_funds
-        fees = opportunity["buy_price"] * opportunity["buy_taker_fee"]
-        to_crypto = (from_usd - fees) / opportunity[
-            "buy_price"
-        ]  # Convert USD to Crypto
-        to_usd = to_crypto * opportunity["buy_price"]
-        funds = to_usd
-
-        instructions.append(
-            {
-                "instruction": "buy",
-                "from_exchange": buy_exchange,
-                "from_currency": "USD",
-                "from_amount": from_usd,
-                "to_exchange": buy_exchange,
-                "to_currency": currency_pair[0],
-                "to_amount": to_crypto,
-                "change_in_usd": to_usd - from_usd,
-                "from_usd": None,
-                "to_usd": to_usd,
-            }
-        )
-
-        # Transfer Step (if applicable)
-        if opportunity["network_fees_crypto"] > 0:
-            from_crypto = to_crypto
-            from_usd = funds
-            to_crypto = from_crypto * (1 - opportunity["buy_withdraw_fee"])
-            to_crypto -= opportunity["network_fees_crypto"]
-            to_crypto *= 1 - opportunity["sell_deposit_fee"]
-
-            to_usd = to_crypto * opportunity["sell_price"]
-            fees = from_usd - to_usd
-
-            instructions.append(
-                {
-                    "instruction": "transfer",
-                    "from_exchange": buy_exchange,
-                    "from_currency": currency_pair[0],
-                    "from_amount": from_crypto,
-                    "to_exchange": sell_exchange,
-                    "to_currency": currency_pair[0],
-                    "to_amount": to_crypto,
-                    "change_in_usd": to_usd - from_usd,
-                    "from_usd": from_usd,
-                    "to_usd": to_usd,
-                }
-            )
-
-        # Sell Step
-        from_crypto = to_crypto
-        from_usd = to_usd
-
-        fees = opportunity["effective_sell_price"] * opportunity["sell_taker_fee"]
-        to_usd = from_crypto * opportunity["sell_price"] - fees
-
-        instructions.append(
-            {
-                "instruction": "sell",
-                "from_exchange": sell_exchange,
-                "from_currency": currency_pair[0],
-                "from_amount": from_crypto,
-                "to_exchange": sell_exchange,
-                "to_currency": "USD",
-                "to_amount": to_usd,
-                "change_in_usd": to_usd - from_usd,
-                "from_usd": from_usd,
-                "to_usd": None,
-            }
-        )
-
-        return {
-            "summary_header": summary_header,
-            "waterfall_data": waterfall_data,
-            "instructions": instructions,
-        }
 
     @staticmethod
     def return_triangle_arbitrage_instructions(arbitrages):
@@ -411,7 +283,6 @@ class ArbitrageHandler:
             if reversed_pair in prices:
                 return 1 / prices[reversed_pair]
         return None
-        # return prices.get(pair)
 
     @staticmethod
     def calculate_fees(currency_fees, pair, amount, fee_type="taker"):
@@ -482,13 +353,10 @@ class ArbitrageHandler:
             )
             usd_end = (coin2_after_fees - fees3_coin) * rate3
 
-            # Calculate change in USD for the sell step
             change_in_usd_sell = usd_end - usd_after_transfer
 
-            # Calculate profit
             profit = usd_end - usd_start
 
-            # Create instructions for each step of the arbitrage
             instructions = []
 
             # 1. Buy step (USD -> Coin1)
@@ -539,7 +407,6 @@ class ArbitrageHandler:
                 }
             )
 
-            # Calculate the waterfall data
             potential_profit = usd_start * (rate1 * rate2 * rate3 - 1)
             waterfall_data = {
                 "Potential Profit": potential_profit,
@@ -580,107 +447,6 @@ class ArbitrageHandler:
         else:
             # Return the closest non-profitable opportunity
             return [closest_opportunity]
-
-    @staticmethod
-    def create_arbitrage_triangular_instructions_data(opportunity):
-        instructions = []
-
-        # Extract data from opportunity
-        coin1, coin2 = opportunity["path"][1], opportunity["path"][2]
-        rate1, rate2, rate3 = opportunity["conversion_rates"]
-        fees1_usd, fees2_usd, fees3_usd = opportunity["fees_usd"]
-        fees1_coin, fees2_coin, fees3_coin = opportunity["fees_coin"]
-        total_profit = opportunity["profit"]
-        potential_profit = opportunity["potential_profit_before_fees"]
-        exchange = opportunity["exchange"]
-
-        # 1. Buy step (USD -> Coin1)
-        from_amount = 1 / rate1
-        to_amount = (from_amount - fees1_coin) * rate1  # Convert USD to Coin1
-        to_usd = from_amount - fees1_usd
-
-        instructions.append(
-            {
-                "instruction": "buy",
-                "from_exchange": exchange,
-                "from_currency": "usd",
-                "from_amount": from_amount,
-                "to_exchange": exchange,
-                "to_currency": coin1,
-                "to_amount": to_amount,
-                "total_fees": fees1_usd,
-                "from_usd": None,
-                "to_usd": to_usd,
-            }
-        )
-
-        # Update from_usd for the next step
-        from_usd = to_usd
-
-        from_amount = to_amount
-        to_amount = (from_amount - fees2_coin) * rate2  # Convert USD to Coin1
-        # to_usd = to_amount * rate3
-        to_usd = from_usd - fees2_usd
-
-        instructions.append(
-            {
-                "instruction": "transfer",
-                "from_exchange": exchange,
-                "from_currency": coin1,
-                "from_amount": from_amount,
-                "to_exchange": exchange,
-                "to_currency": coin2,
-                "to_amount": to_amount,
-                "total_fees": -(to_usd - from_usd),
-                "from_usd": from_usd,
-                "to_usd": to_usd,
-            }
-        )
-
-        # Update from_usd for the next step
-        from_usd = to_usd
-
-        from_amount = to_amount
-        # to_amount = (from_amount - fees3_coin) * rate3  # Convert USD to Coin1
-        to_usd = from_usd - fees3_usd
-        to_amount = to_usd
-
-        instructions.append(
-            {
-                "instruction": "sell",
-                "from_exchange": exchange,
-                "from_currency": coin2,
-                "from_amount": from_amount,
-                "to_exchange": exchange,
-                "to_currency": "usd",
-                "to_amount": to_amount,
-                "total_fees": fees3_usd,
-                "from_usd": from_usd,
-                "to_usd": None,
-            }
-        )
-
-        # Calculate the waterfall data
-        waterfall_data = {
-            "Potential Profit": potential_profit,
-            "Buy Fees": -fees1_usd,
-            "Transfer Fees": -fees2_usd,
-            "Sell Fees": -fees3_usd,
-        }
-
-        # Create the summary header
-        summary_header = {
-            "total_profit": total_profit,
-            "coins_used": [coin1, coin2],
-            "exchanges_used": exchange,
-        }
-
-        return {
-            "summary_header": summary_header,
-            "waterfall_data": waterfall_data,
-            "instructions": instructions,
-            "path": [("USD", coin1), (coin1, coin2), (coin2, "USD")],
-        }
 
     @staticmethod
     def identify_all_statistical_arbitrage(
@@ -1065,9 +831,8 @@ class ArbitrageHandler:
         amount_buy_coin = usd_start / entry_price
         fees_buy_coin = amount_buy_coin * currency_fee
         net_buy_coin = amount_buy_coin - fees_buy_coin
-
-        change_in_usd_buy = -fees_buy_coin  # Change in USD is just the fees paid
-        usd_after_buy = usd_start + change_in_usd_buy  # Adjusted USD after buy
+        usd_after_buy = net_buy_coin * entry_price
+        change_in_usd_buy = usd_after_buy - usd_start
 
         buy_instruction = {
             "instruction": "buy",
@@ -1089,7 +854,7 @@ class ArbitrageHandler:
                 [buy_instruction],
                 usd_after_buy,
                 None,
-                change_in_usd_buy,
+                buy_fee_usd,
                 amount_buy_coin,
                 None,
             )
@@ -1119,12 +884,11 @@ class ArbitrageHandler:
         total_fees_usd = buy_fee_usd + sell_fee_usd  # Sum of all fees
         profit = usd_after_sell - usd_start
 
-        # Return instructions and final USD amount
         return (
             [buy_instruction, sell_instruction],
             usd_after_buy,
             usd_after_sell,
-            total_fees_usd,  # Corrected total fees in USD
+            total_fees_usd,
             amount_buy_coin,
             profit,
         )
@@ -1169,7 +933,7 @@ class ArbitrageHandler:
                 [sell_short_instruction],
                 usd_after_sell_short,
                 None,
-                change_in_usd_sell_short,
+                fees_sell_coin * entry_price,
                 None,
             )
 
@@ -1262,10 +1026,13 @@ class ArbitrageHandler:
         pair2,
         exchange,
     ):
+        total_fees = coin1_fees_usd + coin2_fees_usd
+        potential_profit = total_profit + total_fees
+
         waterfall_data = {
             "Potential Profit": potential_profit,
-            "Buy Fees": -coin1_fees_usd,
-            "Sell Fees": -coin2_fees_usd,
+            "Coin-1 Fees": -coin1_fees_usd,
+            "Coin-2 Fees": -coin2_fees_usd,
         }
 
         summary_header = {
@@ -1294,7 +1061,7 @@ class ArbitrageHandler:
             entry_price_coin2 - exit_price_coin2
         )
 
-        return potential_profit  # You can add further logic to calculate the actual total profit
+        return potential_profit
 
     @staticmethod
     def statistical_arbitrage_iteration(
@@ -1387,7 +1154,7 @@ class ArbitrageHandler:
         if coin1_profit is not None:
             total_profit = coin1_profit + coin2_profit
         else:
-            total_profit = None
+            total_profit = 0
 
         # Combine instructions from both trades
         combined_instructions = [
