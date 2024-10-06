@@ -13,6 +13,7 @@ from src.arbitrage.ArbitrageHandler import ArbitrageHandler
 from src.news.NewsFetcher import NewsFetcher
 from src.news.NewsChart import NewsChart
 from src.prices.NetworkGraph import create_network_graph
+from src.arbitrage.CointegrationCalculator import CointegrationCalculator
 
 from dash_bootstrap_templates import load_figure_template
 from time import time
@@ -58,6 +59,7 @@ price_chart = PriceChart()
         Output("indicator-selector-container", "style"),
         Output("arbitrage-filter-container", "style"),
         Output("cointegration-selector-container", "style"),
+        Output("p-value-slider-container", "style"),
         Output("funds-input-container", "style"),
     ],
     [Input("tabs", "value")],
@@ -69,6 +71,7 @@ price_chart = PriceChart()
         State("indicator-selector-container", "style"),
         State("arbitrage-filter-container", "style"),
         State("cointegration-selector-container", "style"),
+        State("p-value-slider-container", "style"),
         State("funds-input-container", "style"),
         Input("arbitrage-selector", "value"),
     ],
@@ -82,6 +85,7 @@ def render_tab_content(
     indicator_filter_style,
     arbitrage_filter_style,
     cointegration_filter_style,
+    p_value_slider_style,
     funds_input_style,
     arbitrage_filter_value,
 ):
@@ -93,6 +97,7 @@ def render_tab_content(
         indicator_filter_style["display"] = "block"
         arbitrage_filter_style["display"] = "none"
         cointegration_filter_style["display"] = "none"
+        p_value_slider_style["display"] = "none"
         funds_input_style["display"] = "none"
     elif active_tab == "tab-2":
         grid_style["display"] = "none"
@@ -101,14 +106,17 @@ def render_tab_content(
             exchange_filter_style["display"] = "block"
             currency_filter_style["display"] = "none"
             cointegration_filter_style["display"] = "none"
+            p_value_slider_style["display"] = "none"
         elif arbitrage_filter_value == "statistical":
             exchange_filter_style["display"] = "block"
             currency_filter_style["display"] = "none"
             cointegration_filter_style["display"] = "block"
+            p_value_slider_style["display"] = "block"
         else:
             exchange_filter_style["display"] = "none"
             currency_filter_style["display"] = "block"
             cointegration_filter_style["display"] = "none"
+            p_value_slider_style["display"] = "none"
 
         indicator_filter_style["display"] = "none"
         arbitrage_filter_style["display"] = "block"
@@ -122,6 +130,7 @@ def render_tab_content(
         indicator_filter_style,
         arbitrage_filter_style,
         cointegration_filter_style,
+        p_value_slider_style,
         funds_input_style,
     )
 
@@ -313,8 +322,12 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
     cointegration_pair = ast.literal_eval(cointegration_pair_str)
     start_time = time()
     prices = data_manager.get_historical_prices_for_all_currencies(exchange)
-    spreads = data_manager.get_cointegration_spreads(exchange)
-    spread = spreads.get(cointegration_pair)
+
+    spread = CointegrationCalculator.calculate_spread(
+        prices, cointegration_pair[0], cointegration_pair[1]
+    )
+    cointegration_pair = (cointegration_pair[0], cointegration_pair[1])
+
     _, currency_fees = data_manager.get_live_prices_and_fees_for_single_exchange(
         exchange
     )
@@ -322,7 +335,7 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
     # print("got prices", got_prices - start_time)
     arbitrage_opportunities = None
 
-    if spreads:
+    if spread:
         arbitrage_opportunities = ArbitrageHandler.identify_all_statistical_arbitrage(
             prices,
             cointegration_pair,
@@ -383,11 +396,12 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
         Input("exchange-selector", "value"),
         Input("currency-selector", "value"),
         Input("cointegration-pairs-input", "value"),
+        Input("p-value-slider", "value"),
         Input("interval-component", "n_intervals"),
     ],
 )
 def update_filter_values(
-    exchange_value, currency_value, cointegration_value, n_intervals
+    exchange_value, currency_value, cointegration_value, p_value, n_intervals
 ):
     exchange_options = data_manager.get_exchanges()
     if not exchange_options:
@@ -416,11 +430,21 @@ def update_filter_values(
     elif currency_value is None:
         currency_value = currency_options[0]
 
-    spreads = data_manager.get_cointegration_spreads(exchange_value)
-    if spreads is None:
+    pairs = data_manager.get_exchanges_cointegration_pairs(exchange_value)
+    significant_pairs = {}
+    if pairs:
+        significant_pairs = [
+            (pair[0], pair[1], "p_val " + str(round(value, 2)))
+            for pair, value in pairs.items()
+            if value <= p_value
+        ]
+
+    if not significant_pairs:
         cointegration_pairs_str_options = []
     else:
-        cointegration_pairs_str_options = sorted([str(tup) for tup in spreads.keys()])
+        cointegration_pairs_str_options = sorted(
+            [str(tup) for tup in significant_pairs]
+        )
 
     if cointegration_value is None:
         if not cointegration_pairs_str_options:

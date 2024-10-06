@@ -30,7 +30,7 @@ class DataManager:
             while True:
                 await self.fetch_all_live_prices()
                 await self.fetch_all_order_books()
-                await asyncio.sleep(self.sleep_time)  # Fetch every 10 seconds
+                await asyncio.sleep(self.sleep_time)
 
         asyncio.run_coroutine_threadsafe(periodic_fetch(), self.loop)
 
@@ -86,7 +86,7 @@ class DataManager:
         print(f"{exchange_name} initialized successfully")
 
         await data_fetcher.update_all_historical_prices()
-        data_fetcher.update_cointegration_pairs()
+        # data_fetcher.update_cointegration_pairs()
 
     async def extract_currency_fees(self, exchange, exchange_name, currencies):
         for currency, symbol in currencies.items():
@@ -158,7 +158,7 @@ class DataManager:
         return self.network_fees_config["default_network_fees"]
 
     def get_network_fees(self, currency):
-        return self.network_fees[currency]
+        return self.network_fees.get(currency, 0)
 
     def get_exchanges(self):
         return list(self.exchanges.keys())
@@ -182,9 +182,16 @@ class DataManager:
         prices = data_fetcher.get_df_of_all_historical_prices()
         return prices
 
-    def get_cointegration_spreads(self, exchange_name):
+    def get_exchanges_cointegration_spreads(self, exchange_name):
         data_fetcher = self.exchanges.get(exchange_name)
         if not data_fetcher:
             return None
-        cointegration_pairs = data_fetcher.get_cointegration_spreads()
+        cointegration_spreads = data_fetcher.get_cointegration_spreads()
+        return cointegration_spreads
+
+    def get_exchanges_cointegration_pairs(self, exchange_name):
+        data_fetcher = self.exchanges.get(exchange_name)
+        if not data_fetcher:
+            return None
+        cointegration_pairs = data_fetcher.get_cointegration_pairs()
         return cointegration_pairs

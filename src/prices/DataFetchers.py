@@ -22,6 +22,7 @@ class DataFetcher:
         self.exchange_fees = {}
         self.historical_data = {}
         self.live_data = {}
+        self.cointegration_pairs = {}
         self.cointegration_spreads = {}
         self.order_books = {}
         self.market_symbols = []
@@ -99,10 +100,10 @@ class DataFetcher:
     def update_cointegration_pairs(self):
         start_time = time()
         df = self.get_df_of_all_historical_prices()
-        cointegration_pairs = CointegrationCalculator.find_cointegration_pairs(df)
-        self.cointegration_spreads = CointegrationCalculator.calculate_all_spreads(
-            df, cointegration_pairs
-        )
+        self.cointegration_pairs = CointegrationCalculator.find_cointegration_pairs(df)
+        # self.cointegration_spreads = CointegrationCalculator.calculate_all_spreads(
+        #     df, cointegration_pairs
+        # )
         end_time = time()
         print(end_time - start_time, "time to generate cointegrity pairs")
 
@@ -143,6 +144,7 @@ class DataFetcher:
             batch = currencies[i : i + batch_size]
             tasks = [self.update_historical_prices(currency) for currency in batch]
             await self._gather_with_timeout(tasks, "update_all_historical_prices")
+            self.update_cointegration_pairs()
 
             # Add a delay if there are more batches
             # if i + batch_size < len(currencies):
@@ -201,24 +203,84 @@ class DataFetcher:
 
         return ohlcv
 
-    async def fetch_all_live_prices(self):
-        all_currencies = self.currencies | self.inter_coin_symbols
-        if all_currencies is None:
+    # async def fetch_all_live_prices(self):
+    #     all_currencies = self.currencies | self.inter_coin_symbols
+    #     if all_currencies is None:
+    #         return None
+    #
+    #     # bybit cannot mix different markets into same query
+    #     if self.exchange_name == "Bybit":
+    #         tasks = [self.fetch_live_price_multiple(self.currencies)] + [
+    #             self.fetch_live_price_multiple(self.inter_coin_symbols)
+    #         ]
+    #     elif self.client.has.get("fetchTickers"):
+    #         tasks = [self.fetch_live_price_multiple(all_currencies)]
+    #     else:
+    #         tasks = [
+    #             self.fetch_live_price(currency, symbol)
+    #             for currency, symbol in all_currencies.items()
+    #         ]
+    #     await self._gather_with_timeout(tasks, "fetch_all_live_prices")
+
+    @staticmethod
+    def create_batches(data_dict, batch_size):
+        items = list(data_dict.items())
+        return [
+            dict(items[i : i + batch_size]) for i in range(0, len(items), batch_size)
+        ]
+
+    async def fetch_all_live_prices(self, batch_size=10, delay_time=0):
+        # Collect all currencies (union of dictionaries)
+        all_currencies = {**self.currencies, **self.inter_coin_symbols}
+        if not all_currencies:
             return None
 
-        # bybit cannot mix different markets into same query
-        if self.exchange_name == "Bybit":
-            tasks = [self.fetch_live_price_multiple(self.currencies)] + [
-                self.fetch_live_price_multiple(self.inter_coin_symbols)
-            ]
-        elif self.client.has.get("fetchTickers"):
-            tasks = [self.fetch_live_price_multiple(all_currencies)]
-        else:
+        # If the exchange is not Bybit and does not support fetchTickers, handle it separately
+        if self.exchange_name != "Bybit" and not self.client.has.get("fetchTickers"):
             tasks = [
                 self.fetch_live_price(currency, symbol)
                 for currency, symbol in all_currencies.items()
             ]
-        await self._gather_with_timeout(tasks, "fetch_all_live_prices")
+            await self._gather_with_timeout(tasks, "fetch_all_live_prices_individual")
+            return
+
+        batches = []
+
+        if self.exchange_name == "Bybit":
+            # Batch self.currencies and self.inter_coin_symbols separately
+            currency_batches = DataFetcher.create_batches(self.currencies, batch_size)
+            intercoin_batches = DataFetcher.create_batches(
+                self.inter_coin_symbols, batch_size
+            )
+            batches.extend(currency_batches)
+            batches.extend(intercoin_batches)
+
+        elif self.client.has.get("fetchTickers"):
+            all_currency_batches = DataFetcher.create_batches(
+                all_currencies, batch_size
+            )
+            batches.extend(all_currency_batches)
+
+        for batch_number, batch in enumerate(batches):
+            print(
+                f"Running batch {batch_number + 1}/{len(batches)} with {len(batch)} items"
+            )
+
+            tasks = [self.fetch_live_price_multiple(batch)]
+
+            try:
+                await self._gather_with_timeout(
+                    tasks, f"fetch_all_live_prices_batch_{batch_number}"
+                )
+            except Exception as e:
+                print(f"Error occurred while processing batch {batch_number + 1}: {e}")
+
+            # Optionally, add a delay between batches to prevent overloading
+            if batch_number + 1 < len(batches):
+                print(f"Waiting {delay_time} seconds before the next batch...")
+                await asyncio.sleep(delay_time)
+
+        print("All batches completed.")
 
     async def fetch_live_price(self, currency, symbol):
         try:
@@ -296,7 +358,7 @@ class DataFetcher:
         since = self.client.parse8601(
             (datetime.today() - timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
         )
-        print("getting", currency)
+        # print("getting", currency)
         try:
             data = await asyncio.wait_for(
                 self.client.fetch_ohlcv(symbol, timeframe, since), timeout=30
@@ -311,7 +373,7 @@ class DataFetcher:
             print(f"Error fetching {currency}: {e}")
             return None
 
-        print("got", currency)
+        # print("got", currency)
 
         df = pd.DataFrame(
             data, columns=["timestamp", "open", "high", "low", "close", "volume"]
@@ -323,8 +385,18 @@ class DataFetcher:
 
         self.historical_data[currency].update_from_dataframe(df)
 
+    # async def _gather_with_timeout(self, tasks, task_name):
+    #     await asyncio.wait_for(asyncio.gather(*tasks), self.timeout)
+
     async def _gather_with_timeout(self, tasks, task_name):
-        await asyncio.wait_for(asyncio.gather(*tasks), self.timeout)
+        try:
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=self.timeout)
+        except asyncio.TimeoutError:
+            print(f"Timeout occurred while gathering tasks for {task_name}")
+            # Optionally handle the timeout, retry, or cancel tasks
+        except Exception as e:
+            print(f"Exception in {task_name}: {e}")
+            # Optionally handle other exceptions
 
     @staticmethod
     def generate_inter_coin_symbols(currencies, market_symbols):
@@ -486,3 +558,6 @@ class DataFetcher:
 
     def get_cointegration_spreads(self):
         return self.cointegration_spreads
+
+    def get_cointegration_pairs(self):
+        return self.cointegration_pairs

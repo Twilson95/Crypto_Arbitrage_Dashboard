@@ -98,6 +98,27 @@ class AppLayout:
             style=filter_style,
         )
 
+        p_value_slider = html.Div(
+            [
+                html.Label("P Value"),
+                dcc.Slider(
+                    id="p-value-slider",
+                    min=0,
+                    max=1,
+                    step=0.01,
+                    value=0.05,
+                    marks=None,
+                    tooltip={
+                        "placement": "bottom",
+                        "always_visible": True,
+                    },
+                ),
+            ],
+            title="P_Value",
+            id="p-value-slider-container",
+            style=filter_style,  # Initialize with display set to 'none'
+        )
+
         # log_marks = generate_log_marks()
         # funds_slider = html.Div(
         #     [
@@ -159,6 +180,7 @@ class AppLayout:
             currency_filter,
             indicator_filter,
             cointegration_filter,
+            p_value_slider,
             # funds_slider,
             funds_input,
         ]
