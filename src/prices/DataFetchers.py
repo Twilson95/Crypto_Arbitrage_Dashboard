@@ -229,11 +229,11 @@ class DataFetcher:
             dict(items[i : i + batch_size]) for i in range(0, len(items), batch_size)
         ]
 
-    async def fetch_all_live_prices(self, batch_size=10, delay_time=0):
+    async def fetch_all_live_prices(self, batch_size=20, delay_time=0):
         # Collect all currencies (union of dictionaries)
         all_currencies = {**self.currencies, **self.inter_coin_symbols}
         if not all_currencies:
-            return None
+            return
 
         # If the exchange is not Bybit and does not support fetchTickers, handle it separately
         if self.exchange_name != "Bybit" and not self.client.has.get("fetchTickers"):
