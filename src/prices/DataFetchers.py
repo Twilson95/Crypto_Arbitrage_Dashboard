@@ -100,12 +100,11 @@ class DataFetcher:
     def update_cointegration_pairs(self):
         start_time = time()
         df = self.get_df_of_all_historical_prices()
-        self.cointegration_pairs = CointegrationCalculator.find_cointegration_pairs(df)
-        # self.cointegration_spreads = CointegrationCalculator.calculate_all_spreads(
-        #     df, cointegration_pairs
-        # )
+        self.cointegration_pairs = CointegrationCalculator.find_cointegration_pairs(
+            df, self.cointegration_pairs
+        )
         end_time = time()
-        print(end_time - start_time, "time to generate cointegrity pairs")
+        print(f"{(end_time - start_time):.2f} seconds to generate cointegrity pairs")
 
     def initialize_live_data(self, currency):
         self.live_data[currency] = OHLCData()
@@ -203,25 +202,6 @@ class DataFetcher:
 
         return ohlcv
 
-    # async def fetch_all_live_prices(self):
-    #     all_currencies = self.currencies | self.inter_coin_symbols
-    #     if all_currencies is None:
-    #         return None
-    #
-    #     # bybit cannot mix different markets into same query
-    #     if self.exchange_name == "Bybit":
-    #         tasks = [self.fetch_live_price_multiple(self.currencies)] + [
-    #             self.fetch_live_price_multiple(self.inter_coin_symbols)
-    #         ]
-    #     elif self.client.has.get("fetchTickers"):
-    #         tasks = [self.fetch_live_price_multiple(all_currencies)]
-    #     else:
-    #         tasks = [
-    #             self.fetch_live_price(currency, symbol)
-    #             for currency, symbol in all_currencies.items()
-    #         ]
-    #     await self._gather_with_timeout(tasks, "fetch_all_live_prices")
-
     @staticmethod
     def create_batches(data_dict, batch_size):
         items = list(data_dict.items())
@@ -263,7 +243,7 @@ class DataFetcher:
 
         for batch_number, batch in enumerate(batches):
             print(
-                f"Running batch {batch_number + 1}/{len(batches)} with {len(batch)} items"
+                f"Running live data batch {batch_number + 1}/{len(batches)} with {len(batch)} items"
             )
 
             tasks = [self.fetch_live_price_multiple(batch)]
@@ -279,8 +259,6 @@ class DataFetcher:
             if batch_number + 1 < len(batches):
                 print(f"Waiting {delay_time} seconds before the next batch...")
                 await asyncio.sleep(delay_time)
-
-        print("All batches completed.")
 
     async def fetch_live_price(self, currency, symbol):
         try:
@@ -314,6 +292,9 @@ class DataFetcher:
         self.live_data[currency].low.append(current_price)
         self.live_data[currency].close.append(current_price)
         self.live_data[currency].open.append(current_price)
+
+        if currency in self.historical_data.keys():
+            self.historical_data[currency].close[-1] = current_price
 
     async def fetch_live_price_multiple(self, currencies):
         symbols = list(currencies.values())
@@ -351,6 +332,9 @@ class DataFetcher:
             self.live_data[currency].low.append(current_price)
             self.live_data[currency].close.append(current_price)
             self.live_data[currency].open.append(current_price)
+
+            if currency in self.historical_data.keys():
+                self.historical_data[currency].close[-1] = current_price
 
     async def update_historical_prices(self, currency):
         symbol = self.currencies[currency]
@@ -522,6 +506,21 @@ class DataFetcher:
             for currency, symbol in self.currencies.items()
         ]
         await self._gather_with_timeout(tasks, "fetch_all_live_prices")
+
+    # async def fetch_all_order_books(self, batch_size):
+    #     batches = DataFetcher.create_batches(self.currencies, batch_size)
+    #
+    #     for batch_number, batch in enumerate(batches):
+    #         print(f"Processing order book batch {batch_number + 1}/{len(batches)}")
+    #
+    #         tasks = [
+    #             self.fetch_order_book(currency, symbol)
+    #             for currency, symbol in batch.items()
+    #         ]
+    #
+    #         await self._gather_with_timeout(
+    #             tasks, f"fetch_order_books_batch_{batch_number}"
+    #         )
 
     async def fetch_order_book(self, currency, symbol):
         current_order_book = await self.client.fetch_order_book(symbol)
