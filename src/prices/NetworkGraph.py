@@ -33,6 +33,9 @@ def create_network_graph(live_prices, arbitrage_opportunities=None):
     # Handle arbitrage opportunities if provided
     if arbitrage_opportunities:
         for arbitrage in arbitrage_opportunities:
+            if arbitrage is None:
+                continue
+
             arbitrage_route = arbitrage.get("path", None)
             total_profit = arbitrage.get("summary_header", {}).get("total_profit", None)
 
