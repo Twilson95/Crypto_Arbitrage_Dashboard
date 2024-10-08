@@ -431,7 +431,7 @@ def update_filter_values(
         currency_value = currency_options[0]
 
     pairs = data_manager.get_exchanges_cointegration_pairs(exchange_value)
-    significant_pairs = {}
+    significant_pairs = []
     if pairs:
         significant_pairs = [
             (pair[0], pair[1]) for pair, value in pairs.items() if value <= p_value
@@ -440,15 +440,22 @@ def update_filter_values(
     if not significant_pairs:
         cointegration_pairs_str_options = []
     else:
+        # cointegration_pairs_str_options = sorted(
+        #     [str(tup) for tup in significant_pairs]
+        # )
         cointegration_pairs_str_options = sorted(
-            [str(tup) for tup in significant_pairs]
+            [
+                {"label": f"{tup[0]}, {tup[1]}", "value": str(tup)}
+                for tup in significant_pairs
+            ],
+            key=lambda x: x["label"],
         )
 
     if cointegration_value is None:
         if not cointegration_pairs_str_options:
             cointegration_value = None
         else:
-            cointegration_value = cointegration_pairs_str_options[0]
+            cointegration_value = cointegration_pairs_str_options[0]["value"]
 
     return (
         exchange_options,
