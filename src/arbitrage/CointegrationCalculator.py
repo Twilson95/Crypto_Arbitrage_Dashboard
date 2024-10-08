@@ -6,25 +6,24 @@ from statsmodels.tsa.stattools import coint
 class CointegrationCalculator:
 
     @staticmethod
-    def find_cointegration_pairs(df):
-        cointegration_pairs = {}
-        # df = df.iloc[:100]  # Limit data to the first 100 rows for analysis
-
-        considered_pairs = set()
+    def find_cointegration_pairs(df, precalculated_pairs):
+        # Start with the pre-existing cointegration pairs
+        cointegration_pairs = precalculated_pairs.copy()
 
         for column_1 in df.columns:
             for column_2 in df.columns:
                 if column_1 == column_2:
                     continue
 
+                # pair = tuple(sorted([column_1, column_2]))
                 pair = tuple(
                     sorted(
                         [column_1, column_2], key=lambda x: df[x].mean(), reverse=True
                     )
                 )
 
-                # Check if the pair has already been considered
-                if pair in considered_pairs:
+                # Skip the pair if it's already in the precalculated pairs
+                if pair in cointegration_pairs:
                     continue
 
                 coint_stat, p_value, crit_values = (
@@ -32,8 +31,6 @@ class CointegrationCalculator:
                 )
 
                 cointegration_pairs[pair] = p_value
-
-                considered_pairs.add(pair)
 
         return cointegration_pairs
 
@@ -81,7 +78,6 @@ class CointegrationCalculator:
         spread_zscore = (spread - mean_spread) / std_spread
         arbitrage_signals = spread_zscore.abs() > threshold
 
-        # Compile results
         opportunities = pd.DataFrame(
             {"Spread": spread, "Z-Score": spread_zscore, "Arbitrage": arbitrage_signals}
         )
