@@ -1,4 +1,4 @@
-from src.arbitrage.ArbitrageInstructions import ArbitrageInstructions
+from cryptopy.src.arbitrage.ArbitrageInstructions import ArbitrageInstructions
 import itertools
 
 

@@ -1,5 +1,5 @@
 from dash import dash_table
-from src.layout.layout_styles import style_table, style_cell
+from cryptopy.src.layout.layout_styles import style_table, style_cell
 
 
 class NewsChart:

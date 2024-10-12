@@ -3,13 +3,12 @@ from itertools import permutations
 import pytz
 import re
 from time import time
-
 import pandas as pd
 from ccxt.base.errors import RateLimitExceeded
-
-from src.prices.OHLCData import OHLCData
-from src.arbitrage.CointegrationCalculator import CointegrationCalculator
 import asyncio
+
+from cryptopy import OHLCData
+from cryptopy import CointegrationCalculator
 
 
 class DataFetcher:

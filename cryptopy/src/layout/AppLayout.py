@@ -1,6 +1,6 @@
 from dash import html, dcc
 import dash_bootstrap_components as dbc
-from src.layout.layout_styles import (
+from cryptopy.src.layout.layout_styles import (
     container_style,
     header_style,
     filter_container_style,
@@ -9,7 +9,6 @@ from src.layout.layout_styles import (
     grid_row_style,
     grid_element_style,
 )
-from src.prices.helper_functions import generate_log_marks
 
 
 class AppLayout:

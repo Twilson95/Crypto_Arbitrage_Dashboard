@@ -1,7 +1,6 @@
 import plotly.graph_objects as go
 from dash import html, dcc
-from src.prices.helper_functions import format_amount, round_to_significant_figures
-from time import time
+from cryptopy.src.prices.helper_functions import format_amount
 
 
 class ArbitrageInstructions:
