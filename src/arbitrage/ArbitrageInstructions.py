@@ -106,8 +106,8 @@ class ArbitrageInstructions:
         if total_profit is None:
             total_profit = 0
         summary_text = (
-            f"Arbitrage Opportunity: Buy {coins[0]}, convert to {coins[1]} and sell for an "
-            f"expected profit of ${total_profit:.2f} after fees."
+            f"Arbitrage Opportunity: Buy {coins[0]}, Sell {coins[1]} and wait for an exit signal before closing "
+            f"positions for an expected profit of ${total_profit:.2f} after fees."
         )
         return html.P(summary_text, style={"margin-bottom": "2px"})
 

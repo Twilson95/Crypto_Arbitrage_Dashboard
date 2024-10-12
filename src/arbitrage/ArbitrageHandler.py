@@ -815,6 +815,9 @@ class ArbitrageHandler:
 
     @staticmethod
     def return_statistical_arbitrage_instructions(arbitrages):
+        if not arbitrages:
+            return {}, {}
+
         instruction_diagrams = []
 
         for arbitrage in arbitrages:
@@ -1097,7 +1100,7 @@ class ArbitrageHandler:
 
         if hedge_ratio < 0:
             # hedge_ratio = 1 / hedge_ratio
-            print(hedge_ratio)
+            print("hedge ratio is negative", hedge_ratio)
             pass
 
         if entry_type == "short":

@@ -407,36 +407,40 @@ class PriceChart:
 
         # Entry points for buying and selling both coins
         buy_expensive_trace = go.Scatter(
-            x=[point[0] for point in buy_expensive_points],
-            y=[point[1] for point in buy_expensive_points],  # Expensive coin buy
+            x=[point[0] for point in buy_expensive_points]
+            + [point[0] for point in buy_cheaper_points],
+            y=[point[1] for point in buy_expensive_points]
+            + [point[1] for point in buy_cheaper_points],
             mode="markers",
-            name="Buy Expensive",
+            name="Buy Signal",
             marker=dict(color="green", size=10, symbol="triangle-up"),
         )
 
         sell_expensive_trace = go.Scatter(
-            x=[point[0] for point in sell_expensive_points],
-            y=[point[1] for point in sell_expensive_points],  # Expensive coin sell
+            x=[point[0] for point in sell_expensive_points]
+            + [point[0] for point in sell_cheaper_points],
+            y=[point[1] for point in sell_expensive_points]
+            + [point[1] for point in sell_cheaper_points],
             mode="markers",
-            name="Sell Expensive",
+            name="Sell Signal",
             marker=dict(color="red", size=10, symbol="triangle-down"),
         )
 
-        buy_cheaper_trace = go.Scatter(
-            x=[point[0] for point in buy_cheaper_points],
-            y=[point[1] for point in buy_cheaper_points],  # Cheaper coin buy
-            mode="markers",
-            name="Buy Cheaper",
-            marker=dict(color="green", size=10, symbol="triangle-up"),
-        )
+        # buy_cheaper_trace = go.Scatter(
+        #     x=[point[0] for point in buy_cheaper_points],
+        #     y=[point[1] for point in buy_cheaper_points],  # Cheaper coin buy
+        #     mode="markers",
+        #     name="Buy Signal",
+        #     marker=dict(color="green", size=10, symbol="triangle-up"),
+        # )
 
-        sell_cheaper_trace = go.Scatter(
-            x=[point[0] for point in sell_cheaper_points],
-            y=[point[1] for point in sell_cheaper_points],  # Cheaper coin sell
-            mode="markers",
-            name="Sell Cheaper",
-            marker=dict(color="red", size=10, symbol="triangle-down"),
-        )
+        # sell_cheaper_trace = go.Scatter(
+        #     x=[point[0] for point in sell_cheaper_points],
+        #     y=[point[1] for point in sell_cheaper_points],  # Cheaper coin sell
+        #     mode="markers",
+        #     name="Sell Signal",
+        #     marker=dict(color="red", size=10, symbol="triangle-down"),
+        # )
 
         # Create the figure and add all traces
         fig = go.Figure(
@@ -445,8 +449,8 @@ class PriceChart:
                 adjusted_cheaper_trace,
                 buy_expensive_trace,
                 sell_expensive_trace,
-                buy_cheaper_trace,
-                sell_cheaper_trace,
+                # buy_cheaper_trace,
+                # sell_cheaper_trace,
             ]
         )
 
@@ -456,7 +460,7 @@ class PriceChart:
             xaxis_title=None,
             yaxis_title="Price",
             template="plotly_dark",
-            margin=dict(l=10, r=10, t=40, b=10),
+            margin=dict(l=10, r=15, t=40, b=10),
             xaxis=dict(
                 type="date"
             ),  # Ensure datetime index is properly formatted on x-axis

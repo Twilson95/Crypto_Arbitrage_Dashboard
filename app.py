@@ -348,9 +348,6 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
     identify_arbitrage = time()
     # print("identify arbitrage", identify_arbitrage - got_prices)
 
-    if not arbitrage_opportunities:
-        return {}, {}
-
     arbitrage_instructions = (
         arbitrage_handler.return_statistical_arbitrage_instructions(
             arbitrage_opportunities
