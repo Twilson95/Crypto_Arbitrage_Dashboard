@@ -22,7 +22,7 @@ import yaml
 
 # load_figure_template("DARKLY")
 
-app = Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
+app = Dash(__name__, external_stylesheets=[dbc.themes.SLATE], assets_folder="../assets")
 app.title = "Crypto Dashboard"
 
 with open("cryptopy/config/exchange_config.yaml", "r") as f:
