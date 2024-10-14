@@ -1,7 +1,8 @@
 from newsapi import NewsApiClient
 from datetime import datetime, timedelta
 from cryptopy import SentimentAllocator
-import pandas as pd
+import os
+import json
 
 
 class NewsFetcher:
@@ -12,6 +13,7 @@ class NewsFetcher:
         self.sentiment_allocator = SentimentAllocator()
         # self.fetch_news_sources()
         self.currencies = config["NewsApi"]["pairs"]
+        self.caching_folder = "data/news_data/"
         self.fetch_all_latest_news()
 
     def fetch_news_sources(self):
@@ -27,15 +29,56 @@ class NewsFetcher:
             news = self.get_cached_news(currency)
             if news is None:
                 self.fetch_latest_news(currency)
+                self.cache_news_data(currency)
 
-    def get_cached_news(self, currency):
+    def get_cached_news(self, currency, caching_hrs=1):
+        safe_currency = currency.replace("/", "_")
         try:
-            folder_path = r"../../data/news_data/"
-            file_name = currency + ".csv"
-            news_df = pd.read_csv(folder_path + file_name)
-        except:
-            news_df = None
-        return news_df
+            # Use JSON file instead of CSV
+            file_name = safe_currency + ".json"
+            file_path = os.path.join(self.caching_folder, file_name)
+
+            with open(file_path, "r") as f:
+                news_data = json.load(f)
+
+            cache_time = datetime.fromisoformat(news_data["cache_time"])
+
+            now = datetime.now()
+            time_difference = now - cache_time
+
+            if time_difference < timedelta(hours=caching_hrs):
+                print(f"retrieving cached news data {currency}")
+                self.news_data[currency] = news_data["news_items"]
+                return news_data["news_items"], False  # Cached data found
+        except FileNotFoundError:
+            return None
+        except Exception as e:
+            print(f"Exception raised: {e}")
+            return None
+
+        return None
+
+    def cache_news_data(self, currency):
+        news_data = self.news_data.get(currency)
+
+        if news_data:
+            safe_currency = currency.replace("/", "_")
+
+            data_to_cache = {
+                "cache_time": datetime.now().isoformat(),
+                "news_items": news_data,
+            }
+
+            file_name = safe_currency + ".json"
+            file_path = os.path.join(self.caching_folder, file_name)
+
+            parent_dir = os.path.dirname(file_path)
+            if not os.path.exists(parent_dir):
+                os.makedirs(parent_dir)
+
+            # Save to JSON file
+            with open(file_path, "w") as f:
+                json.dump(data_to_cache, f, indent=4)
 
     def fetch_latest_news(self, currency):
         self.news_data[currency] = []
