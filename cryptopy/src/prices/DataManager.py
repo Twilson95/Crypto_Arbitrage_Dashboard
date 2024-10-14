@@ -1,6 +1,6 @@
 import asyncio
 import ccxt.async_support as ccxt
-from src.prices.DataFetchers import DataFetcher
+from cryptopy import DataFetcher
 from threading import Thread
 
 

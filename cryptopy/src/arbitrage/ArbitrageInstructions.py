@@ -1,7 +1,6 @@
 import plotly.graph_objects as go
 from dash import html, dcc
-from src.prices.helper_functions import format_amount, round_to_significant_figures
-from time import time
+from cryptopy.src.prices.helper_functions import format_amount
 
 
 class ArbitrageInstructions:
@@ -106,8 +105,8 @@ class ArbitrageInstructions:
         if total_profit is None:
             total_profit = 0
         summary_text = (
-            f"Arbitrage Opportunity: Buy {coins[0]}, convert to {coins[1]} and sell for an "
-            f"expected profit of ${total_profit:.2f} after fees."
+            f"Arbitrage Opportunity: Buy {coins[0]}, Sell {coins[1]} and wait for an exit signal before closing "
+            f"positions for an expected profit of ${total_profit:.2f} after fees."
         )
         return html.P(summary_text, style={"margin-bottom": "2px"})
 

@@ -1,7 +1,7 @@
 import plotly.graph_objects as go
 import networkx as nx
 import numpy as np
-from src.prices.helper_functions import format_amount
+from cryptopy.src.prices.helper_functions import format_amount
 
 
 def create_network_graph(live_prices, arbitrage_opportunities=None):

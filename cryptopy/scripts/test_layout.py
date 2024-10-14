@@ -2,11 +2,11 @@ from dash import Dash
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
 
-from src.layout.AppLayout import AppLayout
-from src.layout.FilterComponents import FilterComponent
-from src.prices.TechnicalIndicators import TechnicalIndicators
-from src.prices.PriceChart import PriceChart
-from src.news.NewsChart import NewsChart
+from cryptopy.src.layout.AppLayout import AppLayout
+from cryptopy.src.layout.FilterComponents import FilterComponent
+from cryptopy.src.prices.TechnicalIndicators import TechnicalIndicators
+from cryptopy.src.prices.PriceChart import PriceChart
+from cryptopy.src.news.NewsChart import NewsChart
 from dummy_data import news, live_data, historical_data
 
 import configparser

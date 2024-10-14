@@ -1,21 +1,20 @@
 from dash import Dash, dcc
-
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
 
-from src.layout.AppLayout import AppLayout
-from src.layout.FilterComponents import FilterComponent
+from cryptopy import (
+    AppLayout,
+    FilterComponent,
+    TechnicalIndicators,
+    PriceChart,
+    DataManager,
+    ArbitrageHandler,
+    NewsFetcher,
+    NewsChart,
+    CointegrationCalculator,
+)
+from cryptopy.src.prices.NetworkGraph import create_network_graph
 
-from src.prices.TechnicalIndicators import TechnicalIndicators
-from src.prices.PriceChart import PriceChart
-from src.prices.DataManager import DataManager
-from src.arbitrage.ArbitrageHandler import ArbitrageHandler
-from src.news.NewsFetcher import NewsFetcher
-from src.news.NewsChart import NewsChart
-from src.prices.NetworkGraph import create_network_graph
-from src.arbitrage.CointegrationCalculator import CointegrationCalculator
-
-from dash_bootstrap_templates import load_figure_template
 from time import time
 import ast
 
@@ -23,16 +22,16 @@ import yaml
 
 # load_figure_template("DARKLY")
 
-app = Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
+app = Dash(__name__, external_stylesheets=[dbc.themes.SLATE], assets_folder="../assets")
 app.title = "Crypto Dashboard"
 
-with open("./src/config/exchange_config.yaml", "r") as f:
+with open("cryptopy/config/exchange_config.yaml", "r") as f:
     exchange_config = yaml.safe_load(f)
 
-with open("./src/config/news_config.yaml", "r") as f:
+with open("cryptopy/config/news_config.yaml", "r") as f:
     news_config = yaml.safe_load(f)
 
-with open("./src/config/network_fees.yaml", "r") as f:
+with open("cryptopy/config/network_fees.yaml", "r") as f:
     network_fees_config = yaml.safe_load(f)
 
 filter_component = FilterComponent()
@@ -45,8 +44,8 @@ start_time = time()
 data_manager = DataManager(exchange_config, network_fees_config)
 end_time = time()
 
-# news_fetcher = NewsFetcher(news_config)
-# news_chart = NewsChart()
+news_fetcher = NewsFetcher(news_config)
+news_chart = NewsChart()
 price_chart = PriceChart()
 
 
@@ -180,16 +179,16 @@ def update_live_price_chart(currency, exchange_name, n_intervals, indicator):
     return price_chart.create_ohlc_chart(prices, mark_limit=20, title="Live Price")
 
 
-# @app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
-# def update_news_chart(currency):
-#     if not currency:
-#         return {}
-#
-#     news = news_fetcher.get_news_data(currency)
-#     if not news:
-#         return {}
-#
-#     return news_chart.create_table(news)
+@app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
+def update_news_chart(currency):
+    if not currency:
+        return {}
+
+    news = news_fetcher.get_news_data(currency)
+    if not news:
+        return {}
+
+    return news_chart.create_table(news)
 
 
 @app.callback(
@@ -347,9 +346,6 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
         )
     identify_arbitrage = time()
     # print("identify arbitrage", identify_arbitrage - got_prices)
-
-    if not arbitrage_opportunities:
-        return {}, {}
 
     arbitrage_instructions = (
         arbitrage_handler.return_statistical_arbitrage_instructions(

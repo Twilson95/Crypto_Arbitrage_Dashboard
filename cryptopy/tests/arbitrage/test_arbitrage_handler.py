@@ -1,5 +1,5 @@
 import unittest
-from src.arbitrage.ArbitrageHandler import ArbitrageHandler
+from cryptopy.src.arbitrage.ArbitrageHandler import ArbitrageHandler
 
 
 class TestArbitrageHandler(unittest.TestCase):
