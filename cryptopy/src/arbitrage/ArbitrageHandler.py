@@ -10,7 +10,7 @@ from cryptopy.src.prices.NetworkGraph import create_network_graph
 class ArbitrageHandler:
     def __init__(self):
         self.simple_arbitrage_opportunities = []
-        self.triangular_abitrage_opportunities = []
+        self.triangular_arbitrage_opportunities = []
         self.statistical_arbitrage_opportunities = []
 
     @staticmethod

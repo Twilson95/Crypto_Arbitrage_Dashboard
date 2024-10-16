@@ -1,6 +1,8 @@
 from plotly import graph_objs as go
 from plotly.subplots import make_subplots
 import pandas as pd
+import plotly.express as px
+from time import time
 
 
 class PriceChart:
@@ -200,7 +202,6 @@ class PriceChart:
         upper_threshold = spread_mean + 2 * spread_std
         lower_threshold = spread_mean - 2 * spread_std
 
-        # Align all data
         spread = spread.align(upper_threshold)[0]
         spread = spread.align(lower_threshold)[0]
 
@@ -221,16 +222,13 @@ class PriceChart:
         above_upper = False
         below_lower = False
 
-        # Track entry and exit points based on the threshold conditions
         for i in range(1, len(spread)):
             if spread.iloc[i] > upper_threshold.iloc[i] and not above_upper:
-                # Spread is above upper threshold -> Sell expensive, Buy cheaper
                 entry_points.append(
                     (spread.index[i], spread.iloc[i], "sell_expensive", "buy_cheaper")
                 )
                 above_upper = True
             elif spread.iloc[i] < lower_threshold.iloc[i] and not below_lower:
-                # Spread is below lower threshold -> Buy expensive, Sell cheaper
                 entry_points.append(
                     (spread.index[i], spread.iloc[i], "buy_expensive", "sell_cheaper")
                 )
@@ -324,6 +322,7 @@ class PriceChart:
     def plot_prices_and_spread(
         df, pair, hedge_ratio, entry_points, exit_points, window=70
     ):
+        start_time = time()
         """
         Plot the prices of two coins with hedge ratio adjustment and arbitrage signals.
         Args:
@@ -334,15 +333,10 @@ class PriceChart:
         exit_points: List of exit points returned from plot_spread, including buy/sell indicators.
         window: The rolling window size for calculating mean and standard deviation (default is 60).
         """
-
-        # Extract price data from the DataFrame
         more_expensive_price = df[pair[0]]
         cheaper_price = df[pair[1]]
 
-        # Adjust the cheaper coin's price using the hedge ratio
         adjusted_cheaper_price = cheaper_price * hedge_ratio
-
-        # Use the datetime index from the DataFrame as the x-axis
         x_axis = df.index
 
         # Get the latest 'window' number of dates
@@ -465,5 +459,7 @@ class PriceChart:
                 type="date"
             ),  # Ensure datetime index is properly formatted on x-axis
         )
+        end_time = time()
+        print(f"plot spread time {(end_time - start_time):.2f}")
 
         return fig
