@@ -32,6 +32,15 @@ class OHLCData:
         data_dict = self.to_dict()
         return pd.DataFrame(data_dict)
 
+    def update_with_latest_value(self, new_price, new_datetime):
+        # self.datetime = []
+        # self.open = []
+        if new_price > self.high[-1]:
+            self.high[-1] = new_price
+        if new_price < self.low[-1]:
+            self.low[-1] = new_price
+        self.close[-1] = new_price
+
     def __repr__(self):
         return (
             f"datetime: {self.datetime}\n"

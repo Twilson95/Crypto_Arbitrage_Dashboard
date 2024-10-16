@@ -1,4 +1,5 @@
 from newsapi import NewsApiClient
+from newsapi.newsapi_exception import NewsAPIException
 from datetime import datetime, timedelta
 from cryptopy import SentimentAllocator
 import os
@@ -25,16 +26,24 @@ class NewsFetcher:
         )
 
     def fetch_all_latest_news(self):
+        news_api_limit_reached = False
         for currency in self.currencies.keys():
             news = self.get_cached_news(currency)
-            if news is None:
+
+            # if news api limit reached stop querying it
+            if news_api_limit_reached or news is not None:
+                continue
+
+            try:
                 self.fetch_latest_news(currency)
-                self.cache_news_data(currency)
+            except NewsAPIException as e:
+                news_api_limit_reached = True
+                print(f"{e.args[0].get('message', 'Unknown error')}")
+            self.cache_news_data(currency)
 
     def get_cached_news(self, currency, caching_hrs=1):
         safe_currency = currency.replace("/", "_")
         try:
-            # Use JSON file instead of CSV
             file_name = safe_currency + ".json"
             file_path = os.path.join(self.caching_folder, file_name)
 

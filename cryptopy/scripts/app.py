@@ -1,4 +1,4 @@
-from dash import Dash, dcc
+from dash import Dash, dcc, html
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
 
@@ -433,6 +433,7 @@ def update_filter_values(
             (pair[0], pair[1]) for pair, value in pairs.items() if value <= p_value
         ]
 
+    # live_statistical_arbitrage_events = data_manager.get_live_statistical_arbitrage_events(exchange)
     if not significant_pairs:
         cointegration_pairs_str_options = []
     else:
@@ -441,10 +442,13 @@ def update_filter_values(
         # )
         cointegration_pairs_str_options = sorted(
             [
-                {"label": f"{tup[0]}, {tup[1]}", "value": str(tup)}
+                {
+                    "label": create_filter_label(tup),
+                    "value": str(tup),
+                }
                 for tup in significant_pairs
             ],
-            key=lambda x: x["label"],
+            key=lambda x: x["value"],
         )
 
     if cointegration_value is None:
@@ -460,6 +464,23 @@ def update_filter_values(
         currency_value,
         cointegration_pairs_str_options,
         cointegration_value,
+    )
+
+
+def create_filter_label(tup):
+    color = "green" if tup[0] == "FIL/USD" else "red"
+
+    return html.Span(
+        [
+            # html.Img(
+            #     src="/assets/images/language_icons/r-lang_50px.svg", height=20
+            # ),
+            html.Span(
+                f"{tup[0]}, {tup[1]}",
+                style={"font-size": 15, "padding-left": 10, "color": color},
+            ),
+        ],
+        style={"align-items": "center", "justify-content": "center"},
     )
 
 

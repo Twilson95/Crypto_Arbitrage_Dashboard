@@ -4,8 +4,8 @@ import pytz
 import re
 from time import time
 import pandas as pd
-from ccxt.base.errors import RateLimitExceeded
 import asyncio
+import os
 
 from cryptopy import OHLCData
 from cryptopy import CointegrationCalculator
@@ -19,14 +19,15 @@ class DataFetcher:
         self.inter_coin_symbols = None
         self.currency_fees = {}
         self.exchange_fees = {}
-        self.historical_data = {}
-        self.live_data = {}
+        self.historical_data = dict()
+        self.live_data = dict()
         self.cointegration_pairs = {}
         self.cointegration_spreads = {}
         self.order_books = {}
         self.market_symbols = []
         self.timeout = 60
         self.markets = markets
+        self.caching_folder = f"data/historical_data/{self.exchange_name}/"
 
     def extract_exchange_fees(self):
         exchange_fees = self.client.fees["funding"]
@@ -293,7 +294,10 @@ class DataFetcher:
         self.live_data[currency].open.append(current_price)
 
         if currency in self.historical_data.keys():
-            self.historical_data[currency].close[-1] = current_price
+            # self.historical_data[currency].close[-1] = current_price
+            self.historical_data[currency].update_with_latest_value(
+                current_price, datetime_obj
+            )
 
     async def fetch_live_price_multiple(self, currencies):
         symbols = list(currencies.values())
@@ -335,41 +339,140 @@ class DataFetcher:
             if currency in self.historical_data.keys():
                 self.historical_data[currency].close[-1] = current_price
 
+    # async def update_historical_prices(self, currency):
+    #     symbol = self.currencies[currency]
+    #     timeframe = "1d"  # Daily data
+    #     since = self.client.parse8601(
+    #         (datetime.today() - timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    #     )
+    #     try:
+    #         data = await asyncio.wait_for(
+    #             self.client.fetch_ohlcv(symbol, timeframe, since), timeout=self.timeout
+    #         )
+    #     except asyncio.TimeoutError:
+    #         print(f"Timeout for fetching {currency}. Skipping.")
+    #         return None
+    #     except RateLimitExceeded as e:
+    #         print(f"Rate limit exceeded: {e}")
+    #         return None
+    #     except Exception as e:
+    #         print(f"Error fetching {currency}: {e}")
+    #         return None
+    #
+    #     df = pd.DataFrame(
+    #         data, columns=["timestamp", "open", "high", "low", "close", "volume"]
+    #     )
+    #     df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+    #
+    #     if currency not in self.historical_data.keys():
+    #         self.initialize_historic_data(currency)
+    #
+    #     self.historical_data[currency].update_from_dataframe(df)
+
     async def update_historical_prices(self, currency):
         symbol = self.currencies[currency]
-        timeframe = "1d"  # Daily data
-        since = self.client.parse8601(
-            (datetime.today() - timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        timeframe = "1d"
+        days_to_fetch = 100
+
+        if currency not in self.historical_data.keys():
+            self.initialize_historic_data(currency)
+
+        # Step 1: Check for cached data
+        cached_df, since, missing_days = await self.check_for_cached_data(
+            currency, days_to_fetch
         )
-        # print("getting", currency)
+
+        self.historical_data[currency].update_from_dataframe(cached_df)
+
+        # If no new data needs to be fetched, stop early
+        if missing_days <= 0:
+            # print(f"No new data to fetch for {currency}.")
+            return
+
+        # Step 2: Query the API for missing data
+        new_data = await self.query_historical_data(symbol, timeframe, since)
+
+        # If no new data was fetched (due to errors), stop early
+        if new_data is None:
+            return
+
+        self.historical_data[currency].update_from_dataframe(new_data)
+
+        # Step 3: Cache the new data (merge with existing cache and save)
+        self.cache_historical_data(currency)
+
+    async def check_for_cached_data(self, currency, days_to_fetch):
+        """
+        Check if cached data exists and calculate how many days of data are missing.
+        Returns cached dataframe, since timestamp, and missing days.
+        """
+        safe_currency = currency.replace("/", "_")
+        file_name = f"{safe_currency}.csv"
+        file_path = os.path.join(self.caching_folder, file_name)
+
+        if os.path.exists(file_path):
+            cached_df = pd.read_csv(file_path, parse_dates=["datetime"])
+            latest_cached_date = cached_df["datetime"].max().date()
+            print(
+                f"Cached data found for {currency}, latest date: {latest_cached_date}"
+            )
+        else:
+            cached_df = pd.DataFrame()
+            latest_cached_date = None
+            # print(f"No cached data for {currency}")
+
+        if latest_cached_date is None:
+            # No cached data, fetch the last `days_to_fetch` days
+            since = self.client.parse8601(
+                (datetime.today() - timedelta(days=days_to_fetch)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+            )
+            missing_days = days_to_fetch
+        else:
+            missing_days = (datetime.today().date() - latest_cached_date).days
+            since = self.client.parse8601(
+                (latest_cached_date + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            )
+
+        return cached_df, since, missing_days
+
+    async def query_historical_data(self, symbol, timeframe, since):
         try:
             data = await asyncio.wait_for(
                 self.client.fetch_ohlcv(symbol, timeframe, since), timeout=self.timeout
             )
         except asyncio.TimeoutError:
-            print(f"Timeout for fetching {currency}. Skipping.")
-            return None
-        except RateLimitExceeded as e:
-            print(f"Rate limit exceeded: {e}")
+            print(f"Timeout for fetching {symbol}. Skipping.")
             return None
         except Exception as e:
-            print(f"Error fetching {currency}: {e}")
+            print(f"Error fetching {symbol}: {e}")
             return None
 
-        # print("got", currency)
+        if data is None:
+            return None
 
         df = pd.DataFrame(
             data, columns=["timestamp", "open", "high", "low", "close", "volume"]
         )
         df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+        return df
 
-        if currency not in self.historical_data.keys():
-            self.initialize_historic_data(currency)
+    def cache_historical_data(self, currency):
+        safe_currency = currency.replace("/", "_")
+        file_name = f"{safe_currency}.csv"
+        file_path = os.path.join(self.caching_folder, file_name)
 
-        self.historical_data[currency].update_from_dataframe(df)
+        if not os.path.exists(self.caching_folder):
+            os.makedirs(self.caching_folder, exist_ok=True)
 
-    # async def _gather_with_timeout(self, tasks, task_name):
-    #     await asyncio.wait_for(asyncio.gather(*tasks), self.timeout)
+        historical_ohlc = self.get_historical_prices(currency)
+        historical_df = historical_ohlc.to_dataframe()
+        if historical_df.empty:
+            print(f"{currency} is empty")
+            return
+
+        historical_df.to_csv(file_path, index=False)
 
     async def _gather_with_timeout(self, tasks, task_name):
         try:
@@ -530,9 +633,12 @@ class DataFetcher:
 
     def get_df_of_all_historical_prices(self):
         dataframes = []
+        # take copy to avoid errors of it being read and written to at same time
+        historic_data_copy = self.historical_data.copy()
+        # print("historic_data_copy", historic_data_copy)
 
         # Loop through each currency to create a DataFrame with datetime as index
-        for currency, historic_currency_data in self.historical_data.items():
+        for currency, historic_currency_data in historic_data_copy.items():
             datetime_values = historic_currency_data.datetime
             closing_prices = historic_currency_data.close
 
@@ -540,6 +646,7 @@ class DataFetcher:
             df_currency = pd.DataFrame(
                 data={currency: closing_prices}, index=pd.to_datetime(datetime_values)
             )
+            # print(df_currency)
 
             # Append the DataFrame to the list
             dataframes.append(df_currency)
