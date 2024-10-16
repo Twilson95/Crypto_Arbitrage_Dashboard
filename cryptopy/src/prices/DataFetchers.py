@@ -19,8 +19,8 @@ class DataFetcher:
         self.inter_coin_symbols = None
         self.currency_fees = {}
         self.exchange_fees = {}
-        self.historical_data = {}
-        self.live_data = {}
+        self.historical_data = dict()
+        self.live_data = dict()
         self.cointegration_pairs = {}
         self.cointegration_spreads = {}
         self.order_books = {}
@@ -449,6 +449,9 @@ class DataFetcher:
             print(f"Error fetching {symbol}: {e}")
             return None
 
+        if data is None:
+            return None
+
         df = pd.DataFrame(
             data, columns=["timestamp", "open", "high", "low", "close", "volume"]
         )
@@ -465,7 +468,8 @@ class DataFetcher:
 
         historical_ohlc = self.get_historical_prices(currency)
         historical_df = historical_ohlc.to_dataframe()
-        if not historical_df:
+        if historical_df.empty:
+            print(f"{currency} is empty")
             return
 
         historical_df.to_csv(file_path, index=False)
@@ -629,9 +633,12 @@ class DataFetcher:
 
     def get_df_of_all_historical_prices(self):
         dataframes = []
+        # take copy to avoid errors of it being read and written to at same time
+        historic_data_copy = self.historical_data.copy()
+        # print("historic_data_copy", historic_data_copy)
 
         # Loop through each currency to create a DataFrame with datetime as index
-        for currency, historic_currency_data in self.historical_data.items():
+        for currency, historic_currency_data in historic_data_copy.items():
             datetime_values = historic_currency_data.datetime
             closing_prices = historic_currency_data.close
 
@@ -639,6 +646,7 @@ class DataFetcher:
             df_currency = pd.DataFrame(
                 data={currency: closing_prices}, index=pd.to_datetime(datetime_values)
             )
+            # print(df_currency)
 
             # Append the DataFrame to the list
             dataframes.append(df_currency)
