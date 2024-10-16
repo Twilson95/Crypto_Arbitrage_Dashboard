@@ -636,11 +636,9 @@ class ArbitrageInstructions:
                 )
             )
 
-        # Apply all annotations at once to minimize multiple calls
-        fig.update_layout(annotations=annotations)
-
         # Update layout to hide axes and grid lines
         fig.update_layout(
+            annotations=annotations,
             showlegend=False,
             margin=dict(l=0, r=0, t=0, b=0),
             height=ArbitrageInstructions.instruction_height,

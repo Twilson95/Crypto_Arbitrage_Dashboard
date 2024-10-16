@@ -632,23 +632,20 @@ class DataFetcher:
         return self.order_books.get(currency)
 
     def get_df_of_all_historical_prices(self):
+        start_time = time()
         dataframes = []
+
         # take copy to avoid errors of it being read and written to at same time
         historic_data_copy = self.historical_data.copy()
-        # print("historic_data_copy", historic_data_copy)
 
-        # Loop through each currency to create a DataFrame with datetime as index
         for currency, historic_currency_data in historic_data_copy.items():
             datetime_values = historic_currency_data.datetime
             closing_prices = historic_currency_data.close
 
-            # Create a DataFrame for each currency with datetime as index
             df_currency = pd.DataFrame(
                 data={currency: closing_prices}, index=pd.to_datetime(datetime_values)
             )
             # print(df_currency)
-
-            # Append the DataFrame to the list
             dataframes.append(df_currency)
 
         if not dataframes:
@@ -656,8 +653,31 @@ class DataFetcher:
 
         # Concatenate all DataFrames along the datetime index
         df_combined = pd.concat(dataframes, axis=1, join="outer")
+        end_time = time()
+        print(f"time to get all historic prices {(end_time - start_time):.2f}")
+        df_combined = df_combined.sort_index()
+        return df_combined
 
-        # Sort the index to ensure proper chronological order
+    def get_df_of_historical_prices_pairs(self, pair):
+        start_time = time()
+        dataframes = []
+
+        for currency in pair:
+            historic_data = self.historical_data[currency]
+            datetime_values = historic_data.datetime
+            closing_prices = historic_data.close
+
+            df_currency = pd.DataFrame(
+                data={currency: closing_prices}, index=pd.to_datetime(datetime_values)
+            )
+            dataframes.append(df_currency)
+
+        if not dataframes:
+            return None
+
+        df_combined = pd.concat(dataframes, axis=1, join="outer")
+        end_time = time()
+        print(f"time to get pair of historic prices {(end_time - start_time):.2f}")
         df_combined = df_combined.sort_index()
         return df_combined
 
@@ -666,3 +686,6 @@ class DataFetcher:
 
     def get_cointegration_pairs(self):
         return self.cointegration_pairs
+
+    def get_historical_price_options(self):
+        return list(self.historical_data.keys())

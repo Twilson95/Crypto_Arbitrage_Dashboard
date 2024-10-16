@@ -12,6 +12,7 @@ from cryptopy import (
     NewsFetcher,
     NewsChart,
     CointegrationCalculator,
+    TriangularArbitrage,
 )
 from cryptopy.src.prices.NetworkGraph import create_network_graph
 
@@ -293,21 +294,14 @@ def triangular_arbitrage_graphs(exchange, funds):
         if len(price.close) > 0
     }
 
-    arbitrage_opportunities = None
-    if prices and currency_fees:
-        arbitrage_opportunities = arbitrage_handler.identify_triangle_arbitrage(
+    if not prices or not currency_fees:
+        return {}, {}
+
+    exchange_network_graph, arbitrage_instructions = (
+        arbitrage_handler.return_triangle_arbitrage_instructions(
             prices, currency_fees, exchange, funds
         )
-
-    exchange_network_graph = create_network_graph(prices, arbitrage_opportunities)
-
-    arbitrage_instructions = {}
-    if arbitrage_opportunities:
-        arbitrage_instructions = (
-            arbitrage_handler.return_triangle_arbitrage_instructions(
-                arbitrage_opportunities
-            )
-        )
+    )
     return (
         dcc.Graph(figure=exchange_network_graph, style={"height": "100%"}),
         arbitrage_instructions,
@@ -319,8 +313,11 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
         return {}, {}
 
     cointegration_pair = ast.literal_eval(cointegration_pair_str)
-    start_time = time()
-    prices = data_manager.get_historical_prices_for_all_currencies(exchange)
+
+    # prices = data_manager.get_historical_prices_for_all_currencies(exchange)
+    prices = data_manager.get_df_of_historical_prices_pairs(
+        exchange, cointegration_pair
+    )
 
     spread = CointegrationCalculator.calculate_spread(
         prices, cointegration_pair[0], cointegration_pair[1]
@@ -330,36 +327,24 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
     _, currency_fees = data_manager.get_live_prices_and_fees_for_single_exchange(
         exchange
     )
-    got_prices = time()
-    # print("got prices", got_prices - start_time)
-    arbitrage_opportunities = None
-
+    arbitrage_instructions = {}
     if spread:
-        arbitrage_opportunities = ArbitrageHandler.identify_all_statistical_arbitrage(
-            prices,
-            cointegration_pair,
-            spread,
-            currency_fees,
-            exchange,
-            funds,
-            window=30,
+        arbitrage_instructions = (
+            ArbitrageHandler.return_statistical_arbitrage_instructions(
+                prices,
+                cointegration_pair,
+                spread,
+                currency_fees,
+                exchange,
+                funds,
+                window=30,
+            )
         )
-    identify_arbitrage = time()
-    # print("identify arbitrage", identify_arbitrage - got_prices)
-
-    arbitrage_instructions = (
-        arbitrage_handler.return_statistical_arbitrage_instructions(
-            arbitrage_opportunities
-        )
-    )
-    returned_instructions = time()
-    # print("returned_instructions", returned_instructions - identify_arbitrage)
 
     spread_chart, entry_dates, exit_dates = price_chart.plot_spread(
         spread["spread"], cointegration_pair, 30
     )
-    plot_spread = time()
-    # print("plot_spread", plot_spread - returned_instructions)
+
     statistical_arbitrage_chart = PriceChart.plot_prices_and_spread(
         prices,
         cointegration_pair,
@@ -367,8 +352,6 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
         entry_dates,
         exit_dates,
     )
-    plot_prices = time()
-    # print("plot_prices", plot_prices - plot_spread)
 
     return (
         [
@@ -413,16 +396,11 @@ def update_filter_values(
     if exchange_value is None:
         exchange_value = exchange_options[0]
 
-    currency_data = data_manager.get_historical_prices_for_all_currencies(
-        exchange_value
-    )
-    if currency_data is None:
-        currency_options = []
-    else:
-        currency_options = list(currency_data.keys())
+    currency_options = data_manager.get_historical_price_options(exchange_value)
 
     if not currency_options:
         currency_value = None
+        currency_options = []
     elif currency_value is None:
         currency_value = currency_options[0]
 

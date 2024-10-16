@@ -182,6 +182,20 @@ class DataManager:
         prices = data_fetcher.get_df_of_all_historical_prices()
         return prices
 
+    def get_df_of_historical_prices_pairs(self, exchange_name, pair):
+        data_fetcher = self.exchanges.get(exchange_name)
+        if not data_fetcher:
+            return None
+        prices = data_fetcher.get_df_of_historical_prices_pairs(pair)
+        return prices
+
+    def get_historical_price_options(self, exchange_name):
+        data_fetcher = self.exchanges.get(exchange_name)
+        if not data_fetcher:
+            return None
+        options = data_fetcher.get_historical_price_options()
+        return options
+
     def get_exchanges_cointegration_spreads(self, exchange_name):
         data_fetcher = self.exchanges.get(exchange_name)
         if not data_fetcher:
