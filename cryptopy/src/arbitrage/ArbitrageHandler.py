@@ -51,12 +51,11 @@ class ArbitrageHandler:
 
     @staticmethod
     def return_statistical_arbitrage_instructions(
-        prices, cointegration_pair, spread, currency_fees, exchange, funds, window=30
+        prices, cointegration_data, currency_fees, exchange, funds, window=30
     ):
         arbitrages = StatisticalArbitrage.identify_all_statistical_arbitrage(
             prices,
-            cointegration_pair,
-            spread,
+            cointegration_data,
             currency_fees,
             exchange,
             funds,

@@ -22,7 +22,6 @@ class DataFetcher:
         self.historical_data = dict()
         self.live_data = dict()
         self.cointegration_pairs = {}
-        self.cointegration_spreads = {}
         self.order_books = {}
         self.market_symbols = []
         self.timeout = 60
@@ -242,9 +241,9 @@ class DataFetcher:
             batches.extend(all_currency_batches)
 
         for batch_number, batch in enumerate(batches):
-            print(
-                f"Running live data batch {batch_number + 1}/{len(batches)} with {len(batch)} items"
-            )
+            # print(
+            # f"Running live data batch {batch_number + 1}/{len(batches)} with {len(batch)} items"
+            # )
 
             tasks = [self.fetch_live_price_multiple(batch)]
 
@@ -257,7 +256,7 @@ class DataFetcher:
 
             # Optionally, add a delay between batches to prevent overloading
             if batch_number + 1 < len(batches):
-                print(f"Waiting {delay_time} seconds before the next batch...")
+                # print(f"Waiting {delay_time} seconds before the next batch...")
                 await asyncio.sleep(delay_time)
 
     async def fetch_live_price(self, currency, symbol):
@@ -681,11 +680,11 @@ class DataFetcher:
         df_combined = df_combined.sort_index()
         return df_combined
 
-    def get_cointegration_spreads(self):
-        return self.cointegration_spreads
-
     def get_cointegration_pairs(self):
         return self.cointegration_pairs
+
+    def get_cointegration_pair(self, pair):
+        return self.cointegration_pairs[pair]
 
     def get_historical_price_options(self):
         return list(self.historical_data.keys())

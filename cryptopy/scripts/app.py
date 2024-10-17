@@ -312,28 +312,29 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
     if exchange is None or cointegration_pair_str is None:
         return {}, {}
 
-    cointegration_pair = ast.literal_eval(cointegration_pair_str)
+    cointegration_pair = tuple(ast.literal_eval(cointegration_pair_str))
 
-    # prices = data_manager.get_historical_prices_for_all_currencies(exchange)
     prices = data_manager.get_df_of_historical_prices_pairs(
         exchange, cointegration_pair
     )
 
-    spread = CointegrationCalculator.calculate_spread(
-        prices, cointegration_pair[0], cointegration_pair[1]
+    cointegration_data = data_manager.get_cointegration_pair_from_exchange(
+        exchange, cointegration_pair
     )
-    cointegration_pair = (cointegration_pair[0], cointegration_pair[1])
+    if cointegration_data.spread is None:
+        cointegration_data.spread, cointegration_data.hedge_ratio = (
+            CointegrationCalculator.calculate_spread(prices, cointegration_pair)
+        )
 
     _, currency_fees = data_manager.get_live_prices_and_fees_for_single_exchange(
         exchange
     )
     arbitrage_instructions = {}
-    if spread:
+    if cointegration_data.spread is not None:
         arbitrage_instructions = (
             ArbitrageHandler.return_statistical_arbitrage_instructions(
                 prices,
-                cointegration_pair,
-                spread,
+                cointegration_data,
                 currency_fees,
                 exchange,
                 funds,
@@ -342,13 +343,13 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
         )
 
     spread_chart, entry_dates, exit_dates = price_chart.plot_spread(
-        spread["spread"], cointegration_pair, 30
+        cointegration_data.spread, cointegration_pair, 30
     )
 
     statistical_arbitrage_chart = PriceChart.plot_prices_and_spread(
         prices,
         cointegration_pair,
-        spread["hedge_ratio"],
+        cointegration_data.hedge_ratio,
         entry_dates,
         exit_dates,
     )
@@ -396,7 +397,9 @@ def update_filter_values(
     if exchange_value is None:
         exchange_value = exchange_options[0]
 
-    currency_options = data_manager.get_historical_price_options(exchange_value)
+    currency_options = data_manager.get_historical_price_options_from_exchange(
+        exchange_value
+    )
 
     if not currency_options:
         currency_value = None
@@ -404,30 +407,21 @@ def update_filter_values(
     elif currency_value is None:
         currency_value = currency_options[0]
 
-    pairs = data_manager.get_exchanges_cointegration_pairs(exchange_value)
-    significant_pairs = []
-    if pairs:
-        significant_pairs = [
-            (pair[0], pair[1]) for pair, value in pairs.items() if value <= p_value
-        ]
+    cointegration_pairs = data_manager.get_cointegration_pairs_from_exchange(
+        exchange_value
+    )
 
-    # live_statistical_arbitrage_events = data_manager.get_live_statistical_arbitrage_events(exchange)
-    if not significant_pairs:
-        cointegration_pairs_str_options = []
-    else:
-        # cointegration_pairs_str_options = sorted(
-        #     [str(tup) for tup in significant_pairs]
-        # )
-        cointegration_pairs_str_options = sorted(
-            [
-                {
-                    "label": create_filter_label(tup),
-                    "value": str(tup),
-                }
-                for tup in significant_pairs
-            ],
-            key=lambda x: x["value"],
-        )
+    cointegration_pairs_str_options = sorted(
+        [
+            {
+                "label": create_filter_label(cointegration_data),
+                "value": str(pair),
+            }
+            for pair, cointegration_data in cointegration_pairs.items()
+            if cointegration_data.p_value <= p_value
+        ],
+        key=lambda x: x["value"],
+    )
 
     if cointegration_value is None:
         if not cointegration_pairs_str_options:
@@ -445,8 +439,15 @@ def update_filter_values(
     )
 
 
-def create_filter_label(tup):
-    color = "green" if tup[0] == "FIL/USD" else "red"
+def create_filter_label(cointegration_data):
+    trade_status = cointegration_data.trade_details.get("trade_status")
+    pair = cointegration_data.pair
+    print(pair, trade_status)
+    color = (
+        "green"
+        if trade_status == "open"
+        else "red" if trade_status == "closed" else "black"
+    )
 
     return html.Span(
         [
@@ -454,7 +455,7 @@ def create_filter_label(tup):
             #     src="/assets/images/language_icons/r-lang_50px.svg", height=20
             # ),
             html.Span(
-                f"{tup[0]}, {tup[1]}",
+                f"{pair[0]}, {pair[1]}",
                 style={"font-size": 15, "padding-left": 10, "color": color},
             ),
         ],

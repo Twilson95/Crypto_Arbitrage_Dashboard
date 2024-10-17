@@ -1,3 +1,6 @@
+from time import time
+
+
 class StatisticalArbitrage:
 
     @staticmethod
@@ -294,14 +297,16 @@ class StatisticalArbitrage:
 
     @staticmethod
     def identify_statistical_arbitrage(
-        drawing_instructions,
-        pairs,
+        cointegration_data,
         currency_fees,
         exchange,
         funds,
         price_df,
-        hedge_ratio,
     ):
+        drawing_instructions = cointegration_data.trade_details
+        pairs = cointegration_data.pair
+        hedge_ratio = cointegration_data.hedge_ratio
+
         entry_points = drawing_instructions["entry_points"]
         exit_points = drawing_instructions["exit_points"]
 
@@ -376,26 +381,21 @@ class StatisticalArbitrage:
 
     @staticmethod
     def identify_all_statistical_arbitrage(
-        prices, pair, spread_details, currency_fees, exchange, funds, window=30
+        prices, cointegration_data, currency_fees, exchange, funds, window=30
     ):
-        spread = spread_details["spread"]
-        hedge_ratio = spread_details["hedge_ratio"]
-        drawing_instructions = StatisticalArbitrage.get_statistical_arbitrage_trades(
-            spread, window
+        cointegration_data.trade_details = (
+            StatisticalArbitrage.get_statistical_arbitrage_trades(
+                cointegration_data.spread, window
+            )
         )
         arbitrage_instructions = StatisticalArbitrage.identify_statistical_arbitrage(
-            drawing_instructions,
-            pair,
-            currency_fees,
-            exchange,
-            funds,
-            prices,
-            hedge_ratio,
+            cointegration_data, currency_fees, exchange, funds, prices
         )
         return arbitrage_instructions
 
     @staticmethod
     def get_statistical_arbitrage_trades(spread, window=30):
+        start_time = time()
         spread_mean = spread.rolling(window=window).mean()
         spread_std = spread.rolling(window=window).std()
 
@@ -441,11 +441,16 @@ class StatisticalArbitrage:
         while len(exit_points) < len(entry_points):
             exit_points.append((None, None))
 
-        drawing_instructions = {
+        trade_details = {
             "entry_points": entry_points,
             "exit_points": exit_points,
             "spread_mean": spread_mean,
             "lower_threshold": lower_threshold,
             "upper_threshold": upper_threshold,
+            "trade_status": (
+                "closed" if len(entry_points) == len(exit_points) else "open"
+            ),
         }
-        return drawing_instructions
+        end_time = time()
+        print(f"time to get arbitrage trades {(end_time - start_time):.4f}")
+        return trade_details

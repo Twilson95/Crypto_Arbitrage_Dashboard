@@ -42,7 +42,7 @@ class AppLayout:
                     id="exchange-selector",
                     options=[],
                     placeholder="Select an exchange",
-                    value="Bitmex",
+                    value=None,
                 ),
             ],
             title="Exchange",
