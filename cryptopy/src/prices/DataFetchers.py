@@ -22,7 +22,6 @@ class DataFetcher:
         self.historical_data = dict()
         self.live_data = dict()
         self.cointegration_pairs = {}
-        self.cointegration_spreads = {}
         self.order_books = {}
         self.market_symbols = []
         self.timeout = 60
@@ -242,9 +241,9 @@ class DataFetcher:
             batches.extend(all_currency_batches)
 
         for batch_number, batch in enumerate(batches):
-            print(
-                f"Running live data batch {batch_number + 1}/{len(batches)} with {len(batch)} items"
-            )
+            # print(
+            # f"Running live data batch {batch_number + 1}/{len(batches)} with {len(batch)} items"
+            # )
 
             tasks = [self.fetch_live_price_multiple(batch)]
 
@@ -257,7 +256,7 @@ class DataFetcher:
 
             # Optionally, add a delay between batches to prevent overloading
             if batch_number + 1 < len(batches):
-                print(f"Waiting {delay_time} seconds before the next batch...")
+                # print(f"Waiting {delay_time} seconds before the next batch...")
                 await asyncio.sleep(delay_time)
 
     async def fetch_live_price(self, currency, symbol):
@@ -294,7 +293,6 @@ class DataFetcher:
         self.live_data[currency].open.append(current_price)
 
         if currency in self.historical_data.keys():
-            # self.historical_data[currency].close[-1] = current_price
             self.historical_data[currency].update_with_latest_value(
                 current_price, datetime_obj
             )
@@ -550,6 +548,34 @@ class DataFetcher:
 
         return inter_coin_symbols
 
+    def update_all_cointegration_spreads(self):
+        print("start updating all cointegration pairs from live data")
+        start_time = time()
+
+        for cointegration_data in self.cointegration_pairs.values():
+            # if cointegration_data.p_value > 0.05:
+            #     continue
+            print(f"{cointegration_data.pair}, updating all cointegration pairs")
+            coin1, coin2 = cointegration_data.pair
+            price1 = self.get_historical_prices(coin1).close[-1]
+            price2 = self.get_historical_prices(coin2).close[-1]
+            if (
+                price1 is None
+                or price2 is None
+                or cointegration_data.hedge_ratio is None
+            ):
+                continue
+            try:
+                cointegration_data.update_latest_spread(price1, price2)
+                cointegration_data.update_trade_details()
+            except Exception as e:
+                print(f"An error occurred: {e}")
+
+            end_time = time()
+            print(
+                f"time to update all cointegration with live prices {(end_time - start_time):.2f}"
+            )
+
     @staticmethod
     def get_inverse_pair(pair):
         return pair.split("/")[1] + "/" + pair.split("/")[0]
@@ -677,15 +703,15 @@ class DataFetcher:
 
         df_combined = pd.concat(dataframes, axis=1, join="outer")
         end_time = time()
-        print(f"time to get pair of historic prices {(end_time - start_time):.2f}")
+        # print(f"time to get pair of historic prices {(end_time - start_time):.2f}")
         df_combined = df_combined.sort_index()
         return df_combined
 
-    def get_cointegration_spreads(self):
-        return self.cointegration_spreads
-
     def get_cointegration_pairs(self):
         return self.cointegration_pairs
+
+    def get_cointegration_pair(self, pair):
+        return self.cointegration_pairs[pair]
 
     def get_historical_price_options(self):
         return list(self.historical_data.keys())

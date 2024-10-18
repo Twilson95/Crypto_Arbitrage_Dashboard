@@ -29,10 +29,18 @@ class DataManager:
         async def periodic_fetch():
             while True:
                 await self.fetch_all_live_prices()
+                await self.update_all_cointegration_spreads()
                 await self.fetch_all_order_books()
                 await asyncio.sleep(self.sleep_time)
 
         asyncio.run_coroutine_threadsafe(periodic_fetch(), self.loop)
+
+    async def update_all_cointegration_spreads(self):
+        tasks = [
+            exchange.update_all_cointegration_spreads()
+            for exchange in self.exchanges.values()
+        ]
+        await asyncio.gather(*tasks)
 
     async def initialize_exchanges(self):
         # initialise any exchange there exists api keys for
@@ -116,16 +124,12 @@ class DataManager:
         await asyncio.gather(*tasks)
 
     def get_historical_prices(self, exchange_name, currency):
-        data_fetcher = self.exchanges.get(exchange_name)
-        if not data_fetcher:
-            return None
+        data_fetcher = self.exchanges[exchange_name]
         prices = data_fetcher.get_historical_prices(currency)
         return prices
 
     def get_live_prices(self, exchange_name, currency):
-        data_fetcher = self.exchanges.get(exchange_name)
-        if not data_fetcher:
-            return None
+        data_fetcher = self.exchanges[exchange_name]
         prices = data_fetcher.get_live_prices(currency)
         return prices
 
@@ -176,36 +180,30 @@ class DataManager:
         return order_book
 
     def get_historical_prices_for_all_currencies(self, exchange_name):
-        data_fetcher = self.exchanges.get(exchange_name)
-        if not data_fetcher:
-            return None
+        data_fetcher = self.exchanges[exchange_name]
         prices = data_fetcher.get_df_of_all_historical_prices()
         return prices
 
     def get_df_of_historical_prices_pairs(self, exchange_name, pair):
-        data_fetcher = self.exchanges.get(exchange_name)
-        if not data_fetcher:
-            return None
+        data_fetcher = self.exchanges[exchange_name]
         prices = data_fetcher.get_df_of_historical_prices_pairs(pair)
         return prices
 
-    def get_historical_price_options(self, exchange_name):
-        data_fetcher = self.exchanges.get(exchange_name)
-        if not data_fetcher:
-            return None
+    def get_historical_price_options_from_exchange(self, exchange_name):
+        data_fetcher = self.exchanges[exchange_name]
         options = data_fetcher.get_historical_price_options()
         return options
 
-    def get_exchanges_cointegration_spreads(self, exchange_name):
-        data_fetcher = self.exchanges.get(exchange_name)
-        if not data_fetcher:
-            return None
+    def get_cointegration_spreads_from_exchange(self, exchange_name):
+        data_fetcher = self.exchanges[exchange_name]
         cointegration_spreads = data_fetcher.get_cointegration_spreads()
         return cointegration_spreads
 
-    def get_exchanges_cointegration_pairs(self, exchange_name):
-        data_fetcher = self.exchanges.get(exchange_name)
-        if not data_fetcher:
-            return None
+    def get_cointegration_pairs_from_exchange(self, exchange_name):
+        data_fetcher = self.exchanges[exchange_name]
         cointegration_pairs = data_fetcher.get_cointegration_pairs()
         return cointegration_pairs
+
+    def get_cointegration_pair_from_exchange(self, exchange_name, pair):
+        data_fetcher = self.exchanges[exchange_name]
+        return data_fetcher.get_cointegration_pair(pair)

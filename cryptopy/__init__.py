@@ -17,3 +17,5 @@ from cryptopy.src.layout.AppLayout import AppLayout
 from cryptopy.src.news.SentimentAllocator import SentimentAllocator
 from cryptopy.src.news.NewsFetcher import NewsFetcher
 from cryptopy.src.news.NewsChart import NewsChart
+
+from cryptopy.src.trading.PortfolioManager import PortfolioManager
