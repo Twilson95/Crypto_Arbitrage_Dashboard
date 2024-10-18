@@ -13,6 +13,7 @@ from cryptopy import (
     NewsChart,
     CointegrationCalculator,
     TriangularArbitrage,
+    PortfolioManager,
 )
 from cryptopy.src.prices.NetworkGraph import create_network_graph
 
@@ -48,6 +49,7 @@ end_time = time()
 news_fetcher = NewsFetcher(news_config)
 news_chart = NewsChart()
 price_chart = PriceChart()
+portfolio_manager = PortfolioManager()
 
 
 @app.callback(
@@ -409,19 +411,37 @@ def update_filter_values(
 
     cointegration_pairs = data_manager.get_cointegration_pairs_from_exchange(
         exchange_value
-    )
+    ).copy()
 
+    # print(f"time to update all trade details {(end_time - start_time):.4f}")
+
+    coins_in_portfolio = portfolio_manager.get_traded_pairs()
+    color_order = {"red": 0, "green": 1, "black": 2}
+    # Modified to only call create_filter_label once and store the color for sorting
     cointegration_pairs_str_options = sorted(
         [
             {
-                "label": create_filter_label(cointegration_data),
+                # Run create_filter_label once and store both the label and color
+                "label": create_filter_label(cointegration_data, coins_in_portfolio)[
+                    0
+                ],  # HTML label with color
                 "value": str(pair),
+                "color": create_filter_label(cointegration_data, coins_in_portfolio)[
+                    1
+                ],  # Extracted color for sorting
             }
             for pair, cointegration_data in cointegration_pairs.items()
             if cointegration_data.p_value <= p_value
         ],
-        key=lambda x: x["value"],
+        # Sort first by 'value', then by 'color'
+        key=lambda x: (color_order[x["color"]], x["value"]),
     )
+
+    # Remove the 'color' field after sorting to ensure the output is clean
+    cointegration_pairs_str_options = [
+        {"label": x["label"], "value": x["value"]}
+        for x in cointegration_pairs_str_options
+    ]
 
     if cointegration_value is None:
         if not cointegration_pairs_str_options:
@@ -439,27 +459,36 @@ def update_filter_values(
     )
 
 
-def create_filter_label(cointegration_data):
+def create_filter_label(cointegration_data, coins_in_portfolio):
     trade_status = cointegration_data.trade_details.get("trade_status")
     pair = cointegration_data.pair
-    print(pair, trade_status)
-    color = (
-        "green"
-        if trade_status == "open"
-        else "red" if trade_status == "closed" else "black"
+
+    is_open_opportunity = cointegration_data.is_open_opportunity()
+    # print("is opportunity: ", is_open_opportunity)
+    is_in_portfolio = (
+        pair in coins_in_portfolio or (pair[1], pair[0]) in coins_in_portfolio
     )
 
-    return html.Span(
-        [
-            # html.Img(
-            #     src="/assets/images/language_icons/r-lang_50px.svg", height=20
-            # ),
-            html.Span(
-                f"{pair[0]}, {pair[1]}",
-                style={"font-size": 15, "padding-left": 10, "color": color},
-            ),
-        ],
-        style={"align-items": "center", "justify-content": "center"},
+    color = (
+        "green"
+        if is_open_opportunity and not is_in_portfolio
+        else "red" if trade_status == "closed" and is_in_portfolio else "black"
+    )
+
+    return (
+        html.Span(
+            [
+                # html.Img(
+                #     src="/assets/images/language_icons/r-lang_50px.svg", height=20
+                # ),
+                html.Span(
+                    f"{pair[0]}, {pair[1]}",
+                    style={"font-size": 15, "padding-left": 10, "color": color},
+                ),
+            ],
+            style={"align-items": "center", "justify-content": "center"},
+        ),
+        color,
     )
 
 

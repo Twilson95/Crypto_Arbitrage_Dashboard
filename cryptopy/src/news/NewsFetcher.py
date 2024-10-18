@@ -56,7 +56,7 @@ class NewsFetcher:
             time_difference = now - cache_time
 
             if time_difference < timedelta(hours=caching_hrs):
-                print(f"retrieving cached news data {currency}")
+                # print(f"retrieving cached news data {currency}")
                 self.news_data[currency] = news_data["news_items"]
                 return news_data["news_items"], False  # Cached data found
         except FileNotFoundError:

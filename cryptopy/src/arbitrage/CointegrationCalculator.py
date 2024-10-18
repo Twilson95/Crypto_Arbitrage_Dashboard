@@ -10,17 +10,30 @@ from cryptopy import StatisticalArbitrage
 class CointegrationData:
     pair: tuple
     p_value: float
-    spread: Optional[list]
+    spread: Optional[pd.Series]
     hedge_ratio: Optional[float]
     trade_details: Dict = field(default_factory=dict)
 
     def update_latest_spread(self, price1, price2):
-        self.spread[-1] = price1 - self.hedge_ratio * price2
+        print("updating latest spread")
+        self.spread.iloc[-1] = price1 - self.hedge_ratio * price2
 
     def update_trade_details(self):
+        print("updating trade details")
         self.trade_details = StatisticalArbitrage.get_statistical_arbitrage_trades(
             self.spread
         )
+
+    def is_open_opportunity(self):
+        open_opportunity = False
+        if self.trade_details.get("trade_status") == "open":
+            current_spread = self.spread.iloc[-1]
+            upper_threshold = self.trade_details["upper_threshold"].iloc[-1]
+            lower_threshold = self.trade_details["lower_threshold"].iloc[-1]
+            if current_spread > upper_threshold or current_spread < lower_threshold:
+                open_opportunity = True
+
+        return open_opportunity
 
 
 class CointegrationCalculator:

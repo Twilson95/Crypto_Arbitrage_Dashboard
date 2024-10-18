@@ -460,6 +460,6 @@ class PriceChart:
             ),  # Ensure datetime index is properly formatted on x-axis
         )
         end_time = time()
-        print(f"plot spread time {(end_time - start_time):.2f}")
+        # print(f"plot spread time {(end_time - start_time):.2f}")
 
         return fig

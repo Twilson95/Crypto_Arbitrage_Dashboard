@@ -448,9 +448,11 @@ class StatisticalArbitrage:
             "lower_threshold": lower_threshold,
             "upper_threshold": upper_threshold,
             "trade_status": (
-                "closed" if len(entry_points) == len(exit_points) else "open"
+                "open"
+                if exit_points[-1] == (None, None)
+                else None if len(entry_points) == 0 else "closed"
             ),
         }
         end_time = time()
-        print(f"time to get arbitrage trades {(end_time - start_time):.4f}")
+        # print(f"time to get arbitrage trades {(end_time - start_time):.4f}")
         return trade_details
