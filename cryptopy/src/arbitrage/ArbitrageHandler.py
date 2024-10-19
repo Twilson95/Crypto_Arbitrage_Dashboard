@@ -64,6 +64,8 @@ class ArbitrageHandler:
         if not arbitrages:
             return {}, {}
 
+        arbitrages.reverse()
+
         instruction_diagrams = []
 
         for arbitrage in arbitrages:
