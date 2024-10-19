@@ -129,6 +129,7 @@ class StatisticalArbitrage:
 
         # Combine all data into a single dictionary for this opportunity
         return {
+            "entry_date": entry_time,
             "summary_header": summary_header,
             "waterfall_data": waterfall_data,
             "instructions": combined_instructions,
