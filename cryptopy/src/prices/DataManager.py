@@ -29,18 +29,15 @@ class DataManager:
         async def periodic_fetch():
             while True:
                 await self.fetch_all_live_prices()
-                await self.update_all_cointegration_spreads()
+                self.update_all_cointegration_spreads()
                 await self.fetch_all_order_books()
                 await asyncio.sleep(self.sleep_time)
 
         asyncio.run_coroutine_threadsafe(periodic_fetch(), self.loop)
 
-    async def update_all_cointegration_spreads(self):
-        tasks = [
+    def update_all_cointegration_spreads(self):
+        for exchange in self.exchanges.values():
             exchange.update_all_cointegration_spreads()
-            for exchange in self.exchanges.values()
-        ]
-        await asyncio.gather(*tasks)
 
     async def initialize_exchanges(self):
         # initialise any exchange there exists api keys for
