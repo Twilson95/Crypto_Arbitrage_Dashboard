@@ -555,7 +555,6 @@ class DataFetcher:
         for cointegration_data in self.cointegration_pairs.values():
             # if cointegration_data.p_value > 0.05:
             #     continue
-            print(f"{cointegration_data.pair}, updating all cointegration pairs")
             coin1, coin2 = cointegration_data.pair
             price1 = self.get_historical_prices(coin1).close[-1]
             price2 = self.get_historical_prices(coin2).close[-1]

@@ -120,7 +120,15 @@ class NewsFetcher:
         return sentiment
 
     def get_news_data(self, currency):
-        return self.news_data[currency]
+        news_data = self.news_data.get(currency, {})
+        if news_data == {}:
+            # find any non-empty news data to return
+            for currency, news_data in self.news_data.items():
+                if news_data == {}:
+                    continue
+                else:
+                    return news_data
+        return news_data
 
     def add_sentiment_analysis(self):
         currencies = self.news_data.keys()

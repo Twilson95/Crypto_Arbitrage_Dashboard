@@ -15,11 +15,9 @@ class CointegrationData:
     trade_details: Dict = field(default_factory=dict)
 
     def update_latest_spread(self, price1, price2):
-        print("updating latest spread")
         self.spread.iloc[-1] = price1 - self.hedge_ratio * price2
 
     def update_trade_details(self):
-        print("updating trade details")
         self.trade_details = StatisticalArbitrage.get_statistical_arbitrage_trades(
             self.spread
         )
