@@ -1,5 +1,6 @@
 from dash import html, dcc
 import dash_bootstrap_components as dbc
+import plotly.graph_objs as go
 from cryptopy.src.layout.layout_styles import (
     container_style,
     header_style,
@@ -16,6 +17,33 @@ class AppLayout:
         self.filter_component = filter_component
         self.technical_indicators = technical_indicators
         self.interval_rate = interval_rate_sec
+        self.default_figure = AppLayout.create_default_figure()
+
+    @staticmethod
+    def create_default_figure():
+        return go.Figure(
+            layout=dict(
+                template="plotly_dark",
+                annotations=[
+                    {
+                        "text": "Waiting for data...",  # The message to display
+                        "xref": "paper",
+                        "yref": "paper",
+                        "showarrow": False,
+                        "font": {
+                            "size": 24,
+                            "color": "white",  # Ensure text is visible on dark background
+                        },
+                        "x": 0.5,  # Position in the center of the graph
+                        "y": 0.5,
+                        "xanchor": "center",
+                        "yanchor": "middle",
+                    }
+                ],
+                xaxis={"visible": False},  # Hide x-axis
+                yaxis={"visible": False},  # Hide y-axis
+            )
+        )
 
     def create_filters(self):
 
@@ -163,13 +191,14 @@ class AppLayout:
         ]
 
     @staticmethod
-    def create_grid_elements():
+    def create_grid_elements(default_figure):
         return [
             dbc.Row(
                 [
                     dbc.Col(
                         dcc.Graph(
                             id="historic-price-chart",
+                            figure=default_figure,
                             style={"height": "100%", "width": "100%"},
                         ),
                         style=grid_element_style,
@@ -177,6 +206,7 @@ class AppLayout:
                     dbc.Col(
                         dcc.Graph(
                             id="live-price-chart",
+                            figure=default_figure,
                             style={"height": "100%", "width": "100%"},
                         ),
                         style=grid_element_style,
@@ -189,6 +219,7 @@ class AppLayout:
                     dbc.Col(
                         dcc.Graph(
                             id="depth-chart",
+                            figure=default_figure,
                             style={
                                 "height": "100%",
                                 "width": "100%",
@@ -280,7 +311,7 @@ class AppLayout:
         return html.Div(
             id="grid-container",
             style=grid_container_style,
-            children=self.create_grid_elements(),
+            children=self.create_grid_elements(self.default_figure),
         )
 
     def tab_2_elements(self):

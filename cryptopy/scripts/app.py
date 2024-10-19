@@ -148,11 +148,11 @@ def render_tab_content(
 )
 def update_historic_price_chart(currency, exchange, selected_indicators):
     if not (currency and exchange):
-        return {}
+        return app_layout.default_figure
 
     prices = data_manager.get_historical_prices(exchange, currency)
     if not prices:
-        return {}
+        return app_layout.default_figure
 
     indicators = technical_indicators.apply_indicators(prices, selected_indicators)
 
@@ -173,11 +173,11 @@ def update_historic_price_chart(currency, exchange, selected_indicators):
 def update_live_price_chart(currency, exchange_name, n_intervals, indicator):
     # print(currency, exchange)
     if not (currency or exchange_name):
-        return {}
+        return app_layout.default_figure
 
     prices = data_manager.get_live_prices(exchange_name, currency)
     if not prices:
-        return {}
+        return app_layout.default_figure
 
     return price_chart.create_ohlc_chart(prices, mark_limit=20, title="Live Price")
 
@@ -185,11 +185,11 @@ def update_live_price_chart(currency, exchange_name, n_intervals, indicator):
 @app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
 def update_news_chart(currency):
     if not currency:
-        return {}
+        return [dcc.Graph(id="news-default", figure=app_layout.default_figure)]
 
     news = news_fetcher.get_news_data(currency)
     if not news:
-        return {}
+        return [dcc.Graph(id="news-default", figure=app_layout.default_figure)]
 
     return news_chart.create_table(news)
 
@@ -202,13 +202,13 @@ def update_news_chart(currency):
         Input("interval-component", "n_intervals"),
     ],
 )
-def update_news_chart(exchange, currency, n_intervals):
+def update_depth_chart(exchange, currency, n_intervals):
     if not currency or not exchange:
-        return {}
+        return app_layout.default_figure
 
     order_book = data_manager.get_order_book(exchange, currency)
     if not order_book:
-        return {}
+        return app_layout.default_figure
 
     return price_chart.plot_depth_chart(order_book)
 
