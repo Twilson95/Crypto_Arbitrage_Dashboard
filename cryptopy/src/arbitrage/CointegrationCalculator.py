@@ -4,6 +4,7 @@ from statsmodels.tsa.stattools import coint
 from dataclasses import dataclass, field
 from typing import Optional, Dict
 from cryptopy import StatisticalArbitrage
+from datetime import timedelta
 
 
 @dataclass
@@ -68,6 +69,57 @@ class CointegrationCalculator:
                 )
 
         return cointegration_pairs
+
+    # @staticmethod
+    # def find_cointegration_pairs(df, precalculated_pairs, run_date=None, days_back=100):
+    #     if run_date is None:
+    #         run_date = pd.Timestamp.today()
+    #     else:
+    #         # Convert to pd.Timestamp if the user provides a string or date object
+    #         run_date = pd.to_datetime(run_date)
+    #
+    #     start_date = run_date - pd.Timedelta(days=days_back)
+    #     df_filtered = df[(df.index >= start_date) & (df.index <= run_date)]
+    #
+    #     cointegration_pairs = precalculated_pairs
+    #
+    #     # Iterate through pairs of columns (time series) in the DataFrame
+    #     for column_1 in df_filtered.columns:
+    #         for column_2 in df_filtered.columns:
+    #             if column_1 == column_2:
+    #                 continue
+    #
+    #             # Sort the pair based on mean prices (descending) and create the tuple
+    #             pair = tuple(
+    #                 sorted(
+    #                     [column_1, column_2],
+    #                     key=lambda x: df_filtered[x].mean(),
+    #                     reverse=True,
+    #                 )
+    #             )
+    #
+    #             # If this pair has already been processed, skip it
+    #             if pair in cointegration_pairs:
+    #                 continue
+    #
+    #             # Perform the cointegration test
+    #             coint_stat, p_value, crit_values = (
+    #                 CointegrationCalculator.test_cointegration(df_filtered, pair)
+    #             )
+    #
+    #             spread, hedge_ratio = None, None
+    #             # If the p-value is below 0.05, calculate the spread and hedge ratio
+    #             if p_value < 0.05:
+    #                 spread, hedge_ratio = CointegrationCalculator.calculate_spread(
+    #                     df_filtered, pair
+    #                 )
+    #
+    #             # Store the cointegration results in the dictionary
+    #             cointegration_pairs[pair] = CointegrationData(
+    #                 pair=pair, p_value=p_value, spread=spread, hedge_ratio=hedge_ratio
+    #             )
+    #
+    #     return cointegration_pairs
 
     @staticmethod
     def test_cointegration(df, pair):

@@ -570,10 +570,10 @@ class DataFetcher:
             except Exception as e:
                 print(f"An error occurred: {e}")
 
-            end_time = time()
-            print(
-                f"time to update all cointegration with live prices {(end_time - start_time):.2f}"
-            )
+        end_time = time()
+        print(
+            f"time to update all cointegration with live prices {(end_time - start_time):.2f}"
+        )
 
     @staticmethod
     def get_inverse_pair(pair):
