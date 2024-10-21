@@ -143,11 +143,18 @@ class DataFetcher:
             tasks = [self.update_historical_prices(currency) for currency in batch]
             await self._gather_with_timeout(tasks, "update_all_historical_prices")
             self.update_cointegration_pairs()
+        self.output_cointegration_pairs(
+            f"data/historical_data/{self.exchange_name}/cointegration_pairs.csv"
+        )
+        # Add a delay if there are more batches
+        # if i + batch_size < len(currencies):
+        #     print(f"Waiting for {wait_time} seconds before the next batch...")
+        #     await asyncio.sleep(wait_time)
 
-            # Add a delay if there are more batches
-            # if i + batch_size < len(currencies):
-            #     print(f"Waiting for {wait_time} seconds before the next batch...")
-            #     await asyncio.sleep(wait_time)
+    def output_cointegration_pairs(self, path):
+        pairs = self.cointegration_pairs.keys()
+        df = pd.DataFrame(pairs, columns=["coin_1", "coin_2"])
+        df.to_csv(path, index=False)
 
     async def fetch_initial_live_prices(self, currency, count):
         symbol = self.currencies[currency]
@@ -555,7 +562,6 @@ class DataFetcher:
         for cointegration_data in self.cointegration_pairs.values():
             # if cointegration_data.p_value > 0.05:
             #     continue
-            print(f"{cointegration_data.pair}, updating all cointegration pairs")
             coin1, coin2 = cointegration_data.pair
             price1 = self.get_historical_prices(coin1).close[-1]
             price2 = self.get_historical_prices(coin2).close[-1]
@@ -571,10 +577,10 @@ class DataFetcher:
             except Exception as e:
                 print(f"An error occurred: {e}")
 
-            end_time = time()
-            print(
-                f"time to update all cointegration with live prices {(end_time - start_time):.2f}"
-            )
+        end_time = time()
+        print(
+            f"time to update all cointegration with live prices {(end_time - start_time):.2f}"
+        )
 
     @staticmethod
     def get_inverse_pair(pair):
