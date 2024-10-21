@@ -1,6 +1,8 @@
 from cryptopy import StatisticalArbitrage
 import os
 import pandas as pd
+import json
+import datetime
 
 
 def check_for_opening_event(
@@ -78,5 +80,29 @@ def get_trade_profit(
     )
     if arbitrage:
         profit = arbitrage.get("summary_header", {}).get("total_profit", 0)
-        print(f"Profit for {close_event[0].date} {close_reason}: {profit}")
+        print(
+            f"{pair}, date: {open_event[0]} to {close_event[0]}, close_reason: {close_reason}: profit {profit:.2f}"
+        )
         return profit
+
+
+def json_serial(obj):
+    if isinstance(obj, (datetime.datetime, datetime.date)):
+        return (
+            obj.isoformat()
+        )  # Convert to ISO format string (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+    raise TypeError(f"Type {type(obj)} not serializable")
+
+
+def save_to_json(data, filename):
+    directory = os.path.dirname(filename)
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory)
+
+    with open(filename, "w") as json_file:
+        json.dump(data, json_file, indent=4, default=json_serial)
+
+
+def read_from_json(filename):
+    with open(filename, "r") as json_file:
+        return json.load(json_file)

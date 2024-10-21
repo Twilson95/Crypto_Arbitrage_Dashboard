@@ -1,4 +1,5 @@
 import pandas as pd
+
 from cryptopy import CointegrationCalculator
 from cryptopy.scripts.simulation_helpers import (
     get_trade_profit,
@@ -7,27 +8,37 @@ from cryptopy.scripts.simulation_helpers import (
     check_for_opening_event,
     read_historic_data_long_term,
     filter_df,
+    save_to_json,
 )
 
+simulation_name = "default_parameters"
 exchange_name = "Kraken"
 historic_data_folder = f"../../data/historical_data/{exchange_name}_300_days/"
+cointegration_pairs_path = f"../../data/historical_data/cointegration_pairs.csv"
+simulation_path = f"../../data/simulations/{simulation_name}.json"
+
 trade_results = []
 
 # Simulation parameters
 days_back = 100  # hedge ratio and p_value based off this
 rolling_window = 30  # controls moving avg for mean and thresholds
 p_value_open_threshold = 0.05
-p_value_close_threshold = 0.2
+p_value_close_threshold = 1
 expiry_days_threshold = 14
 spread_threshold = 2
 
+pair_combinations_df = pd.read_csv(cointegration_pairs_path)
+pair_combinations = list(pair_combinations_df.itertuples(index=False, name=None))
 
-pair_combinations = [
-    ("LTC/USD", "KSM/USD")
-    # ("BTC/USD", "DOGE/USD"),
-]
+# pair_combinations = [("LTC/USD", "KSM/USD")]
+#     ("TIA/USD", "ARB/USD"),
+#     ("UNI/USD", "OP/USD"),
+#     ("FIL/USD", "PEPE/USD"),
+#     ("LTC/USD", "SHIB/USD"),
+#     # ("BTC/USD", "DOGE/USD"),
+# ]
 
-for pair in pair_combinations:
+for pair in sorted(pair_combinations, key=lambda x: x[0]):
     open_position = False
     open_event = None
     currency_fees = {pair[0]: {"taker": 0.004}, pair[1]: {"taker": 0.004}}
@@ -39,6 +50,7 @@ for pair in pair_combinations:
         [df_pair_1["close"], df_pair_2["close"]], axis=1, keys=[pair[0], pair[1]]
     ).dropna()
 
+    df.index = df.index.date
     for current_date in df.index[days_back:]:
         df_filtered = filter_df(df, current_date, days_back)
 
@@ -80,7 +92,18 @@ for pair in pair_combinations:
                     hedge_ratio,
                     close_reason,
                 )
-                trade_results.append((open_event, close_event, profit))
+                trade_results.append(
+                    {
+                        "pair": pair,
+                        "open_date": open_event[0],
+                        "open_spread": open_event[1],
+                        "open_direction": open_event[2],
+                        "close_date": close_event[0],
+                        "close_spread": close_event[1],
+                        "close_reason": close_reason,
+                        "profit": profit,
+                    }
+                )
                 open_position = False
 
         if not open_position:
@@ -94,3 +117,19 @@ for pair in pair_combinations:
             )
             if open_event:
                 open_position = True
+
+total_profit = sum(result["profit"] for result in trade_results)
+print(f"Total Expected Profit: {total_profit:.2f}")
+simulation_data = {
+    "parameters": {
+        "days_back": days_back,
+        "rolling_window": rolling_window,
+        "p_value_open_threshold": p_value_open_threshold,
+        "p_value_close_threshold": p_value_close_threshold,
+        "expiry_days_threshold": expiry_days_threshold,
+        "spread_threshold": spread_threshold,
+    },
+    "trade_events": trade_results,
+    "total_profit": total_profit,
+}
+save_to_json(simulation_data, simulation_path)
