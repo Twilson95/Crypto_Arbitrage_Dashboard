@@ -1,7 +1,7 @@
 import pandas as pd
 
 from cryptopy import CointegrationCalculator
-from cryptopy.scripts.simulation_helpers import (
+from cryptopy.scripts.simulations.simulation_helpers import (
     get_trade_profit,
     get_todays_data,
     check_for_closing_event,
@@ -14,7 +14,7 @@ from cryptopy.scripts.simulation_helpers import (
 simulation_name = "default_parameters"
 exchange_name = "Kraken"
 historic_data_folder = f"../../data/historical_data/{exchange_name}_300_days/"
-cointegration_pairs_path = f"../../data/historical_data/cointegration_pairs.csv"
+cointegration_pairs_path = f"../../../data/historical_data/cointegration_pairs.csv"
 simulation_path = f"../../data/simulations/{simulation_name}.json"
 
 trade_results = []

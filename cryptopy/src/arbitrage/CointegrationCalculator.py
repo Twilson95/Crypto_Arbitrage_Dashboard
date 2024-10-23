@@ -126,6 +126,10 @@ class CointegrationCalculator:
         prices1 = df[pair[0]]
         prices2 = df[pair[1]]
 
+        if prices1.isnull().any() or prices2.isnull().any():
+            # print(f"{pair} One of the series contains NaN values. Returning None.")
+            return None, None, None
+
         coint_result = coint(prices1, prices2)
         return coint_result
 

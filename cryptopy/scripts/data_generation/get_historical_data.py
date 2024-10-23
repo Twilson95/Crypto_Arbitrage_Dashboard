@@ -4,7 +4,7 @@ import ccxt
 import yaml
 
 # Load exchange config from yaml file
-with open("../config/exchange_config.yaml", "r") as f:
+with open("../../config/exchange_config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
 # Setup exchange connection

@@ -1,7 +1,7 @@
 import ccxt
 import yaml
 
-with open("../config/exchange_config.yaml", "r") as f:
+with open("../../config/exchange_config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
 exchange_name = "Bitmex"

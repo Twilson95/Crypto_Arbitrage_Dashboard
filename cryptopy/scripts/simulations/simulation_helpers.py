@@ -3,6 +3,7 @@ import os
 import pandas as pd
 import json
 import datetime
+import glob
 
 
 def check_for_opening_event(
@@ -106,3 +107,16 @@ def save_to_json(data, filename):
 def read_from_json(filename):
     with open(filename, "r") as json_file:
         return json.load(json_file)
+
+
+def get_combined_df_of_prices(folder_path):
+    csv_files = glob.glob(os.path.join(folder_path, "*.csv"))
+    dfs = []
+    for file in csv_files:
+        file_name = os.path.basename(file).replace(".csv", "")
+        new_column_name = file_name.replace("_", "/")
+        df = pd.read_csv(file, index_col=0)
+        df = df[["close"]].rename(columns={"close": new_column_name})
+        dfs.append(df)
+    combined_df = pd.concat(dfs, axis=1, join="outer")
+    return combined_df

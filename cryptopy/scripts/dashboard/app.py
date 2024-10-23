@@ -50,6 +50,8 @@ news_fetcher = NewsFetcher(news_config)
 news_chart = NewsChart()
 price_chart = PriceChart()
 portfolio_manager = PortfolioManager()
+portfolio_path = r"data/portfolio_data/Kraken/live_positions.csv"
+portfolio_manager.read_portfolio(portfolio_path)
 
 
 @app.callback(
