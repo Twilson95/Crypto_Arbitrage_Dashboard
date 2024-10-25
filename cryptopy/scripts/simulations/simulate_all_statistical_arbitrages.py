@@ -13,9 +13,9 @@ from cryptopy.scripts.simulations.simulation_helpers import (
 
 simulation_name = "default_parameters"
 exchange_name = "Kraken"
-historic_data_folder = f"../../data/historical_data/{exchange_name}_300_days/"
+historic_data_folder = f"../../../data/historical_data/{exchange_name}_300_days/"
 cointegration_pairs_path = f"../../../data/historical_data/cointegration_pairs.csv"
-simulation_path = f"../../data/simulations/{simulation_name}.json"
+simulation_path = f"../../../data/simulations/{simulation_name}.json"
 
 trade_results = []
 
