@@ -72,7 +72,14 @@ def get_todays_data(list_data, current_date):
 
 
 def get_trade_profit(
-    open_event, close_event, pair, currency_fees, df_filtered, hedge_ratio, close_reason
+    open_event,
+    close_event,
+    pair,
+    currency_fees,
+    df_filtered,
+    hedge_ratio,
+    close_reason,
+    trade_amount,
 ):
     arbitrage = StatisticalArbitrage.statistical_arbitrage_iteration(
         entry=open_event[0:3],
@@ -80,7 +87,7 @@ def get_trade_profit(
         pairs=pair,
         currency_fees=currency_fees,  # Example transaction cost
         price_df=df_filtered,
-        usd_start=100,
+        usd_start=trade_amount,
         hedge_ratio=hedge_ratio,
         exchange="test",
     )

@@ -13,7 +13,7 @@ from cryptopy.scripts.simulations.simulation_helpers import (
     calculate_expected_profit,
 )
 
-simulation_name = "portfolio_sim_p_0.01_mpr_5"
+simulation_name = "portfolio_sim_30_day_expiry"
 exchange_name = "Kraken"
 historic_data_folder = f"../../../data/historical_data/{exchange_name}_300_days/"
 cointegration_pairs_path = f"../../../data/historical_data/cointegration_pairs.csv"
@@ -28,7 +28,7 @@ parameters = {
     "rolling_window": 30,  # controls moving avg for mean and thresholds
     "p_value_open_threshold": 0.01,
     "p_value_close_threshold": 1,
-    "expiry_days_threshold": 14,
+    "expiry_days_threshold": 30,
     "spread_threshold": 2,
     "hedge_ratio_positive": True,
     "max_coin_price_ratio": 5,
@@ -43,7 +43,7 @@ print("historic_data_combined")
 pair_combinations_df = pd.read_csv(cointegration_pairs_path)
 pair_combinations = list(pair_combinations_df.itertuples(index=False, name=None))
 
-portfolio_manager = PortfolioManager(parameters["max_concurrent_trades"])
+portfolio_manager = PortfolioManager(parameters["max_concurrent_trades"], funds=1000)
 print(df.head())
 
 df.index = pd.to_datetime(df.index)
@@ -95,6 +95,7 @@ for current_date in df.index[days_back:]:
                 hedge_ratio,
             )
             if close_event:
+                trade_amount = portfolio_manager.get_funds() * 0.1
                 profit = get_trade_profit(
                     open_event,
                     close_event,
@@ -103,8 +104,9 @@ for current_date in df.index[days_back:]:
                     df_filtered,
                     hedge_ratio,
                     close_reason,
+                    trade_amount,
                 )
-                portfolio_manager.on_closing_trade(pair)
+                portfolio_manager.on_closing_trade(pair, profit)
                 cumulative_profit += profit
                 trade_results.append(
                     {

@@ -91,6 +91,7 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
                     df_filtered,
                     hedge_ratio,
                     close_reason,
+                    trade_amount=100,
                 )
                 trade_results.append(
                     {

@@ -2,7 +2,8 @@ import pandas as pd
 
 
 class PortfolioManager:
-    def __init__(self, max_trades=6):
+    def __init__(self, max_trades=6, funds=1000):
+        self.funds = funds
         self.portfolio = None
         self.traded_pairs = set()
         self.traded_coins = set()
@@ -10,6 +11,9 @@ class PortfolioManager:
         self.sold_coins = set()
         self.open_events = dict()
         self.max_trades = max_trades
+
+    def get_funds(self):
+        return self.funds
 
     def read_portfolio(self, portfolio_path):
         self.portfolio = pd.read_csv(portfolio_path)
@@ -39,8 +43,9 @@ class PortfolioManager:
             return True
         return False
 
-    def on_closing_trade(self, pair):
+    def on_closing_trade(self, pair, profit):
         self.traded_pairs.remove(pair)
+        self.funds += profit
 
         # self.traded_coins.remove(pair[0])
         # self.traded_coins.remove(pair[1])

@@ -9,7 +9,7 @@ from cryptopy.scripts.simulations.simulation_helpers import read_from_json
 
 matplotlib.use("TkAgg")  # Or another backend like 'Qt5Agg' depending on your system
 
-simulation_name = "portfolio_sim_p_0.01_mpr_5"
+simulation_name = "portfolio_sim_dynamic_trade_amount"
 simulation_path = f"../../../data/simulations/{simulation_name}.json"
 
 json_data = read_from_json(simulation_path)
@@ -37,20 +37,20 @@ df["open_days"] = (df["close_date"] - df["open_date"]).dt.days
 # plt.title("Histogram of Profits by Pairs")
 # plt.show()
 #
-# profits_per_day = df.groupby(["open_days"])["profit"].sum()
-# profits_per_day.plot()
-# plt.xlabel("open_days")
-# plt.ylabel("profit")
-# plt.title("profit per open day")
-# plt.show()
+profits_per_day = df.groupby(["open_days"])["profit"].sum()
+profits_per_day.plot()
+plt.xlabel("open_days")
+plt.ylabel("profit")
+plt.title("profit per open day")
+plt.show()
 #
-# profits_by_pair = df.groupby(["coin_1", "coin_2"])["profit"].sum()
-# print(profits_by_pair)
-# profits_by_pair.hist(bins=30)
-# plt.xlabel("Profit")
-# plt.ylabel("Frequency")
-# plt.title("Histogram of Profits by Pairs")
-# plt.show()
+profits_by_pair = df.groupby(["coin_1", "coin_2"])["profit"].sum()
+print(profits_by_pair)
+profits_by_pair.hist(bins=30)
+plt.xlabel("Profit")
+plt.ylabel("Frequency")
+plt.title("Histogram of Profits by Pairs")
+plt.show()
 
 # scatter_plot_with_trend(df)
 print(df.groupby(["open_direction"])["profit"].sum())
