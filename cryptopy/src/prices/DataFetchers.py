@@ -143,9 +143,10 @@ class DataFetcher:
             tasks = [self.update_historical_prices(currency) for currency in batch]
             await self._gather_with_timeout(tasks, "update_all_historical_prices")
             self.update_cointegration_pairs()
-        self.output_cointegration_pairs(
-            f"data/historical_data/{self.exchange_name}/cointegration_pairs.csv"
-        )
+        # self.output_cointegration_pairs(
+        #     f"data/historical_data/cointegration_pairs.csv"
+        # )
+
         # Add a delay if there are more batches
         # if i + batch_size < len(currencies):
         #     print(f"Waiting for {wait_time} seconds before the next batch...")

@@ -12,19 +12,17 @@ from cryptopy import (
     NewsFetcher,
     NewsChart,
     CointegrationCalculator,
-    TriangularArbitrage,
     PortfolioManager,
 )
-from cryptopy.src.prices.NetworkGraph import create_network_graph
 
 from time import time
 import ast
 
 import yaml
 
-# load_figure_template("DARKLY")
-
-app = Dash(__name__, external_stylesheets=[dbc.themes.SLATE], assets_folder="../assets")
+app = Dash(
+    __name__, external_stylesheets=[dbc.themes.SLATE], assets_folder="../../assets"
+)
 app.title = "Crypto Dashboard"
 
 with open("cryptopy/config/exchange_config.yaml", "r") as f:
@@ -50,6 +48,8 @@ news_fetcher = NewsFetcher(news_config)
 news_chart = NewsChart()
 price_chart = PriceChart()
 portfolio_manager = PortfolioManager()
+portfolio_path = r"data/portfolio_data/Kraken/live_positions.csv"
+portfolio_manager.read_portfolio(portfolio_path)
 
 
 @app.callback(
