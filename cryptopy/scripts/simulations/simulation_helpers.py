@@ -78,13 +78,15 @@ def check_for_closing_event(
     elif open_event["direction"] == "long" and spread > spread_mean:
         return {"date": current_date, "spread": spread, "reason": "crossed_mean"}
 
-    spread_distance = abs(open_event["spread"] - spread_mean)
-    short_stop_loss = open_event["spread"] + spread_distance
-    long_stop_loss = open_event["spread"] - spread_distance
-    if open_event["direction"] == "short" and spread > short_stop_loss:
+    if open_event["direction"] == "short" and spread > open_event["stop_loss"]:
         return {"date": current_date, "spread": spread, "reason": "stop_loss"}
-    elif open_event["direction"] == "long" and spread < long_stop_loss:
+    elif open_event["direction"] == "long" and spread < open_event["stop_loss"]:
         return {"date": current_date, "spread": spread, "reason": "stop_loss"}
+
+    if open_event["direction"] == "short" and spread_mean > open_event["spread"]:
+        return {"date": current_date, "spread": spread, "reason": "non-profitable"}
+    elif open_event["direction"] == "long" and spread_mean < open_event["spread"]:
+        return {"date": current_date, "spread": spread, "reason": "non-profitable"}
 
     return None
 

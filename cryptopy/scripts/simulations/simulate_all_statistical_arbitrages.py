@@ -43,6 +43,7 @@ pair_combinations = list(pair_combinations_df.itertuples(index=False, name=None)
 # ]
 
 for pair in sorted(pair_combinations, key=lambda x: x[0]):
+    print(pair)
     open_position = False
     open_event = None
     currency_fees = {pair[0]: {"taker": 0.004}, pair[1]: {"taker": 0.004}}
@@ -95,7 +96,7 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
 
         avg_price_ratio = get_avg_price_difference(df_filtered, pair, hedge_ratio)
 
-        if open_position is not None:
+        if open_position:
             continue
 
         open_event = check_for_opening_event(
