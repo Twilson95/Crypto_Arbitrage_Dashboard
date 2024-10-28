@@ -7,47 +7,86 @@ import glob
 
 
 def check_for_opening_event(
-    current_date,
-    todays_spread,
-    p_value,
-    p_value_open_threshold,
-    upper_threshold,
-    lower_threshold,
-    avg_price_ratio,
+    todays_data, p_value, parameters, avg_price_ratio, hedge_ratio
 ):
-    if p_value < p_value_open_threshold:
-        if todays_spread > upper_threshold:
-            return current_date, todays_spread, "short", avg_price_ratio
-        elif todays_spread < lower_threshold:
-            return current_date, todays_spread, "long", avg_price_ratio
+    current_date = todays_data["date"]
+    upper_threshold = todays_data["upper_threshold"]
+    lower_threshold = todays_data["lower_threshold"]
+    spread = todays_data["spread"]
+    spread_mean = todays_data["spread_mean"]
+
+    if hedge_ratio < 0 and parameters["hedge_ratio_positive"]:
+        return None
+
+    if avg_price_ratio > parameters["max_coin_price_ratio"] or avg_price_ratio < 0:
+        return None
+
+    if p_value < parameters["p_value_open_threshold"]:
+        spread_distance = abs(spread - spread_mean)
+        if spread > upper_threshold:
+            short_stop_loss = (
+                spread + spread_distance * parameters["stop_loss_multiplier"]
+            )
+
+            return {
+                "date": current_date,
+                "spread": spread,
+                "direction": "short",
+                "avg_price_ratio": avg_price_ratio,
+                "stop_loss": short_stop_loss,
+            }
+        elif spread < lower_threshold:
+            long_stop_loss = (
+                spread - spread_distance * parameters["stop_loss_multiplier"]
+            )
+            return {
+                "date": current_date,
+                "spread": spread,
+                "direction": "long",
+                "avg_price_ratio": avg_price_ratio,
+                "stop_loss": long_stop_loss,
+            }
     return None
 
 
 def check_for_closing_event(
-    current_date,
-    todays_spread,
+    todays_data,
     p_value,
-    p_value_close_threshold,
-    spread_mean,
+    parameters,
     open_event,
-    expiry_days_threshold,
     hedge_ratio,
 ):
-    if p_value > p_value_close_threshold:
-        return (current_date, todays_spread), "p_value"
+    current_date = todays_data["date"]
+    spread = todays_data["spread"]
+    spread_mean = todays_data["spread_mean"]
+
+    if p_value > parameters["p_value_close_threshold"]:
+        return {"date": current_date, "spread": spread, "reason": "p_value"}
 
     if hedge_ratio < 0:
-        return (current_date, todays_spread), "negative_hedge_ratio"
+        return {
+            "date": current_date,
+            "spread": spread,
+            "reason": "negative_hedge_ratio",
+        }
 
-    if open_event and (current_date - open_event[0]).days > expiry_days_threshold:
-        return (current_date, todays_spread), "expired"
+    if (current_date - open_event["date"]).days > parameters["expiry_days_threshold"]:
+        return {"date": current_date, "spread": spread, "reason": "expired"}
 
-    if open_event and open_event[2] == "short" and todays_spread < spread_mean:
-        return (current_date, todays_spread), "crossed_mean"
-    elif open_event and open_event[2] == "long" and todays_spread > spread_mean:
-        return (current_date, todays_spread), "crossed_mean"
+    if open_event["direction"] == "short" and spread < spread_mean:
+        return {"date": current_date, "spread": spread, "reason": "crossed_mean"}
+    elif open_event["direction"] == "long" and spread > spread_mean:
+        return {"date": current_date, "spread": spread, "reason": "crossed_mean"}
 
-    return None, None
+    spread_distance = abs(open_event["spread"] - spread_mean)
+    short_stop_loss = open_event["spread"] + spread_distance
+    long_stop_loss = open_event["spread"] - spread_distance
+    if open_event["direction"] == "short" and spread > short_stop_loss:
+        return {"date": current_date, "spread": spread, "reason": "stop_loss"}
+    elif open_event["direction"] == "long" and spread < long_stop_loss:
+        return {"date": current_date, "spread": spread, "reason": "stop_loss"}
+
+    return None
 
 
 def read_historic_data_long_term(pair, historic_data_folder):
@@ -64,11 +103,29 @@ def filter_df(df, current_date, days_back):
     return df[(df.index >= start_date) & (df.index <= current_date)]
 
 
-def get_todays_data(list_data, current_date):
+def filter_list_to_current_date(list_data, current_date):
     todays_data = (
         list_data.loc[current_date] if current_date in list_data.index else None
     )
     return todays_data
+
+
+def get_todays_data(parameters, spread, current_date):
+    rolling_window = parameters["rolling_window"]
+    spread_mean = spread.rolling(window=rolling_window).mean()
+    spread_std = spread.rolling(window=rolling_window).std()
+    spread_threshold = parameters["spread_threshold"]
+    upper_threshold = spread_mean + spread_threshold * spread_std
+    lower_threshold = spread_mean - spread_threshold * spread_std
+
+    return {
+        "date": current_date,
+        "spread": filter_list_to_current_date(spread, current_date),
+        "spread_mean": filter_list_to_current_date(spread_mean, current_date),
+        "spread_std": filter_list_to_current_date(spread_std, current_date),
+        "upper_threshold": filter_list_to_current_date(upper_threshold, current_date),
+        "lower_threshold": filter_list_to_current_date(lower_threshold, current_date),
+    }
 
 
 def get_trade_profit(
@@ -78,12 +135,11 @@ def get_trade_profit(
     currency_fees,
     df_filtered,
     hedge_ratio,
-    close_reason,
     trade_amount,
 ):
     arbitrage = StatisticalArbitrage.statistical_arbitrage_iteration(
-        entry=open_event[0:3],
-        exit=close_event,
+        entry=(open_event["date"], open_event["spread"], open_event["direction"]),
+        exit=(close_event["date"], close_event["spread"]),
         pairs=pair,
         currency_fees=currency_fees,  # Example transaction cost
         price_df=df_filtered,
@@ -94,7 +150,7 @@ def get_trade_profit(
     if arbitrage:
         profit = arbitrage.get("summary_header", {}).get("total_profit", 0)
         print(
-            f"{pair}, date: {open_event[0]} to {close_event[0]}, close_reason: {close_reason}: profit {profit:.2f}"
+            f"{pair}, date: {open_event['date']} to {close_event['date']}, close_reason: {close_event['reason']}: profit {profit:.2f}"
         )
         return profit
 
@@ -142,24 +198,21 @@ def get_avg_price_difference(df, pair, hedge_ratio):
 
 
 def calculate_expected_profit(
-    current_date,
-    df,
-    pair,
-    hedge_ratio,
-    open_event,
-    todays_spread,
-    todays_spread_mean,
-    currency_fees,
+    df, pair, hedge_ratio, open_event, todays_data, currency_fees
 ):
-    if open_event[2] == "short":
-        buy_coin_price = get_todays_data(df[pair[1]], current_date)
+    current_date = todays_data["date"]
+    spread = todays_data["spread"]
+    spread_mean = todays_data["spread_mean"]
+
+    if open_event["direction"] == "short":
+        buy_coin_price = filter_list_to_current_date(df[pair[1]], current_date)
         adjusted_value = buy_coin_price * hedge_ratio
         bought_amount = 100 / adjusted_value
-    elif open_event[2] == "long":
-        buy_coin_price = get_todays_data(df[pair[0]], current_date)
+    elif open_event["direction"] == "long":
+        buy_coin_price = filter_list_to_current_date(df[pair[0]], current_date)
         bought_amount = 100 / buy_coin_price
     else:
         return None
 
     fees = currency_fees[pair[0]]["taker"] * 2
-    return bought_amount * abs(todays_spread - todays_spread_mean) * (1 - fees)
+    return bought_amount * abs(spread - spread_mean) * (1 - fees)

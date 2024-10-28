@@ -9,7 +9,7 @@ from cryptopy.scripts.simulations.simulation_helpers import read_from_json
 
 matplotlib.use("TkAgg")  # Or another backend like 'Qt5Agg' depending on your system
 
-simulation_name = "portfolio_sim_dynamic_trade_amount"
+simulation_name = "portfolio_sim_30_day_expiry"
 simulation_path = f"../../../data/simulations/{simulation_name}.json"
 
 json_data = read_from_json(simulation_path)
@@ -38,7 +38,10 @@ df["open_days"] = (df["close_date"] - df["open_date"]).dt.days
 # plt.show()
 #
 profits_per_day = df.groupby(["open_days"])["profit"].sum()
+fig, ax1 = plt.subplots(figsize=(12, 6))
 profits_per_day.plot()
+plt.axhline(y=0, color="red", linestyle="--", linewidth=1)
+ax1.set_ylim(-50, 200)
 plt.xlabel("open_days")
 plt.ylabel("profit")
 plt.title("profit per open day")

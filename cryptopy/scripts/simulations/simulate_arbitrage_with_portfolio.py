@@ -3,7 +3,6 @@ import pandas as pd
 from cryptopy import CointegrationCalculator, PortfolioManager
 from cryptopy.scripts.simulations.simulation_helpers import (
     get_trade_profit,
-    get_todays_data,
     check_for_closing_event,
     check_for_opening_event,
     filter_df,
@@ -11,6 +10,7 @@ from cryptopy.scripts.simulations.simulation_helpers import (
     get_combined_df_of_prices,
     get_avg_price_difference,
     calculate_expected_profit,
+    get_todays_data,
 )
 
 simulation_name = "portfolio_sim_30_day_expiry"
@@ -34,6 +34,7 @@ parameters = {
     "max_coin_price_ratio": 5,
     "max_concurrent_trades": 10,
     "min_expected_profit": 5,
+    "stop_loss_multiplier": 1,  # ratio of expected trade distance to use as stop loss location
 }
 
 folder_path = "../../../data/historical_data/Kraken_300_days"
@@ -67,32 +68,14 @@ for current_date in df.index[days_back:]:
         spread, hedge_ratio = CointegrationCalculator.calculate_spread(
             df_filtered, pair
         )
-        rolling_window = parameters["rolling_window"]
-        spread_mean = spread.rolling(window=rolling_window).mean()
-        spread_std = spread.rolling(window=rolling_window).std()
-        spread_threshold = parameters["spread_threshold"]
-        upper_threshold = spread_mean + spread_threshold * spread_std
-        lower_threshold = spread_mean - spread_threshold * spread_std
-
-        todays_spread = get_todays_data(spread, current_date)
-        todays_spread_mean = get_todays_data(spread_mean, current_date)
-        todays_spread_std = get_todays_data(spread_std, current_date)
-        todays_upper_threshold = get_todays_data(upper_threshold, current_date)
-        todays_lower_threshold = get_todays_data(lower_threshold, current_date)
+        todays_data = get_todays_data(parameters, spread, current_date)
 
         close_event = None
         # if open position exists check for close signal
         open_event = portfolio_manager.get_open_event(pair)
         if open_event:
-            close_event, close_reason = check_for_closing_event(
-                current_date,
-                todays_spread,
-                p_value,
-                parameters["p_value_close_threshold"],
-                todays_spread_mean,
-                open_event,
-                parameters["expiry_days_threshold"],
-                hedge_ratio,
+            close_event = check_for_closing_event(
+                todays_data, p_value, parameters, open_event, hedge_ratio
             )
             if close_event:
                 trade_amount = portfolio_manager.get_funds() * 0.1
@@ -103,7 +86,6 @@ for current_date in df.index[days_back:]:
                     currency_fees,
                     df_filtered,
                     hedge_ratio,
-                    close_reason,
                     trade_amount,
                 )
                 portfolio_manager.on_closing_trade(pair, profit)
@@ -111,60 +93,49 @@ for current_date in df.index[days_back:]:
                 trade_results.append(
                     {
                         "pair": pair,
-                        "open_date": open_event[0],
-                        "open_spread": open_event[1],
-                        "open_direction": open_event[2],
-                        "close_date": close_event[0],
-                        "close_spread": close_event[1],
-                        "close_reason": close_reason,
+                        "open_event": open_event,
+                        "close_event": close_event,
                         "profit": profit,
-                        "price_ratio": open_event[3],
                     }
                 )
         open_event = portfolio_manager.get_open_event(pair)
+        avg_price_ratio = get_avg_price_difference(df_filtered, pair, hedge_ratio)
+
         if open_event is not None:
             continue
         if portfolio_manager.is_at_max_trades():
             continue
         if portfolio_manager.is_pair_traded(pair):
             continue
-        if hedge_ratio < 0 and parameters["hedge_ratio_positive"]:
-            continue
-        avg_price_ratio = get_avg_price_difference(df_filtered, pair, hedge_ratio)
-        if avg_price_ratio > parameters["max_coin_price_ratio"] or avg_price_ratio < 0:
-            continue
 
         open_event = check_for_opening_event(
-            current_date,
-            todays_spread,
-            p_value,
-            parameters["p_value_open_threshold"],
-            todays_upper_threshold,
-            todays_lower_threshold,
-            avg_price_ratio,
+            todays_data, p_value, parameters, avg_price_ratio, hedge_ratio
         )
         if open_event:
             expected_profit = calculate_expected_profit(
-                current_date,
                 df,
                 pair,
                 hedge_ratio,
                 open_event,
-                todays_spread,
-                todays_spread_mean,
+                todays_data,
                 currency_fees,
             )
-            print(f"{pair} expected profit: {expected_profit}")
+            print(f"{pair} expected profit: {expected_profit:.2f}")
             if expected_profit < parameters["min_expected_profit"]:
                 continue
 
+            open_event["expected_profit"] = expected_profit
             portfolio_manager.on_opening_trade(pair, open_event)
 
 total_profit = sum(result["profit"] for result in trade_results)
 number_of_trades = len(trade_results)
 positive_trades = len([trade for trade in trade_results if trade["profit"] > 0])
 successful_trades = len(
-    [trade for trade in trade_results if trade["close_reason"] == "crossed_mean"]
+    [
+        trade
+        for trade in trade_results
+        if trade["close_event"]["close_reason"] == "crossed_mean"
+    ]
 )
 
 print(f"Total Expected Profit: {total_profit:.2f}")
