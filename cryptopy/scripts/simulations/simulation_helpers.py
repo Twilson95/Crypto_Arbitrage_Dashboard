@@ -112,7 +112,7 @@ def filter_list_to_current_date(list_data, current_date):
     return todays_data
 
 
-def get_todays_data(parameters, spread, current_date):
+def get_todays_spread_data(parameters, spread, current_date):
     rolling_window = parameters["rolling_window"]
     spread_mean = spread.rolling(window=rolling_window).mean()
     spread_std = spread.rolling(window=rolling_window).std()
@@ -200,7 +200,7 @@ def get_avg_price_difference(df, pair, hedge_ratio):
 
 
 def calculate_expected_profit(
-    df, pair, hedge_ratio, open_event, todays_data, currency_fees
+    df, pair, hedge_ratio, open_event, todays_data, currency_fees, trade_size=100
 ):
     current_date = todays_data["date"]
     spread = todays_data["spread"]
@@ -209,12 +209,12 @@ def calculate_expected_profit(
     if open_event["direction"] == "short":
         buy_coin_price = filter_list_to_current_date(df[pair[1]], current_date)
         adjusted_value = buy_coin_price * hedge_ratio
-        bought_amount = 100 / adjusted_value
+        bought_amount = trade_size / adjusted_value
     elif open_event["direction"] == "long":
         buy_coin_price = filter_list_to_current_date(df[pair[0]], current_date)
-        bought_amount = 100 / buy_coin_price
+        bought_amount = trade_size / buy_coin_price
     else:
         return None
 
-    fees = currency_fees[pair[0]]["taker"] * 2
+    fees = currency_fees[pair[0]]["taker"] * 4
     return bought_amount * abs(spread - spread_mean) * (1 - fees)

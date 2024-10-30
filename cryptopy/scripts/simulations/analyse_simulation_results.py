@@ -1,6 +1,7 @@
 import pandas as pd
 from matplotlib import pyplot as plt
 import matplotlib
+import seaborn as sns
 from cryptopy.scripts.simulations.analysis_helpers import (
     box_plot_coins,
     scatter_plot_with_trend,
@@ -9,11 +10,32 @@ from cryptopy.scripts.simulations.simulation_helpers import read_from_json
 
 matplotlib.use("TkAgg")  # Or another backend like 'Qt5Agg' depending on your system
 
-simulation_name = "portfolio_sim_30_day_expiry"
-simulation_path = f"../../../data/simulations/{simulation_name}.json"
+simulation_name = "optimised_for_all_trades"
+simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
+# simulation_path = f"../../../data/simulations/all_trades/{simulation_name}.json"
 
 json_data = read_from_json(simulation_path)
-df = pd.DataFrame(json_data["trade_events"])
+flattened_data = []
+results = json_data["trade_events"]
+print(results)
+for entry in results:
+    flattened_entry = {
+        "pair": entry["pair"],
+        "open_date": entry["open_event"]["date"],
+        "open_spread": entry["open_event"]["spread"],
+        "open_direction": entry["open_event"]["direction"],
+        "open_avg_price_ratio": entry["open_event"]["avg_price_ratio"],
+        "open_stop_loss": entry["open_event"]["stop_loss"],
+        "open_expected_profit": entry["open_event"]["expected_profit"],
+        "close_date": entry["close_event"]["date"],
+        "close_spread": entry["close_event"]["spread"],
+        "close_reason": entry["close_event"]["reason"],
+        "profit": entry["profit"],
+    }
+    flattened_data.append(flattened_entry)
+
+# Convert to DataFrame
+df = pd.DataFrame(flattened_data)
 
 df[["coin_1", "coin_2"]] = df["pair"].apply(pd.Series)
 
@@ -37,25 +59,24 @@ df["open_days"] = (df["close_date"] - df["open_date"]).dt.days
 # plt.title("Histogram of Profits by Pairs")
 # plt.show()
 #
-profits_per_day = df.groupby(["open_days"])["profit"].sum()
+profits_per_day = df.groupby(["open_days"])["profit"].mean()
 fig, ax1 = plt.subplots(figsize=(12, 6))
 profits_per_day.plot()
 plt.axhline(y=0, color="red", linestyle="--", linewidth=1)
-ax1.set_ylim(-50, 200)
+# ax1.set_ylim(-50, 200)
 plt.xlabel("open_days")
 plt.ylabel("profit")
 plt.title("profit per open day")
 plt.show()
 #
-profits_by_pair = df.groupby(["coin_1", "coin_2"])["profit"].sum()
-print(profits_by_pair)
+profits_by_pair = df["profit"]
 profits_by_pair.hist(bins=30)
 plt.xlabel("Profit")
 plt.ylabel("Frequency")
 plt.title("Histogram of Profits by Pairs")
 plt.show()
 
-# scatter_plot_with_trend(df)
+scatter_plot_with_trend(df)
 print(df.groupby(["open_direction"])["profit"].sum())
 
 df["coin"] = df["coin_1"]
@@ -66,13 +87,14 @@ box_plot_coins(df_combined, "coin")
 
 df["pair_str"] = df["pair"].astype(str)
 # box_plot_coins(df, "pair_str")
-
-df["extra_fees"] = 2
+df.sort_values(by="close_date", inplace=True)
+df["extra_fees"] = 0
 df["net_profit"] = df["profit"] - df["extra_fees"]
 df["cumulative_profit"] = df["net_profit"].cumsum()
 plt.figure(figsize=(12, 6))
 plt.plot(
-    df.index,
+    # df.index,
+    df["close_date"],
     df["cumulative_profit"],
     marker="o",
     linestyle="-",
@@ -82,4 +104,34 @@ plt.title("Cumulative Profit Over Each Row")
 plt.xlabel("Row Index")
 plt.ylabel("Cumulative Profit")
 plt.grid(True)
+plt.show()
+
+
+df["expected_profit_error"] = df["open_expected_profit"] - df["profit"]
+# df_stop_loss = df.loc[df["close_reason"] == "stop_loss"]
+df_sucess = df.loc[df["close_reason"] == "crossed_mean"]
+
+profit_error_by_open_direction = df_sucess.groupby("open_direction")[
+    "expected_profit_error"
+].mean()
+profit_error_by_open_direction.plot(kind="bar")
+plt.xlabel("Open Direction")
+plt.ylabel("Expected Profit Error")
+plt.title("Expected Profit Error by Open Direction")
+plt.show()
+
+# unprofitable_df = df.loc[df["profit"] <= -20]
+# df = df.loc[df["close_reason"] == "crossed_mean"]
+sns.lmplot(
+    data=df,
+    x="open_expected_profit",
+    y="profit",
+    hue="open_direction",
+    height=6,
+    aspect=1.5,
+    scatter_kws={"s": 10},
+)
+plt.title("Scatter Plot of Price Ratio vs Profit with Separate Trend Lines")
+plt.xlabel("Expected")
+plt.ylabel("Profit")
 plt.show()
