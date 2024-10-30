@@ -42,7 +42,7 @@ def box_plot_coins(df, group_column):
 def scatter_plot_with_trend(df):
     sns.lmplot(
         data=df,
-        x="price_ratio",
+        x="open_avg_price_ratio",
         y="profit",
         hue="open_direction",
         height=6,

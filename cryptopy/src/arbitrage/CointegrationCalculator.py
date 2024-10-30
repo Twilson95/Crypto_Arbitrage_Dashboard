@@ -143,16 +143,15 @@ class CointegrationCalculator:
         return spreads
 
     @staticmethod
-    def calculate_spread(df, pair):
+    def calculate_spread(df, pair, hedge_ratio=None):
         prices1 = df[pair[0]]
         prices2 = df[pair[1]]
 
-        # Use linear regression to find the hedge ratio
-        model = sm.OLS(prices1, sm.add_constant(prices2))
-        result = model.fit()
-        hedge_ratio = result.params.iloc[1]
+        if hedge_ratio is None:
+            model = sm.OLS(prices1, sm.add_constant(prices2))
+            result = model.fit()
+            hedge_ratio = result.params.iloc[1]
 
-        # Calculate spread
         spread = prices1 - hedge_ratio * prices2
         spread = spread.dropna()
 

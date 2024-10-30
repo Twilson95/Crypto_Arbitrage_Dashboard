@@ -10,14 +10,14 @@ from cryptopy.scripts.simulations.simulation_helpers import (
     get_combined_df_of_prices,
     get_avg_price_difference,
     calculate_expected_profit,
-    get_todays_data,
+    get_todays_spread_data,
 )
 
-simulation_name = "portfolio_sim_30_day_expiry"
+simulation_name = "trade_size_measured_at_entry_time"
 exchange_name = "Kraken"
 historic_data_folder = f"../../../data/historical_data/{exchange_name}_300_days/"
 cointegration_pairs_path = f"../../../data/historical_data/cointegration_pairs.csv"
-simulation_path = f"../../../data/simulations/{simulation_name}.json"
+simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
 
 trade_results = []
 cumulative_profit = 0
@@ -31,10 +31,11 @@ parameters = {
     "expiry_days_threshold": 30,
     "spread_threshold": 2,
     "hedge_ratio_positive": True,
+    "stop_loss_multiplier": 1.5,  # ratio of expected trade distance to use as stop loss location
     "max_coin_price_ratio": 5,
     "max_concurrent_trades": 10,
-    "min_expected_profit": 5,
-    "stop_loss_multiplier": 1,  # ratio of expected trade distance to use as stop loss location
+    "min_expected_profit": 0.005,  # must expect at least half a percent of the portfolio amount
+    "max_expected_profit": 0.05,  # no more at risk as 5% percent of the portfolio amount
 }
 
 folder_path = "../../../data/historical_data/Kraken_300_days"
@@ -65,20 +66,24 @@ for current_date in df.index[days_back:]:
         if p_value is None:
             continue
 
+        open_event = portfolio_manager.get_open_event(pair)
+        if open_event is None:
+            hedge_ratio = None
+        else:
+            hedge_ratio = open_event["hedge_ratio"]
+
         spread, hedge_ratio = CointegrationCalculator.calculate_spread(
-            df_filtered, pair
+            df_filtered, pair, hedge_ratio
         )
-        todays_data = get_todays_data(parameters, spread, current_date)
+
+        todays_spread_data = get_todays_spread_data(parameters, spread, current_date)
 
         close_event = None
-        # if open position exists check for close signal
-        open_event = portfolio_manager.get_open_event(pair)
         if open_event:
             close_event = check_for_closing_event(
-                todays_data, p_value, parameters, open_event, hedge_ratio
+                todays_spread_data, p_value, parameters, open_event, hedge_ratio
             )
             if close_event:
-                trade_amount = portfolio_manager.get_funds() * 0.1
                 profit = get_trade_profit(
                     open_event,
                     close_event,
@@ -86,10 +91,12 @@ for current_date in df.index[days_back:]:
                     currency_fees,
                     df_filtered,
                     hedge_ratio,
-                    trade_amount,
+                    open_event["trade_amount"],
                 )
                 portfolio_manager.on_closing_trade(pair, profit)
                 cumulative_profit += profit
+                open_event["hedge_ratio"] = hedge_ratio
+                open_event["spread_data"] = todays_spread_data
                 trade_results.append(
                     {
                         "pair": pair,
@@ -109,22 +116,32 @@ for current_date in df.index[days_back:]:
             continue
 
         open_event = check_for_opening_event(
-            todays_data, p_value, parameters, avg_price_ratio, hedge_ratio
+            todays_spread_data, p_value, parameters, avg_price_ratio, hedge_ratio
         )
         if open_event:
+            current_funds = portfolio_manager.get_funds()
+            trade_amount = current_funds * 0.1
             expected_profit = calculate_expected_profit(
                 df,
                 pair,
                 hedge_ratio,
                 open_event,
-                todays_data,
+                todays_spread_data,
                 currency_fees,
+                trade_amount,
             )
             print(f"{pair} expected profit: {expected_profit:.2f}")
-            if expected_profit < parameters["min_expected_profit"]:
+            if (
+                expected_profit < parameters["min_expected_profit"] * current_funds
+                or expected_profit > parameters["max_expected_profit"] * current_funds
+            ):
                 continue
 
+            open_event["trade_amount"] = trade_amount
             open_event["expected_profit"] = expected_profit
+            open_event["hedge_ratio"] = hedge_ratio
+            open_event["spread_data"] = todays_spread_data
+
             portfolio_manager.on_opening_trade(pair, open_event)
 
 total_profit = sum(result["profit"] for result in trade_results)
@@ -134,7 +151,7 @@ successful_trades = len(
     [
         trade
         for trade in trade_results
-        if trade["close_event"]["close_reason"] == "crossed_mean"
+        if trade["close_event"]["reason"] == "crossed_mean"
     ]
 )
 
