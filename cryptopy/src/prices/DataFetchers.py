@@ -6,6 +6,7 @@ from time import time
 import pandas as pd
 import asyncio
 import os
+import ccxt
 
 from cryptopy import OHLCData
 from cryptopy import CointegrationCalculator
@@ -27,6 +28,8 @@ class DataFetcher:
         self.timeout = 60
         self.markets = markets
         self.caching_folder = f"data/historical_data/{self.exchange_name}/"
+        self.balance = None
+        self.open_orders = None
 
     def extract_exchange_fees(self):
         exchange_fees = self.client.fees["funding"]
@@ -95,6 +98,8 @@ class DataFetcher:
         self.currency_fees = DataFetcher.generate_crypto_to_crypto_fees(
             self.currency_fees, self.inter_coin_symbols
         )
+        await self.set_balance()
+        await self.set_open_trades()
 
     def update_cointegration_pairs(self):
         start_time = time()
@@ -387,9 +392,8 @@ class DataFetcher:
         cached_df, since, missing_days = await self.check_for_cached_data(
             currency, days_to_fetch
         )
-
+        # print(f"step 1: {currency} {cached_df}")
         self.historical_data[currency].update_from_dataframe(cached_df)
-
         # If no new data needs to be fetched, stop early
         if missing_days <= 0:
             # print(f"No new data to fetch for {currency}.")
@@ -397,13 +401,11 @@ class DataFetcher:
 
         # Step 2: Query the API for missing data
         new_data = await self.query_historical_data(symbol, timeframe, since)
-
         # If no new data was fetched (due to errors), stop early
         if new_data is None:
             return
 
         self.historical_data[currency].update_from_dataframe(new_data)
-
         # Step 3: Cache the new data (merge with existing cache and save)
         self.cache_historical_data(currency)
 
@@ -423,6 +425,7 @@ class DataFetcher:
                 f"Cached data found for {currency}, latest date: {latest_cached_date}"
             )
         else:
+            print(f"No cached data available for {currency}")
             cached_df = pd.DataFrame()
             latest_cached_date = None
             # print(f"No cached data for {currency}")
@@ -722,3 +725,55 @@ class DataFetcher:
 
     def get_historical_price_options(self):
         return list(self.historical_data.keys())
+
+    async def set_balance(self):
+        try:
+            balance = await self.client.fetch_balance()
+            print("Balance:", balance)
+            self.balance = balance
+        except ccxt.BaseError as e:
+            print("Error fetching balance:", e)
+
+    async def set_open_trades(self):
+        try:
+            # self.client.options["defaultType"] = "spot"
+            # spot_orders = await self.client.fetch_open_orders()
+
+            self.client.options["defaultType"] = "margin"
+            open_positions = await self.client.fetch_positions()
+
+            print(f"open_positions: {open_positions}")
+            self.open_orders = open_positions
+        except ccxt.BaseError as e:
+            print("Error fetching open trades:", e)
+
+    def get_balance(self):
+        balance_dict = self.balance["info"]["result"]
+        balance_dict = {
+            symbol + "/USD": sym_balance["balance"]
+            for symbol, sym_balance in balance_dict.items()
+            if float(sym_balance["balance"]) > 0
+        }
+        return balance_dict
+
+    def get_open_trades(self):
+        open_orders = {
+            element["symbol"]: element["contracts"] for element in self.open_orders
+        }
+        return open_orders
+
+    def place_order(self, trade_type, symbol, price, amount):
+        try:
+            if trade_type == "buy":
+                order = self.client.create_limit_buy_order(symbol, amount, price)
+            elif trade_type == "sell":
+                order = self.client.create_limit_sell_order(symbol, amount, price)
+            else:
+                print("Invalid trade type specified")
+                return None
+
+            print(f"{trade_type.capitalize()} Order placed:", order)
+            return order
+        except ccxt.BaseError as e:
+            print(f"Error placing {trade_type} order:", e)
+            return None

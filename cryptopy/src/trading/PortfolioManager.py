@@ -37,10 +37,10 @@ class PortfolioManager:
             return True
         if pair[0] in self.traded_coins or pair[1] in self.traded_coins:
             return True
-        if pair[0] in self.bought_coins or pair[1] in self.bought_coins:
-            return True
-        if pair[0] in self.sold_coins or pair[1] in self.sold_coins:
-            return True
+        # if pair[0] in self.bought_coins or pair[1] in self.bought_coins:
+        #     return True
+        # if pair[0] in self.sold_coins or pair[1] in self.sold_coins:
+        #     return True
         return False
 
     def on_closing_trade(self, pair, profit):
