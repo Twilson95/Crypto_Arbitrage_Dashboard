@@ -750,7 +750,7 @@ class DataFetcher:
     def get_balance(self):
         balance_dict = self.balance["info"]["result"]
         balance_dict = {
-            symbol + "/USD": sym_balance["balance"]
+            symbol + "/USD": float(sym_balance["balance"])
             for symbol, sym_balance in balance_dict.items()
             if float(sym_balance["balance"]) > 0
         }
@@ -762,18 +762,50 @@ class DataFetcher:
         }
         return open_orders
 
-    def place_order(self, trade_type, symbol, price, amount):
+    async def open_long_position(self, symbol, amount):
+        """Open a long position by buying in the spot market."""
         try:
-            if trade_type == "buy":
-                order = self.client.create_limit_buy_order(symbol, amount, price)
-            elif trade_type == "sell":
-                order = self.client.create_limit_sell_order(symbol, amount, price)
-            else:
-                print("Invalid trade type specified")
-                return None
-
-            print(f"{trade_type.capitalize()} Order placed:", order)
+            print(f"Opening long position for {symbol}, amount: {amount}")
+            self.client.options["defaultType"] = "spot"
+            order = await self.client.create_market_buy_order(symbol, amount)
+            print("Long position opened:", order)
             return order
         except ccxt.BaseError as e:
-            print(f"Error placing {trade_type} order:", e)
+            print(f"Error opening long position: {e}")
+            return None
+
+    async def close_long_position(self, symbol, amount):
+        """Close a long position by selling in the spot market."""
+        try:
+            print(f"Closing long position for {symbol}, amount: {amount}")
+            self.client.options["defaultType"] = "spot"
+            order = await self.client.create_market_sell_order(symbol, amount)
+            print("Long position closed:", order)
+            return order
+        except ccxt.BaseError as e:
+            print(f"Error closing long position: {e}")
+            return None
+
+    async def open_short_position(self, symbol, amount):
+        """Open a short position using margin trading."""
+        try:
+            print(f"Opening short position for {symbol}, amount: {amount}")
+            self.client.options["defaultType"] = "margin"
+            order = await self.client.create_market_sell_order(symbol, amount)
+            print("Short position opened:", order)
+            return order
+        except ccxt.BaseError as e:
+            print(f"Error opening short position: {e}")
+            return None
+
+    async def close_short_position(self, symbol, amount):
+        """Close a short position by buying in the margin market."""
+        try:
+            print(f"Closing short position for {symbol}, amount: {amount}")
+            self.client.options["defaultType"] = "margin"
+            order = await self.client.create_market_buy_order(symbol, amount)
+            print("Short position closed:", order)
+            return order
+        except ccxt.BaseError as e:
+            print(f"Error closing short position: {e}")
             return None

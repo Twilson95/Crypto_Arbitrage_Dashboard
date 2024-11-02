@@ -5,6 +5,8 @@ from cryptopy.src.arbitrage.ArbitrageInstructions import ArbitrageInstructions
 from cryptopy.src.arbitrage.ArbitrageHandler import ArbitrageHandler
 from cryptopy.src.arbitrage.CointegrationCalculator import CointegrationCalculator
 
+from cryptopy.src.helpers.json_helper import JsonHelper
+
 from cryptopy.src.prices.PriceChart import PriceChart
 from cryptopy.src.prices.OHLCData import OHLCData
 from cryptopy.src.prices.DataFetchers import DataFetcher
@@ -19,3 +21,4 @@ from cryptopy.src.news.NewsFetcher import NewsFetcher
 from cryptopy.src.news.NewsChart import NewsChart
 
 from cryptopy.src.trading.PortfolioManager import PortfolioManager
+from cryptopy.src.trading.TradingOpportunities import TradingOpportunities

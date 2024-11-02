@@ -1,16 +1,19 @@
 import pandas as pd
 
-from cryptopy import CointegrationCalculator, PortfolioManager
+from cryptopy import (
+    CointegrationCalculator,
+    PortfolioManager,
+    JsonHelper,
+    TradingOpportunities,
+)
 from cryptopy.scripts.simulations.simulation_helpers import (
     get_trade_profit,
-    check_for_closing_event,
-    check_for_opening_event,
     filter_df,
-    save_to_json,
     get_combined_df_of_prices,
     get_avg_price_difference,
     calculate_expected_profit,
     get_todays_spread_data,
+    get_bought_and_sold_amounts,
 )
 
 simulation_name = "trade_size_measured_at_entry_time"
@@ -33,8 +36,8 @@ parameters = {
     "hedge_ratio_positive": True,
     "stop_loss_multiplier": 1.5,  # ratio of expected trade distance to use as stop loss location
     "max_coin_price_ratio": 5,
-    "max_concurrent_trades": 10,
-    "min_expected_profit": 0.005,  # must expect at least half a percent of the portfolio amount
+    "max_concurrent_trades": 8,
+    "min_expected_profit": 0.01,  # must expect at least half a percent of the portfolio amount
     "max_expected_profit": 0.05,  # no more at risk as 5% percent of the portfolio amount
 }
 
@@ -57,7 +60,7 @@ for current_date in df.index[days_back:]:
     for pair in sorted(pair_combinations, key=lambda x: x[0]):
         if "XRP/USD" in pair:
             continue
-        currency_fees = {pair[0]: {"taker": 0.004}, pair[1]: {"taker": 0.004}}
+        currency_fees = {pair[0]: {"taker": 0.002}, pair[1]: {"taker": 0.002}}
 
         df_filtered = filter_df(df, current_date, days_back)
         coint_stat, p_value, crit_values = CointegrationCalculator.test_cointegration(
@@ -80,7 +83,7 @@ for current_date in df.index[days_back:]:
 
         close_event = None
         if open_event:
-            close_event = check_for_closing_event(
+            close_event = TradingOpportunities.check_for_closing_event(
                 todays_spread_data, p_value, parameters, open_event, hedge_ratio
             )
             if close_event:
@@ -115,20 +118,17 @@ for current_date in df.index[days_back:]:
         if portfolio_manager.is_pair_traded(pair):
             continue
 
-        open_event = check_for_opening_event(
+        open_event = TradingOpportunities.check_for_opening_event(
             todays_spread_data, p_value, parameters, avg_price_ratio, hedge_ratio
         )
         if open_event:
             current_funds = portfolio_manager.get_funds()
             trade_amount = current_funds * 0.1
+            position_size = get_bought_and_sold_amounts(
+                df, pair, open_event, todays_spread_data, trade_size=trade_amount
+            )
             expected_profit = calculate_expected_profit(
-                df,
-                pair,
-                hedge_ratio,
-                open_event,
-                todays_spread_data,
-                currency_fees,
-                trade_amount,
+                pair, todays_spread_data, currency_fees, position_size
             )
             print(f"{pair} expected profit: {expected_profit:.2f}")
             if (
@@ -137,6 +137,7 @@ for current_date in df.index[days_back:]:
             ):
                 continue
 
+            open_event["position_size"] = position_size
             open_event["trade_amount"] = trade_amount
             open_event["expected_profit"] = expected_profit
             open_event["hedge_ratio"] = hedge_ratio
@@ -166,4 +167,4 @@ simulation_data = {
     },
     "trade_events": trade_results,
 }
-save_to_json(simulation_data, simulation_path)
+JsonHelper.save_to_json(simulation_data, simulation_path)
