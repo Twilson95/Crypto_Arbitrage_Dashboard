@@ -14,6 +14,7 @@ class PortfolioManager:
         self.sold_coins = set()
         self.open_events = dict()
         self.max_trades = max_trades
+        self.all_trade_events = None
 
     def get_funds(self):
         return self.funds
@@ -29,14 +30,14 @@ class PortfolioManager:
     def read_open_events(self):
         trade_data = JsonHelper.read_from_json(self.trades_path)
         trade_events = trade_data["trade_events"]
+        self.all_trade_events = trade_events
         open_events = [event for event in trade_events if "close_event" not in event]
         self.open_events = {
-            (event["pair"][0], event["pair"][1]): event["open_event"]
-            for event in open_events
+            (event["pair"][0], event["pair"][1]): event for event in open_events
         }
         for open_event in self.open_events.values():
-            open_event["date"] = datetime.strptime(
-                open_event["date"], "%Y-%m-%d"
+            open_event["open_event"]["date"] = datetime.strptime(
+                open_event["open_event"]["date"], "%Y-%m-%d"
             ).date()
         for pair in self.open_events.keys():
             self.traded_pairs.add(pair)
@@ -49,6 +50,9 @@ class PortfolioManager:
 
     def get_portfolio(self):
         return self.portfolio
+
+    def get_all_trade_events(self):
+        return self.all_trade_events
 
     def is_pair_traded(self, pair):
         if pair in self.traded_pairs:
@@ -74,7 +78,7 @@ class PortfolioManager:
         # self.traded_coins.add(pair[1])
         self.open_events[pair] = open_event
 
-    def get_open_event(self, pair):
+    def get_open_trades(self, pair):
         return self.open_events.get(pair, None)
 
     def get_all_open_events(self):

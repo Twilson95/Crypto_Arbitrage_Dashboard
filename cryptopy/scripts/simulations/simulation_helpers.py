@@ -51,23 +51,28 @@ def get_trade_profit(
     pair,
     currency_fees,
     df_filtered,
-    hedge_ratio,
     trade_amount,
 ):
+
     arbitrage = StatisticalArbitrage.statistical_arbitrage_iteration(
-        entry=(open_event["date"], open_event["spread"], open_event["direction"]),
-        exit=(close_event["date"], close_event["spread"]),
+        entry=(
+            open_event["date"],
+            open_event["spread_data"]["spread"],
+            open_event["direction"],
+        ),
+        exit=(close_event["date"], close_event["spread_data"]["spread"]),
         pairs=pair,
         currency_fees=currency_fees,  # Example transaction cost
         price_df=df_filtered,
         usd_start=trade_amount,
-        hedge_ratio=hedge_ratio,
+        hedge_ratio=open_event["hedge_ratio"],
         exchange="test",
     )
     if arbitrage:
         profit = arbitrage.get("summary_header", {}).get("total_profit", 0)
         print(
-            f"{pair}, date: {open_event['date']} to {close_event['date']}, close_reason: {close_event['reason']}: profit {profit:.2f}"
+            f"{pair}, date: {open_event['date']} to {close_event['date']}, "
+            f"close_reason: {close_event['reason']}: profit {profit:.2f}"
         )
         return profit
 
@@ -101,8 +106,7 @@ def calculate_expected_profit(pair, todays_data, currency_fees, position_sizes):
     return bought_amount * abs(spread - spread_mean) * (1 - fees)
 
 
-def get_bought_and_sold_amounts(df, pair, open_event, todays_data, trade_size=100):
-    current_date = todays_data["date"]
+def get_bought_and_sold_amounts(df, pair, open_event, current_date, trade_size=100):
     hedge_ratio = open_event["hedge_ratio"]
 
     if open_event["direction"] == "short":
@@ -122,6 +126,7 @@ def get_bought_and_sold_amounts(df, pair, open_event, todays_data, trade_size=10
         return None
 
     trade_size = {
+        "trade_amount_usd": trade_size,
         "long_position": {"coin": bought_coin, "amount": bought_amount},
         "short_position": {"coin": sold_coin, "amount": sold_amount},
     }

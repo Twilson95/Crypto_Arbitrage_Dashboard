@@ -110,27 +110,49 @@ class DataManager:
                 "taker": trading_fee.get("taker", 0),
             }
 
-    def close_exchanges(self):
-        async def close_exchanges_async():
-            tasks = [exchange.client.close() for exchange in self.exchanges.values()]
-            await asyncio.gather(*tasks)
+    async def close_exchanges(self):
+        tasks = [exchange.client.close() for exchange in self.exchanges.values()]
+        await asyncio.gather(
+            *tasks, return_exceptions=True
+        )  # Ensure all close tasks finish
 
-        future = asyncio.run_coroutine_threadsafe(close_exchanges_async(), self.loop)
-        return future.result()
+    async def shutdown(self):
+        # Step 1: Close exchange connections
+        await self.close_exchanges()
+        print("All exchange connections closed.")
 
-    def shutdown_loop(self):
-        async def shutdown():
-            self.loop.stop()
-            print("Event loop stopped.")
+        # Step 2: Cancel all pending tasks individually
+        pending_tasks = [
+            task for task in asyncio.all_tasks(self.loop) if not task.done()
+        ]
+        for task in pending_tasks:
+            task.cancel()
+            try:
+                # Give control back to the event loop to handle the cancellation
+                await asyncio.sleep(0)
+                await task
+            except asyncio.CancelledError:
+                # Task was successfully cancelled, move to the next
+                pass
+            except Exception as e:
+                # Handle other exceptions gracefully
+                print(f"Exception during task cancellation: {e}")
 
-        self.close_exchanges()
-        # Run the shutdown coroutine in the existing loop
-        asyncio.run_coroutine_threadsafe(
-            shutdown(), self.loop
-        ).result()  # Wait until shutdown completes
-        self.thread.join()  # Join the thread
-        self.loop.close()  # Finally close the event loop
-        print("Async loop has been closed and thread joined.")
+        print("All pending tasks canceled.")
+
+        # Step 3: Stop the event loop
+        self.loop.stop()
+        print("Event loop stopped.")
+
+    def shutdown_sync(self):
+        asyncio.run(self.shutdown())
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        if self.thread.is_alive():
+            print("Waiting for the event loop thread to finish...")
+            self.thread.join()
+
+        self.loop.close()
+        print("Event loop has been closed and thread joined.")
 
     def select_data_fetcher(self, exchange_name):
         return self.exchanges[exchange_name]

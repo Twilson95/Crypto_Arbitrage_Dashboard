@@ -16,7 +16,7 @@ from cryptopy.scripts.simulations.simulation_helpers import (
     get_bought_and_sold_amounts,
 )
 
-simulation_name = "trade_size_measured_at_entry_time"
+simulation_name = "expected_trading_strategy"
 exchange_name = "Kraken"
 historic_data_folder = f"../../../data/historical_data/{exchange_name}_300_days/"
 cointegration_pairs_path = f"../../../data/historical_data/cointegration_pairs.csv"
@@ -37,8 +37,9 @@ parameters = {
     "stop_loss_multiplier": 1.5,  # ratio of expected trade distance to use as stop loss location
     "max_coin_price_ratio": 5,
     "max_concurrent_trades": 8,
-    "min_expected_profit": 0.01,  # must expect at least half a percent of the portfolio amount
+    "min_expected_profit": 0.008,  # must expect at least half a percent of the portfolio amount
     "max_expected_profit": 0.05,  # no more at risk as 5% percent of the portfolio amount
+    "trade_size": 0.08,  # proportion of portfolio bought in each trade
 }
 
 folder_path = "../../../data/historical_data/Kraken_300_days"
@@ -69,7 +70,7 @@ for current_date in df.index[days_back:]:
         if p_value is None:
             continue
 
-        open_event = portfolio_manager.get_open_event(pair)
+        open_event = portfolio_manager.get_open_trades(pair)
         if open_event is None:
             hedge_ratio = None
         else:
@@ -93,7 +94,6 @@ for current_date in df.index[days_back:]:
                     pair,
                     currency_fees,
                     df_filtered,
-                    hedge_ratio,
                     open_event["trade_amount"],
                 )
                 portfolio_manager.on_closing_trade(pair, profit)
@@ -108,7 +108,7 @@ for current_date in df.index[days_back:]:
                         "profit": profit,
                     }
                 )
-        open_event = portfolio_manager.get_open_event(pair)
+        open_event = portfolio_manager.get_open_trades(pair)
         avg_price_ratio = get_avg_price_difference(df_filtered, pair, hedge_ratio)
 
         if open_event is not None:
@@ -119,13 +119,18 @@ for current_date in df.index[days_back:]:
             continue
 
         open_event = TradingOpportunities.check_for_opening_event(
-            todays_spread_data, p_value, parameters, avg_price_ratio, hedge_ratio
+            todays_spread_data,
+            p_value,
+            parameters,
+            avg_price_ratio,
+            hedge_ratio,
+            current_date,
         )
         if open_event:
             current_funds = portfolio_manager.get_funds()
-            trade_amount = current_funds * 0.1
+            trade_amount = current_funds * parameters["trade_size"]
             position_size = get_bought_and_sold_amounts(
-                df, pair, open_event, todays_spread_data, trade_size=trade_amount
+                df, pair, open_event, current_date, trade_size=trade_amount
             )
             expected_profit = calculate_expected_profit(
                 pair, todays_spread_data, currency_fees, position_size

@@ -84,7 +84,6 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
                     pair,
                     currency_fees,
                     df_filtered,
-                    hedge_ratio,
                     trade_amount=100,
                 )
                 close_event["hedge_ratio"] = hedge_ratio
@@ -105,11 +104,16 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
             continue
 
         open_event = TradingOpportunities.check_for_opening_event(
-            todays_spread_data, p_value, parameters, avg_price_ratio, hedge_ratio
+            todays_spread_data,
+            p_value,
+            parameters,
+            avg_price_ratio,
+            hedge_ratio,
+            current_date,
         )
         if open_event:
             position_sizes = get_bought_and_sold_amounts(
-                df, pair, open_event, todays_spread_data, trade_size=100
+                df, pair, open_event, current_date, trade_size=100
             )
             expected_profit = calculate_expected_profit(
                 pair, todays_spread_data, currency_fees, position_sizes

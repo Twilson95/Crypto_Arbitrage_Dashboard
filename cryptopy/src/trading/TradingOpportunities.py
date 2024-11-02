@@ -4,13 +4,17 @@ from cryptopy.src.trading.PortfolioManager import PortfolioManager
 class TradingOpportunities:
     @staticmethod
     def check_for_opening_event(
-        todays_data, p_value, parameters, avg_price_ratio, hedge_ratio
+        todays_spread_data,
+        p_value,
+        parameters,
+        avg_price_ratio,
+        hedge_ratio,
+        current_date,
     ):
-        current_date = todays_data["date"]
-        upper_threshold = todays_data["upper_threshold"]
-        lower_threshold = todays_data["lower_threshold"]
-        spread = todays_data["spread"]
-        spread_mean = todays_data["spread_mean"]
+        upper_threshold = todays_spread_data["upper_threshold"]
+        lower_threshold = todays_spread_data["lower_threshold"]
+        spread = todays_spread_data["spread"]
+        spread_mean = todays_spread_data["spread_mean"]
 
         if hedge_ratio < 0 and parameters["hedge_ratio_positive"]:
             return None
@@ -27,7 +31,7 @@ class TradingOpportunities:
 
                 return {
                     "date": current_date,
-                    "spread": spread,
+                    "spread_data": todays_spread_data,
                     "hedge_ratio": hedge_ratio,
                     "direction": "short",
                     "avg_price_ratio": avg_price_ratio,
@@ -39,7 +43,7 @@ class TradingOpportunities:
                 )
                 return {
                     "date": current_date,
-                    "spread": spread,
+                    "spread_data": todays_spread_data,
                     "hedge_ratio": hedge_ratio,
                     "direction": "long",
                     "avg_price_ratio": avg_price_ratio,
@@ -60,33 +64,67 @@ class TradingOpportunities:
         spread_mean = todays_data["spread_mean"]
 
         if p_value > parameters["p_value_close_threshold"]:
-            return {"date": current_date, "spread": spread, "reason": "p_value"}
+            return {"date": current_date, "spread_data": spread, "reason": "p_value"}
 
         if hedge_ratio < 0:
             return {
                 "date": current_date,
-                "spread": spread,
+                "spread_data": todays_data,
                 "reason": "negative_hedge_ratio",
             }
 
         if (current_date - open_event["date"]).days > parameters[
             "expiry_days_threshold"
         ]:
-            return {"date": current_date, "spread": spread, "reason": "expired"}
+            return {
+                "date": current_date,
+                "spread_data": todays_data,
+                "reason": "expired",
+            }
 
         if open_event["direction"] == "short" and spread < spread_mean:
-            return {"date": current_date, "spread": spread, "reason": "crossed_mean"}
+            return {
+                "date": current_date,
+                "spread_data": todays_data,
+                "reason": "crossed_mean",
+            }
         elif open_event["direction"] == "long" and spread > spread_mean:
-            return {"date": current_date, "spread": spread, "reason": "crossed_mean"}
+            return {
+                "date": current_date,
+                "spread_data": todays_data,
+                "reason": "crossed_mean",
+            }
 
         if open_event["direction"] == "short" and spread > open_event["stop_loss"]:
-            return {"date": current_date, "spread": spread, "reason": "stop_loss"}
+            return {
+                "date": current_date,
+                "spread_data": todays_data,
+                "reason": "stop_loss",
+            }
         elif open_event["direction"] == "long" and spread < open_event["stop_loss"]:
-            return {"date": current_date, "spread": spread, "reason": "stop_loss"}
+            return {
+                "date": current_date,
+                "spread_data": todays_data,
+                "reason": "stop_loss",
+            }
 
-        if open_event["direction"] == "short" and spread_mean > open_event["spread"]:
-            return {"date": current_date, "spread": spread, "reason": "non-profitable"}
-        elif open_event["direction"] == "long" and spread_mean < open_event["spread"]:
-            return {"date": current_date, "spread": spread, "reason": "non-profitable"}
+        if (
+            open_event["direction"] == "short"
+            and spread_mean > open_event["spread_data"]["spread"]
+        ):
+            return {
+                "date": current_date,
+                "spread_data": todays_data,
+                "reason": "non-profitable",
+            }
+        elif (
+            open_event["direction"] == "long"
+            and spread_mean < open_event["spread_data"]["spread"]
+        ):
+            return {
+                "date": current_date,
+                "spread_data": todays_data,
+                "reason": "non-profitable",
+            }
 
         return None

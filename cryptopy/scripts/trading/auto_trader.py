@@ -26,7 +26,8 @@ parameters = {
     "stop_loss_multiplier": 1.5,  # ratio of expected trade distance to use as stop loss location
     "max_coin_price_ratio": 5,
     "max_concurrent_trades": 10,
-    "min_expected_profit": 0.005,  # must expect at least half a percent of the portfolio amount
+    "trade_size": 0.08,  # amount of portfolio to buy during each trade
+    "min_expected_profit": 0.01,  # must expect at least half a percent of the portfolio amount
     "max_expected_profit": 0.05,  # no more at risk as 5% percent of the portfolio amount
 }
 
@@ -63,13 +64,14 @@ portfolio_manager = PortfolioManager(
     max_trades=8, funds=usd_balance, trades_path=trades_path
 )
 portfolio_manager.read_open_events()
+trade_results = portfolio_manager.get_all_trade_events()
+
 print(portfolio_manager.get_all_open_events())
 
 cointegration_pairs_path = f"data/historical_data/cointegration_pairs.csv"
 pair_combinations_df = pd.read_csv(cointegration_pairs_path)
 pair_combinations = list(pair_combinations_df.itertuples(index=False, name=None))
 
-trade_results = []
 for pair in sorted(pair_combinations, key=lambda x: x[0]):
 
     if "XRP/USD" in pair:
@@ -82,11 +84,11 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
     if p_value is None:
         continue
 
-    open_event = portfolio_manager.get_open_event(pair)
-    if open_event is None:
+    open_trade = portfolio_manager.get_open_trades(pair)
+    if open_trade is None:
         hedge_ratio = None
     else:
-        hedge_ratio = open_event.get("hedge_ratio")
+        hedge_ratio = open_trade["open_event"].get("hedge_ratio")
 
     spread, hedge_ratio = CointegrationCalculator.calculate_spread(
         historical_prices, pair, hedge_ratio
@@ -94,39 +96,60 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
     todays_spread_data = get_todays_spread_data(parameters, spread, current_date)
 
     close_event = None
-    if open_event:
+    if open_trade:
         close_event = TradingOpportunities.check_for_closing_event(
-            todays_spread_data, p_value, parameters, open_event, hedge_ratio
+            todays_spread_data,
+            p_value,
+            parameters,
+            open_trade["open_event"],
+            hedge_ratio,
         )
         if close_event:
             profit = get_trade_profit(
-                open_event,
+                open_trade["open_event"],
                 close_event,
                 pair,
                 currency_fees,
                 historical_prices,
-                hedge_ratio,
-                open_event["trade_amount"],
+                open_trade["position_size"]["trade_amount_usd"],
             )
             portfolio_manager.on_closing_trade(pair, profit)
-            open_event["hedge_ratio"] = hedge_ratio
-            open_event["spread_data"] = todays_spread_data
+            # open_trade["close_event"]["hedge_ratio"] = hedge_ratio
+            # open_trade["close_event"]["spread_data"] = todays_spread_data
 
+            position_size = open_trade.get("position_size")
+            if position_size is None:
+                position_size = get_bought_and_sold_amounts(
+                    historical_prices,
+                    pair,
+                    open_trade,
+                    todays_spread_data,
+                    trade_size=open_trade["position_size"]["trade_amount_usd"],
+                )
+            open_trade["position_size"] = position_size
+            open_trade["profit"] = profit
+            data_fetcher.close_arbitrage_positions_sync(position_size)
             # delete trade result for this open event and append this
-            trade_results.append(
-                {
-                    "pair": pair,
-                    "open_event": open_event,
-                    "close_event": close_event,
-                    "profit": profit,
-                }
-            )
-            # close trade
+            trade_results = [
+                event
+                for event in trade_results
+                if (event["pair"][0], event["pair"][1]) != pair
+                or "close_event" in event
+            ]
 
-    open_event = portfolio_manager.get_open_event(pair)
+            trade_results.append(open_trade)
+            #     {
+            #         "pair": pair,
+            #         "open_event": open_trade,
+            #         "close_event": close_event,
+            #         "profit": profit,
+            #     }
+            # )
+
+    open_trade = portfolio_manager.get_open_trades(pair)
     avg_price_ratio = get_avg_price_difference(historical_prices, pair, hedge_ratio)
 
-    if open_event is not None:
+    if open_trade is not None:
         continue
     if portfolio_manager.is_at_max_trades():
         continue
@@ -134,16 +157,21 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
         continue
 
     open_event = TradingOpportunities.check_for_opening_event(
-        todays_spread_data, p_value, parameters, avg_price_ratio, hedge_ratio
+        todays_spread_data,
+        p_value,
+        parameters,
+        avg_price_ratio,
+        hedge_ratio,
+        current_date,
     )
     if open_event:
         current_funds = portfolio_manager.get_funds()
-        trade_amount = current_funds * 0.05
+        trade_amount = current_funds * parameters["trade_size"]
         position_size = get_bought_and_sold_amounts(
             historical_prices,
             pair,
             open_event,
-            todays_spread_data,
+            current_date,
             trade_size=trade_amount,
         )
         expected_profit = calculate_expected_profit(
@@ -156,16 +184,19 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
         ):
             continue
 
-        open_event["trade_amount"] = trade_amount
-        open_event["expected_profit"] = expected_profit
-        open_event["hedge_ratio"] = hedge_ratio
-        open_event["spread_data"] = todays_spread_data
+        open_trade = {
+            "open_event": open_event,
+            "position_size": position_size,
+            "expected_profit": expected_profit,
+        }
 
-        portfolio_manager.on_opening_trade(pair, open_event)
-        # make trade
+        data_fetcher.open_arbitrage_positions_sync(open_trade["position_size"])
+        portfolio_manager.on_opening_trade(pair, open_trade)
 
 simulation_data = {
     "trade_events": trade_results,
 }
 print(simulation_data)
-# JsonHelper.save_to_json(simulation_data, trades_path)
+JsonHelper.save_to_json(simulation_data, trades_path)
+print("saved trading data")
+data_manager.shutdown_sync()

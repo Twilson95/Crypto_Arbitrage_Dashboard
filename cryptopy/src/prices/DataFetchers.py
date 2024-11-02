@@ -767,7 +767,9 @@ class DataFetcher:
         try:
             print(f"Opening long position for {symbol}, amount: {amount}")
             self.client.options["defaultType"] = "spot"
-            order = await self.client.create_market_buy_order(symbol, amount)
+            order = None
+            # order = await self.client.create_market_buy_order(symbol, amount)
+
             print("Long position opened:", order)
             return order
         except ccxt.BaseError as e:
@@ -779,7 +781,9 @@ class DataFetcher:
         try:
             print(f"Closing long position for {symbol}, amount: {amount}")
             self.client.options["defaultType"] = "spot"
-            order = await self.client.create_market_sell_order(symbol, amount)
+            order = None
+            # order = await self.client.create_market_sell_order(symbol, amount)
+
             print("Long position closed:", order)
             return order
         except ccxt.BaseError as e:
@@ -791,7 +795,8 @@ class DataFetcher:
         try:
             print(f"Opening short position for {symbol}, amount: {amount}")
             self.client.options["defaultType"] = "margin"
-            order = await self.client.create_market_sell_order(symbol, amount)
+            order = None
+            # order = await self.client.create_market_sell_order(symbol, amount)
             print("Short position opened:", order)
             return order
         except ccxt.BaseError as e:
@@ -803,9 +808,65 @@ class DataFetcher:
         try:
             print(f"Closing short position for {symbol}, amount: {amount}")
             self.client.options["defaultType"] = "margin"
-            order = await self.client.create_market_buy_order(symbol, amount)
+            order = None
+            # order = await self.client.create_market_buy_order(symbol, amount)
             print("Short position closed:", order)
             return order
         except ccxt.BaseError as e:
             print(f"Error closing short position: {e}")
             return None
+
+    async def open_arbitrage_positions(self, position_size):
+        long_position = position_size["long_position"]
+        short_position = position_size["short_position"]
+
+        if not long_position or not short_position:
+            print("Error: Both long and short position details are required.")
+            return None
+
+        long_coin, long_amount = long_position["coin"], long_position["amount"]
+        short_coin, short_amount = short_position["coin"], short_position["amount"]
+
+        try:
+            long_trade, short_trade = await asyncio.gather(
+                self.open_long_position(long_coin, long_amount),
+                self.open_short_position(short_coin, short_amount),
+            )
+            return {
+                "long_trade": long_trade,
+                "short_trade": short_trade,
+            }
+        except Exception as e:
+            print(f"Error opening arbitrage positions: {e}")
+            return None
+
+    async def close_arbitrage_positions(self, position_size):
+        long_position = position_size["long_position"]
+        short_position = position_size["short_position"]
+
+        if not long_position or not short_position:
+            print("Error: Both long and short position details are required to close.")
+            return None
+
+        long_coin, long_amount = long_position["coin"], long_position["amount"]
+        short_coin, short_amount = short_position["coin"], short_position["amount"]
+
+        try:
+            close_long_trade, close_short_trade = await asyncio.gather(
+                self.close_long_position(long_coin, long_amount),
+                self.close_short_position(short_coin, short_amount),
+            )
+            return {
+                "close_long_trade": close_long_trade,
+                "close_short_trade": close_short_trade,
+            }
+
+        except Exception as e:
+            print(f"Error closing arbitrage positions: {e}")
+            return None
+
+    def open_arbitrage_positions_sync(self, position_size):
+        return asyncio.run(self.open_arbitrage_positions(position_size))
+
+    def close_arbitrage_positions_sync(self, position_size):
+        return asyncio.run(self.close_arbitrage_positions(position_size))
