@@ -5,12 +5,15 @@ from threading import Thread
 
 
 class DataManager:
-    def __init__(self, config, network_fees_config=None, live_trades=True):
+    def __init__(
+        self, config, network_fees_config=None, live_trades=True, use_cache=True
+    ):
         self.sleep_time = 2
         self.config = config
         self.exchanges = {}
         self.exchange_fees = {}
         self.network_fees = self.fetch_network_fees(network_fees_config)
+        self.use_cache = use_cache
         self.initialized_event = asyncio.Event()
 
         self.loop = asyncio.new_event_loop()
@@ -95,7 +98,9 @@ class DataManager:
         except:
             markets = None
 
-        data_fetcher = DataFetcher(exchange, exchange_name, pairs_mapping, markets)
+        data_fetcher = DataFetcher(
+            exchange, exchange_name, pairs_mapping, markets, self.use_cache
+        )
         await data_fetcher.async_init()
         self.exchanges[exchange_name] = data_fetcher
         print(f"{exchange_name} initialized successfully")
@@ -133,7 +138,7 @@ class DataManager:
                 # Handle other exceptions gracefully
                 print(f"Exception during task cancellation: {e}")
 
-        print("All pending tasks canceled.")
+        # print("All pending tasks canceled.")
         self.loop.stop()
 
     def shutdown_sync(self):
@@ -144,7 +149,7 @@ class DataManager:
             self.thread.join()
 
         self.loop.close()
-        print("Event loop has been closed and thread joined.")
+        # print("Event loop has been closed and thread joined.")
 
     def select_data_fetcher(self, exchange_name):
         return self.exchanges[exchange_name]

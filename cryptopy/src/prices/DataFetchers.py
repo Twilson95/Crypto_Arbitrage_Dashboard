@@ -13,7 +13,7 @@ from cryptopy import CointegrationCalculator
 
 
 class DataFetcher:
-    def __init__(self, client, exchange_name, pairs_mapping, markets):
+    def __init__(self, client, exchange_name, pairs_mapping, markets, use_cache=True):
         self.client = client
         self.exchange_name = exchange_name
         self.currencies = pairs_mapping
@@ -22,6 +22,7 @@ class DataFetcher:
         self.exchange_fees = {}
         self.historical_data = dict()
         self.live_data = dict()
+        self.use_cache = use_cache
         self.cointegration_pairs = {}
         self.order_books = {}
         self.market_symbols = []
@@ -388,25 +389,27 @@ class DataFetcher:
         if currency not in self.historical_data.keys():
             self.initialize_historic_data(currency)
 
-        # Step 1: Check for cached data
-        cached_df, since, missing_days = await self.check_for_cached_data(
-            currency, days_to_fetch
-        )
-        # print(f"step 1: {currency} {cached_df}")
-        self.historical_data[currency].update_from_dataframe(cached_df)
-        # If no new data needs to be fetched, stop early
+        if self.use_cache:
+            cached_df, since, missing_days = await self.check_for_cached_data(
+                currency, days_to_fetch
+            )
+            self.historical_data[currency].update_from_dataframe(cached_df)
+        else:
+            missing_days = days_to_fetch
+            since = self.client.parse8601(
+                (datetime.today() - timedelta(days=days_to_fetch)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+            )
+
         if missing_days <= 0:
-            # print(f"No new data to fetch for {currency}.")
             return
 
-        # Step 2: Query the API for missing data
         new_data = await self.query_historical_data(symbol, timeframe, since)
-        # If no new data was fetched (due to errors), stop early
         if new_data is None:
             return
 
         self.historical_data[currency].update_from_dataframe(new_data)
-        # Step 3: Cache the new data (merge with existing cache and save)
         self.cache_historical_data(currency)
 
     async def check_for_cached_data(self, currency, days_to_fetch):
