@@ -6,6 +6,7 @@ from cryptopy import (
     CointegrationCalculator,
     JsonHelper,
     TradingOpportunities,
+    TradeManager,
 )
 from cryptopy.scripts.simulations.simulation_helpers import (
     get_todays_spread_data,
@@ -35,7 +36,11 @@ with open("cryptopy/config/trading_config.yaml", "r") as f:
     exchange_config = yaml.safe_load(f)
 
 data_manager = DataManager(exchange_config, live_trades=False)
+
 exchange_name = "Kraken"
+trading_manager = TradeManager(exchange_config, exchange_name)
+print(f"max leverage {trading_manager.get_max_leverage('ADA/USD')}")
+
 data_fetcher = data_manager.get_exchange(exchange_name)
 current_balance = data_fetcher.get_balance()
 print(f"current_balance {current_balance}")
@@ -76,7 +81,7 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
 
     if "XRP/USD" in pair:
         continue
-    currency_fees = {pair[0]: {"taker": 0.002}, pair[1]: {"taker": 0.002}}
+    currency_fees = {pair[0]: {"taker": 0.004}, pair[1]: {"taker": 0.004}}
 
     coint_stat, p_value, crit_values = CointegrationCalculator.test_cointegration(
         historical_prices, pair
@@ -128,7 +133,8 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
                 )
             open_trade["position_size"] = position_size
             open_trade["profit"] = profit
-            data_fetcher.close_arbitrage_positions_sync(position_size)
+            trading_manager.close_arbitrage_positions(position_size)
+            # data_fetcher.close_arbitrage_positions_sync(position_size)
             # delete trade result for this open event and append this
             trade_results = [
                 event
@@ -175,7 +181,7 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
             trade_size=trade_amount,
         )
         expected_profit = calculate_expected_profit(
-            pair, todays_spread_data, currency_fees, position_size
+            pair, open_event, position_size, currency_fees
         )
         print(f"{pair} expected profit: {expected_profit:.2f}")
         if (
@@ -185,12 +191,16 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
             continue
 
         open_trade = {
+            "pair": pair,
             "open_event": open_event,
             "position_size": position_size,
             "expected_profit": expected_profit,
         }
-
-        data_fetcher.open_arbitrage_positions_sync(open_trade["position_size"])
+        print(f"open_trade {open_trade}")
+        trading_manager.open_arbitrage_positions(open_trade["position_size"])
+        # data_fetcher.open_arbitrage_positions_sync(open_trade["position_size"])
+        trade_results.append(open_trade)
+        print(f"appended trade to results list")
         portfolio_manager.on_opening_trade(pair, open_trade)
 
 simulation_data = {

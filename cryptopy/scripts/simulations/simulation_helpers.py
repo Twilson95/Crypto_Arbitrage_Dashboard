@@ -97,12 +97,15 @@ def get_avg_price_difference(df, pair, hedge_ratio):
     return mean_prices1 / (mean_prices2 * hedge_ratio)
 
 
-def calculate_expected_profit(pair, todays_data, currency_fees, position_sizes):
-    spread = todays_data["spread"]
-    spread_mean = todays_data["spread_mean"]
+def calculate_expected_profit(pair, open_event, position_size, currency_fees):
+    spread_data = open_event["spread_data"]
+    spread = spread_data["spread"]
+    spread_mean = spread_data["spread_mean"]
 
-    fees = currency_fees[pair[0]]["taker"] * 4
-    bought_amount = position_sizes["long_position"]["amount"]
+    fees = currency_fees[pair[0]]["taker"] * 2 + currency_fees[pair[1]]["taker"] * 2
+    bought_amount = position_size["long_position"]["amount"]
+    if open_event["direction"] == "short":
+        bought_amount /= open_event["hedge_ratio"]
     return bought_amount * abs(spread - spread_mean) * (1 - fees)
 
 
@@ -113,7 +116,7 @@ def get_bought_and_sold_amounts(df, pair, open_event, current_date, trade_size=1
         bought_coin = pair[1]
         sold_coin = pair[0]
         buy_coin_price = filter_list_to_current_date(df[bought_coin], current_date)
-        adjusted_value = buy_coin_price * hedge_ratio
+        adjusted_value = buy_coin_price
         bought_amount = trade_size / adjusted_value
         sold_amount = bought_amount / hedge_ratio
     elif open_event["direction"] == "long":

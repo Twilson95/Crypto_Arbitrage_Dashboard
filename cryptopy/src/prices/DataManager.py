@@ -117,32 +117,24 @@ class DataManager:
         )  # Ensure all close tasks finish
 
     async def shutdown(self):
-        # Step 1: Close exchange connections
         await self.close_exchanges()
-        print("All exchange connections closed.")
 
-        # Step 2: Cancel all pending tasks individually
         pending_tasks = [
             task for task in asyncio.all_tasks(self.loop) if not task.done()
         ]
         for task in pending_tasks:
             task.cancel()
             try:
-                # Give control back to the event loop to handle the cancellation
                 await asyncio.sleep(0)
                 await task
             except asyncio.CancelledError:
-                # Task was successfully cancelled, move to the next
                 pass
             except Exception as e:
                 # Handle other exceptions gracefully
                 print(f"Exception during task cancellation: {e}")
 
         print("All pending tasks canceled.")
-
-        # Step 3: Stop the event loop
         self.loop.stop()
-        print("Event loop stopped.")
 
     def shutdown_sync(self):
         asyncio.run(self.shutdown())

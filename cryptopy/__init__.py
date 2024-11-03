@@ -22,3 +22,4 @@ from cryptopy.src.news.NewsChart import NewsChart
 
 from cryptopy.src.trading.PortfolioManager import PortfolioManager
 from cryptopy.src.trading.TradingOpportunities import TradingOpportunities
+from cryptopy.src.trading.TradingManager import TradeManager
