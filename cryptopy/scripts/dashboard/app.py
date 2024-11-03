@@ -45,9 +45,9 @@ end_time = time()
 news_fetcher = NewsFetcher(news_config)
 news_chart = NewsChart()
 price_chart = PriceChart()
-portfolio_manager = PortfolioManager()
-portfolio_path = r"data/portfolio_data/Kraken/live_positions.csv"
-portfolio_manager.read_portfolio(portfolio_path)
+trades_path = r"data/portfolio_data/Kraken/trades.json"
+portfolio_manager = PortfolioManager(trades_path=trades_path)
+portfolio_manager.read_open_events()
 
 
 @app.callback(

@@ -2,10 +2,11 @@ import ccxt
 
 
 class TradeManager:
-    def __init__(self, config, exchange_name):
+    def __init__(self, config, exchange_name, make_trades=False):
         self.config = config
         self.client = self.initialise(exchange_name)
         self.max_leverage_by_symbol = self._fetch_all_max_leverage()
+        self.make_trades = make_trades
 
     def _fetch_all_max_leverage(self):
         max_leverage_by_symbol = {}
@@ -32,11 +33,8 @@ class TradeManager:
             {
                 "apiKey": api_key,
                 "secret": api_secret,
-                # "enable_time_sync": True,
                 "options": {
                     "recvWindow": 10000,  # Increase recv_window to 10 seconds
-                    # "defaultType": "spot",  # Ensure we're using the spot market
-                    # "fetchMarkets": ["spot"],
                 },
             }
         )
@@ -46,8 +44,11 @@ class TradeManager:
         try:
             print(f"Opening long position for {symbol}, amount: {amount}")
             self.client.options["defaultType"] = "spot"  # Ensure spot market
-            order = self.client.create_market_buy_order(symbol, float(amount))
-            print("Long position opened:", order)
+            if self.make_trades:
+                order = self.client.create_market_buy_order(symbol, float(amount))
+                print("Long position opened:", order)
+            else:
+                order = None
             return order
         except ccxt.BaseError as e:
             print(f"Error opening long position: {e}")
@@ -58,8 +59,11 @@ class TradeManager:
         try:
             print(f"Closing long position for {symbol}, amount: {amount}")
             self.client.options["defaultType"] = "spot"  # Ensure spot market
-            order = self.client.create_market_sell_order(symbol, float(amount))
-            print("Long position closed:", order)
+            if self.make_trades:
+                order = self.client.create_market_sell_order(symbol, float(amount))
+                print("Long position closed:", order)
+            else:
+                order = None
             return order
         except ccxt.BaseError as e:
             print(f"Error closing long position: {e}")
@@ -73,10 +77,13 @@ class TradeManager:
                 f"Opening short position for {symbol}, amount: {amount}, leverage: {leverage}"
             )
             self.client.options["defaultType"] = "margin"
-            order = self.client.create_market_sell_order(
-                symbol, float(amount), params={"leverage": leverage}
-            )
-            print("Short position opened:", order)
+            if self.make_trades:
+                order = self.client.create_market_sell_order(
+                    symbol, float(amount), params={"type": "margin"}
+                )
+                print("Short position opened:", order)
+            else:
+                order = None
             return order
         except ccxt.BaseError as e:
             print(f"Error opening short position: {e}")
@@ -90,10 +97,13 @@ class TradeManager:
                 f"Closing short position for {symbol}, amount: {amount}, leverage: {leverage}"
             )
             self.client.options["defaultType"] = "margin"
-            order = self.client.create_market_buy_order(
-                symbol, float(amount), params={"leverage": leverage}
-            )
-            print("Short position closed:", order)
+            if self.make_trades:
+                order = self.client.create_market_buy_order(
+                    symbol, float(amount), params={"type": "margin"}
+                )
+                print("Short position closed:", order)
+            else:
+                order = None
             return order
         except ccxt.BaseError as e:
             print(f"Error closing short position: {e}")

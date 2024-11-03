@@ -35,11 +35,12 @@ parameters = {
 with open("cryptopy/config/trading_config.yaml", "r") as f:
     exchange_config = yaml.safe_load(f)
 
-data_manager = DataManager(exchange_config, live_trades=False)
-
 exchange_name = "Kraken"
-trading_manager = TradeManager(exchange_config, exchange_name)
-print(f"max leverage {trading_manager.get_max_leverage('ADA/USD')}")
+write_output = False
+make_trades = False
+
+data_manager = DataManager(exchange_config, live_trades=False, use_cache=False)
+trading_manager = TradeManager(exchange_config, exchange_name, make_trades)
 
 data_fetcher = data_manager.get_exchange(exchange_name)
 current_balance = data_fetcher.get_balance()
@@ -131,8 +132,10 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
                     todays_spread_data,
                     trade_size=open_trade["position_size"]["trade_amount_usd"],
                 )
+            open_trade["close_event"] = close_event
             open_trade["position_size"] = position_size
             open_trade["profit"] = profit
+
             trading_manager.close_arbitrage_positions(position_size)
             # data_fetcher.close_arbitrage_positions_sync(position_size)
             # delete trade result for this open event and append this
@@ -142,15 +145,7 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
                 if (event["pair"][0], event["pair"][1]) != pair
                 or "close_event" in event
             ]
-
             trade_results.append(open_trade)
-            #     {
-            #         "pair": pair,
-            #         "open_event": open_trade,
-            #         "close_event": close_event,
-            #         "profit": profit,
-            #     }
-            # )
 
     open_trade = portfolio_manager.get_open_trades(pair)
     avg_price_ratio = get_avg_price_difference(historical_prices, pair, hedge_ratio)
@@ -207,6 +202,9 @@ simulation_data = {
     "trade_events": trade_results,
 }
 print(simulation_data)
-JsonHelper.save_to_json(simulation_data, trades_path)
-print("saved trading data")
+
+if write_output:
+    JsonHelper.save_to_json(simulation_data, trades_path)
+    print("saved trading data")
+
 data_manager.shutdown_sync()

@@ -124,7 +124,7 @@ def get_bought_and_sold_amounts(df, pair, open_event, current_date, trade_size=1
         sold_coin = pair[1]
         buy_coin_price = filter_list_to_current_date(df[bought_coin], current_date)
         bought_amount = trade_size / buy_coin_price
-        sold_amount = trade_size * hedge_ratio
+        sold_amount = bought_amount * hedge_ratio
     else:
         return None
 
