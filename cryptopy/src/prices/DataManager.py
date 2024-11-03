@@ -5,20 +5,36 @@ from threading import Thread
 
 
 class DataManager:
-    def __init__(self, config, network_fees_config):
+    def __init__(self, config, network_fees_config=None, live_trades=True):
         self.sleep_time = 2
         self.config = config
-        self.network_fees_config = network_fees_config
         self.exchanges = {}
         self.exchange_fees = {}
-        self.network_fees = self.fetch_network_fees()
+        self.network_fees = self.fetch_network_fees(network_fees_config)
         self.initialized_event = asyncio.Event()
 
         self.loop = asyncio.new_event_loop()
         self.thread = Thread(target=self.run_loop, args=(self.loop,))
         self.thread.start()
         asyncio.run_coroutine_threadsafe(self.initialize_exchanges(), self.loop)
-        self.schedule_periodic_fetching()
+        if live_trades:
+            self.schedule_periodic_fetching()
+
+    async def initialize_exchanges(self):
+        # initialise any exchange there exists api keys for
+        tasks = [self.initialize_exchange(section) for section in self.config.keys()]
+        await asyncio.gather(*tasks)
+        self.initialized_event.set()  # Signal that initialization is complete
+
+    def get_exchange(self, exchange_name):
+        async def get_exchange_async(exchange_name):
+            await self.initialized_event.wait()
+            return self.exchanges.get(exchange_name, None)
+
+        future = asyncio.run_coroutine_threadsafe(
+            get_exchange_async(exchange_name), self.loop
+        )
+        return future.result()
 
     @staticmethod
     def run_loop(loop):
@@ -38,12 +54,6 @@ class DataManager:
     def update_all_cointegration_spreads(self):
         for exchange in self.exchanges.values():
             exchange.update_all_cointegration_spreads()
-
-    async def initialize_exchanges(self):
-        # initialise any exchange there exists api keys for
-        tasks = [self.initialize_exchange(section) for section in self.config.keys()]
-        await asyncio.gather(*tasks)
-        self.initialized_event.set()  # Signal that initialization is complete
 
     async def initialize_exchange(self, exchange_name):
         exchange = None
@@ -91,7 +101,6 @@ class DataManager:
         print(f"{exchange_name} initialized successfully")
 
         await data_fetcher.update_all_historical_prices()
-        # data_fetcher.update_cointegration_pairs()
 
     async def extract_currency_fees(self, exchange, exchange_name, currencies):
         for currency, symbol in currencies.items():
@@ -102,8 +111,40 @@ class DataManager:
             }
 
     async def close_exchanges(self):
-        tasks = [exchange.close() for exchange in self.exchanges.values()]
-        await asyncio.gather(*tasks)
+        tasks = [exchange.client.close() for exchange in self.exchanges.values()]
+        await asyncio.gather(
+            *tasks, return_exceptions=True
+        )  # Ensure all close tasks finish
+
+    async def shutdown(self):
+        await self.close_exchanges()
+
+        pending_tasks = [
+            task for task in asyncio.all_tasks(self.loop) if not task.done()
+        ]
+        for task in pending_tasks:
+            task.cancel()
+            try:
+                await asyncio.sleep(0)
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                # Handle other exceptions gracefully
+                print(f"Exception during task cancellation: {e}")
+
+        print("All pending tasks canceled.")
+        self.loop.stop()
+
+    def shutdown_sync(self):
+        asyncio.run(self.shutdown())
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        if self.thread.is_alive():
+            print("Waiting for the event loop thread to finish...")
+            self.thread.join()
+
+        self.loop.close()
+        print("Event loop has been closed and thread joined.")
 
     def select_data_fetcher(self, exchange_name):
         return self.exchanges[exchange_name]
@@ -154,9 +195,12 @@ class DataManager:
                 exchange_fees[exchange_name] = fees
         return exchange_fees
 
-    def fetch_network_fees(self):
-        # possible to make this dynamic in future
-        return self.network_fees_config["default_network_fees"]
+    @staticmethod
+    def fetch_network_fees(network_fees_config):
+        if network_fees_config is None:
+            return None
+        else:
+            return network_fees_config["default_network_fees"]
 
     def get_network_fees(self, currency):
         return self.network_fees.get(currency, 0)

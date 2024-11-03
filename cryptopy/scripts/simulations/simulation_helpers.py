@@ -6,91 +6,6 @@ import datetime
 import glob
 
 
-def check_for_opening_event(
-    todays_data, p_value, parameters, avg_price_ratio, hedge_ratio
-):
-    current_date = todays_data["date"]
-    upper_threshold = todays_data["upper_threshold"]
-    lower_threshold = todays_data["lower_threshold"]
-    spread = todays_data["spread"]
-    spread_mean = todays_data["spread_mean"]
-
-    if hedge_ratio < 0 and parameters["hedge_ratio_positive"]:
-        return None
-
-    if avg_price_ratio > parameters["max_coin_price_ratio"] or avg_price_ratio < 0:
-        return None
-
-    if p_value < parameters["p_value_open_threshold"]:
-        spread_distance = abs(spread - spread_mean)
-        if spread > upper_threshold:
-            short_stop_loss = (
-                spread + spread_distance * parameters["stop_loss_multiplier"]
-            )
-
-            return {
-                "date": current_date,
-                "spread": spread,
-                "direction": "short",
-                "avg_price_ratio": avg_price_ratio,
-                "stop_loss": short_stop_loss,
-            }
-        elif spread < lower_threshold:
-            long_stop_loss = (
-                spread - spread_distance * parameters["stop_loss_multiplier"]
-            )
-            return {
-                "date": current_date,
-                "spread": spread,
-                "direction": "long",
-                "avg_price_ratio": avg_price_ratio,
-                "stop_loss": long_stop_loss,
-            }
-    return None
-
-
-def check_for_closing_event(
-    todays_data,
-    p_value,
-    parameters,
-    open_event,
-    hedge_ratio,
-):
-    current_date = todays_data["date"]
-    spread = todays_data["spread"]
-    spread_mean = todays_data["spread_mean"]
-
-    if p_value > parameters["p_value_close_threshold"]:
-        return {"date": current_date, "spread": spread, "reason": "p_value"}
-
-    if hedge_ratio < 0:
-        return {
-            "date": current_date,
-            "spread": spread,
-            "reason": "negative_hedge_ratio",
-        }
-
-    if (current_date - open_event["date"]).days > parameters["expiry_days_threshold"]:
-        return {"date": current_date, "spread": spread, "reason": "expired"}
-
-    if open_event["direction"] == "short" and spread < spread_mean:
-        return {"date": current_date, "spread": spread, "reason": "crossed_mean"}
-    elif open_event["direction"] == "long" and spread > spread_mean:
-        return {"date": current_date, "spread": spread, "reason": "crossed_mean"}
-
-    if open_event["direction"] == "short" and spread > open_event["stop_loss"]:
-        return {"date": current_date, "spread": spread, "reason": "stop_loss"}
-    elif open_event["direction"] == "long" and spread < open_event["stop_loss"]:
-        return {"date": current_date, "spread": spread, "reason": "stop_loss"}
-
-    if open_event["direction"] == "short" and spread_mean > open_event["spread"]:
-        return {"date": current_date, "spread": spread, "reason": "non-profitable"}
-    elif open_event["direction"] == "long" and spread_mean < open_event["spread"]:
-        return {"date": current_date, "spread": spread, "reason": "non-profitable"}
-
-    return None
-
-
 def read_historic_data_long_term(pair, historic_data_folder):
     pair_filename = pair.replace("/", "_")  # Replace "/" with "_"
     file_path = f"{historic_data_folder}{pair_filename}.csv"
@@ -136,47 +51,30 @@ def get_trade_profit(
     pair,
     currency_fees,
     df_filtered,
-    hedge_ratio,
     trade_amount,
 ):
+
     arbitrage = StatisticalArbitrage.statistical_arbitrage_iteration(
-        entry=(open_event["date"], open_event["spread"], open_event["direction"]),
-        exit=(close_event["date"], close_event["spread"]),
+        entry=(
+            open_event["date"],
+            open_event["spread_data"]["spread"],
+            open_event["direction"],
+        ),
+        exit=(close_event["date"], close_event["spread_data"]["spread"]),
         pairs=pair,
         currency_fees=currency_fees,  # Example transaction cost
         price_df=df_filtered,
         usd_start=trade_amount,
-        hedge_ratio=hedge_ratio,
+        hedge_ratio=open_event["hedge_ratio"],
         exchange="test",
     )
     if arbitrage:
         profit = arbitrage.get("summary_header", {}).get("total_profit", 0)
         print(
-            f"{pair}, date: {open_event['date']} to {close_event['date']}, close_reason: {close_event['reason']}: profit {profit:.2f}"
+            f"{pair}, date: {open_event['date']} to {close_event['date']}, "
+            f"close_reason: {close_event['reason']}: profit {profit:.2f}"
         )
         return profit
-
-
-def json_serial(obj):
-    if isinstance(obj, (datetime.datetime, datetime.date)):
-        return (
-            obj.isoformat()
-        )  # Convert to ISO format string (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
-    raise TypeError(f"Type {type(obj)} not serializable")
-
-
-def save_to_json(data, filename):
-    directory = os.path.dirname(filename)
-    if directory and not os.path.exists(directory):
-        os.makedirs(directory)
-
-    with open(filename, "w") as json_file:
-        json.dump(data, json_file, indent=4, default=json_serial)
-
-
-def read_from_json(filename):
-    with open(filename, "r") as json_file:
-        return json.load(json_file)
 
 
 def get_combined_df_of_prices(folder_path):
@@ -199,22 +97,41 @@ def get_avg_price_difference(df, pair, hedge_ratio):
     return mean_prices1 / (mean_prices2 * hedge_ratio)
 
 
-def calculate_expected_profit(
-    df, pair, hedge_ratio, open_event, todays_data, currency_fees, trade_size=100
-):
-    current_date = todays_data["date"]
-    spread = todays_data["spread"]
-    spread_mean = todays_data["spread_mean"]
+def calculate_expected_profit(pair, open_event, position_size, currency_fees):
+    spread_data = open_event["spread_data"]
+    spread = spread_data["spread"]
+    spread_mean = spread_data["spread_mean"]
+
+    fees = currency_fees[pair[0]]["taker"] * 2 + currency_fees[pair[1]]["taker"] * 2
+    bought_amount = position_size["long_position"]["amount"]
+    if open_event["direction"] == "short":
+        bought_amount /= open_event["hedge_ratio"]
+    return bought_amount * abs(spread - spread_mean) * (1 - fees)
+
+
+def get_bought_and_sold_amounts(df, pair, open_event, current_date, trade_size=100):
+    hedge_ratio = open_event["hedge_ratio"]
 
     if open_event["direction"] == "short":
-        buy_coin_price = filter_list_to_current_date(df[pair[1]], current_date)
-        adjusted_value = buy_coin_price * hedge_ratio
+        bought_coin = pair[1]
+        sold_coin = pair[0]
+        buy_coin_price = filter_list_to_current_date(df[bought_coin], current_date)
+        adjusted_value = buy_coin_price
         bought_amount = trade_size / adjusted_value
+        sold_amount = bought_amount / hedge_ratio
     elif open_event["direction"] == "long":
-        buy_coin_price = filter_list_to_current_date(df[pair[0]], current_date)
+        bought_coin = pair[0]
+        sold_coin = pair[1]
+        buy_coin_price = filter_list_to_current_date(df[bought_coin], current_date)
         bought_amount = trade_size / buy_coin_price
+        sold_amount = trade_size * hedge_ratio
     else:
         return None
 
-    fees = currency_fees[pair[0]]["taker"] * 4
-    return bought_amount * abs(spread - spread_mean) * (1 - fees)
+    trade_size = {
+        "trade_amount_usd": trade_size,
+        "long_position": {"coin": bought_coin, "amount": bought_amount},
+        "short_position": {"coin": sold_coin, "amount": sold_amount},
+    }
+
+    return trade_size

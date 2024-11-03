@@ -1,6 +1,9 @@
 from dash import Dash, dcc, html
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
+from time import time
+import ast
+import yaml
 
 from cryptopy import (
     AppLayout,
@@ -14,11 +17,6 @@ from cryptopy import (
     CointegrationCalculator,
     PortfolioManager,
 )
-
-from time import time
-import ast
-
-import yaml
 
 app = Dash(
     __name__, external_stylesheets=[dbc.themes.SLATE], assets_folder="../../assets"
@@ -41,7 +39,7 @@ arbitrage_handler = ArbitrageHandler()
 app_layout = AppLayout(filter_component, technical_indicators, 10)
 app.layout = app_layout.generate_layout()
 start_time = time()
-data_manager = DataManager(exchange_config, network_fees_config)
+data_manager = DataManager(exchange_config, network_fees_config, live_trades=True)
 end_time = time()
 
 news_fetcher = NewsFetcher(news_config)

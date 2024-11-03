@@ -6,7 +6,7 @@ from cryptopy.scripts.simulations.analysis_helpers import (
     box_plot_coins,
     scatter_plot_with_trend,
 )
-from cryptopy.scripts.simulations.simulation_helpers import read_from_json
+from cryptopy import JsonHelper
 
 matplotlib.use("TkAgg")  # Or another backend like 'Qt5Agg' depending on your system
 
@@ -14,7 +14,7 @@ simulation_name = "optimised_for_all_trades"
 simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
 # simulation_path = f"../../../data/simulations/all_trades/{simulation_name}.json"
 
-json_data = read_from_json(simulation_path)
+json_data = JsonHelper.read_from_json(simulation_path)
 flattened_data = []
 results = json_data["trade_events"]
 print(results)

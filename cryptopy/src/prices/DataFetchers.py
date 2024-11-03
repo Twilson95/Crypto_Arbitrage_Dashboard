@@ -6,6 +6,7 @@ from time import time
 import pandas as pd
 import asyncio
 import os
+import ccxt.async_support as ccxt_async
 
 from cryptopy import OHLCData
 from cryptopy import CointegrationCalculator
@@ -27,6 +28,8 @@ class DataFetcher:
         self.timeout = 60
         self.markets = markets
         self.caching_folder = f"data/historical_data/{self.exchange_name}/"
+        self.balance = None
+        self.open_orders = None
 
     def extract_exchange_fees(self):
         exchange_fees = self.client.fees["funding"]
@@ -95,6 +98,8 @@ class DataFetcher:
         self.currency_fees = DataFetcher.generate_crypto_to_crypto_fees(
             self.currency_fees, self.inter_coin_symbols
         )
+        await self.set_balance()
+        await self.set_open_trades()
 
     def update_cointegration_pairs(self):
         start_time = time()
@@ -387,9 +392,8 @@ class DataFetcher:
         cached_df, since, missing_days = await self.check_for_cached_data(
             currency, days_to_fetch
         )
-
+        # print(f"step 1: {currency} {cached_df}")
         self.historical_data[currency].update_from_dataframe(cached_df)
-
         # If no new data needs to be fetched, stop early
         if missing_days <= 0:
             # print(f"No new data to fetch for {currency}.")
@@ -397,13 +401,11 @@ class DataFetcher:
 
         # Step 2: Query the API for missing data
         new_data = await self.query_historical_data(symbol, timeframe, since)
-
         # If no new data was fetched (due to errors), stop early
         if new_data is None:
             return
 
         self.historical_data[currency].update_from_dataframe(new_data)
-
         # Step 3: Cache the new data (merge with existing cache and save)
         self.cache_historical_data(currency)
 
@@ -423,6 +425,7 @@ class DataFetcher:
                 f"Cached data found for {currency}, latest date: {latest_cached_date}"
             )
         else:
+            print(f"No cached data available for {currency}")
             cached_df = pd.DataFrame()
             latest_cached_date = None
             # print(f"No cached data for {currency}")
@@ -722,3 +725,179 @@ class DataFetcher:
 
     def get_historical_price_options(self):
         return list(self.historical_data.keys())
+
+    async def set_balance(self):
+        try:
+            balance = await self.client.fetch_balance()
+            print("Balance:", balance)
+            self.balance = balance
+        except ccxt_async.BaseError as e:
+            print("Error fetching balance:", e)
+
+    async def set_open_trades(self):
+        try:
+            # self.client.options["defaultType"] = "spot"
+            # spot_orders = await self.client.fetch_open_orders()
+
+            self.client.options["defaultType"] = "margin"
+            open_positions = await self.client.fetch_positions()
+
+            print(f"open_positions: {open_positions}")
+            self.open_orders = open_positions
+        except ccxt_async.BaseError as e:
+            print("Error fetching open trades:", e)
+
+    def get_balance(self):
+        balance_dict = self.balance["info"]["result"]
+        balance_dict = {
+            symbol + "/USD": float(sym_balance["balance"])
+            for symbol, sym_balance in balance_dict.items()
+            if float(sym_balance["balance"]) > 0
+        }
+        return balance_dict
+
+    def get_open_trades(self):
+        open_orders = {
+            element["symbol"]: element["contracts"] for element in self.open_orders
+        }
+        return open_orders
+
+    async def open_long_position(self, symbol, amount):
+        """Open a long position by buying in the spot market."""
+        try:
+            print(f"Opening long position for {symbol}, amount: {amount}")
+            # self.client.options["defaultType"] = "spot"
+            self.client.options.update({"defaultType": "spot"})
+
+            # order = None
+            order = await self.client.create_market_buy_order(symbol, float(amount))
+
+            print("Long position opened:", order)
+            return order
+        except ccxt_async.BaseError as e:
+            print(f"Error opening long position: {e}")
+            return None
+
+    async def close_long_position(self, symbol, amount):
+        """Close a long position by selling in the spot market."""
+        try:
+            print(f"Closing long position for {symbol}, amount: {amount}")
+            self.client.options["defaultType"] = "spot"
+            order = None
+            # order = await self.client.create_market_sell_order(symbol, amount)
+
+            print("Long position closed:", order)
+            return order
+        except ccxt_async.BaseError as e:
+            print(f"Error closing long position: {e}")
+            return None
+
+    async def open_short_position(self, symbol, amount):
+        """Open a short position using margin trading."""
+        try:
+            print(f"Opening short position for {symbol}, amount: {amount}")
+            # self.client.options["defaultType"] = "margin"
+            self.client.options.update({"defaultType": "margin"})
+            # order = None
+            order = await self.client.create_market_sell_order(symbol, float(amount))
+            print("Short position opened:", order)
+            return order
+        except ccxt_async.BaseError as e:
+            print(f"Error opening short position: {e}")
+            return None
+
+    async def close_short_position(self, symbol, amount):
+        """Close a short position by buying in the margin market."""
+        try:
+            print(f"Closing short position for {symbol}, amount: {amount}")
+            self.client.options["defaultType"] = "margin"
+            order = None
+            # order = await self.client.create_market_buy_order(symbol, amount)
+            print("Short position closed:", order)
+            return order
+        except ccxt_async.BaseError as e:
+            print(f"Error closing short position: {e}")
+            return None
+
+    async def open_arbitrage_positions(self, position_size):
+        long_position = position_size["long_position"]
+        short_position = position_size["short_position"]
+
+        if not long_position or not short_position:
+            print("Error: Both long and short position details are required.")
+            return None
+
+        long_coin, long_amount = long_position["coin"], long_position["amount"]
+        short_coin, short_amount = short_position["coin"], short_position["amount"]
+
+        try:
+            # Open long position first with spot settings
+            self.client.options["defaultType"] = "spot"
+            long_trade = await self.open_long_position(long_coin, long_amount)
+
+            # After the long position is open, switch to margin for the short
+            self.client.options["defaultType"] = "margin"
+            short_trade = await self.open_short_position(short_coin, short_amount)
+
+            return {
+                "long_trade": long_trade,
+                "short_trade": short_trade,
+            }
+        except Exception as e:
+            print(f"Error opening arbitrage positions: {e}")
+            return None
+
+    # async def open_arbitrage_positions(self, position_size):
+    #     long_position = position_size["long_position"]
+    #     short_position = position_size["short_position"]
+    #
+    #     if not long_position or not short_position:
+    #         print("Error: Both long and short position details are required.")
+    #         return None
+    #
+    #     long_coin, long_amount = long_position["coin"], long_position["amount"]
+    #     short_coin, short_amount = short_position["coin"], short_position["amount"]
+    #
+    #     try:
+    #         long_trade, short_trade = await asyncio.gather(
+    #             self.open_long_position(long_coin, long_amount),
+    #             self.open_short_position(short_coin, short_amount),
+    #         )
+    #         return {
+    #             "long_trade": long_trade,
+    #             "short_trade": short_trade,
+    #         }
+    #     except Exception as e:
+    #         print(f"Error opening arbitrage positions: {e}")
+    #         return None
+
+    async def close_arbitrage_positions(self, position_size):
+        long_position = position_size["long_position"]
+        short_position = position_size["short_position"]
+
+        if not long_position or not short_position:
+            print("Error: Both long and short position details are required to close.")
+            return None
+
+        long_coin, long_amount = long_position["coin"], long_position["amount"]
+        short_coin, short_amount = short_position["coin"], short_position["amount"]
+
+        try:
+            close_long_trade, close_short_trade = await asyncio.gather(
+                self.close_long_position(long_coin, long_amount),
+                self.close_short_position(short_coin, short_amount),
+            )
+            return {
+                "close_long_trade": close_long_trade,
+                "close_short_trade": close_short_trade,
+            }
+
+        except Exception as e:
+            print(f"Error closing arbitrage positions: {e}")
+            return None
+
+    def open_arbitrage_positions_sync(self, position_size):
+        return asyncio.run(self.open_arbitrage_positions(position_size))
+
+    def close_arbitrage_positions_sync(self, position_size):
+        return asyncio.run(self.close_arbitrage_positions(position_size))

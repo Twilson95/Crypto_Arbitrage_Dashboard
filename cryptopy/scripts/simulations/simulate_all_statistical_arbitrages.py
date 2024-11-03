@@ -1,16 +1,14 @@
 import pandas as pd
 
-from cryptopy import CointegrationCalculator
+from cryptopy import CointegrationCalculator, TradingOpportunities, JsonHelper
 from cryptopy.scripts.simulations.simulation_helpers import (
     get_trade_profit,
     get_todays_spread_data,
-    check_for_closing_event,
-    check_for_opening_event,
     calculate_expected_profit,
     filter_df,
-    save_to_json,
     get_avg_price_difference,
     get_combined_df_of_prices,
+    get_bought_and_sold_amounts,
 )
 
 simulation_name = "max_expected_profit"
@@ -50,7 +48,7 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
     print(pair)
     open_position = False
     open_event = None
-    currency_fees = {pair[0]: {"taker": 0.004}, pair[1]: {"taker": 0.004}}
+    currency_fees = {pair[0]: {"taker": 0.002}, pair[1]: {"taker": 0.002}}
 
     days_back = parameters["days_back"]
     rolling_window = parameters["rolling_window"]
@@ -76,7 +74,7 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
 
         close_event = None
         if open_position:
-            close_event = check_for_closing_event(
+            close_event = TradingOpportunities.check_for_closing_event(
                 todays_spread_data, p_value, parameters, open_event, hedge_ratio
             )
             if close_event:
@@ -86,7 +84,6 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
                     pair,
                     currency_fees,
                     df_filtered,
-                    hedge_ratio,
                     trade_amount=100,
                 )
                 close_event["hedge_ratio"] = hedge_ratio
@@ -106,17 +103,20 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
         if open_position:
             continue
 
-        open_event = check_for_opening_event(
-            todays_spread_data, p_value, parameters, avg_price_ratio, hedge_ratio
+        open_event = TradingOpportunities.check_for_opening_event(
+            todays_spread_data,
+            p_value,
+            parameters,
+            avg_price_ratio,
+            hedge_ratio,
+            current_date,
         )
         if open_event:
+            position_sizes = get_bought_and_sold_amounts(
+                df, pair, open_event, current_date, trade_size=100
+            )
             expected_profit = calculate_expected_profit(
-                df,
-                pair,
-                hedge_ratio,
-                open_event,
-                todays_spread_data,
-                currency_fees,
+                pair, todays_spread_data, currency_fees, position_sizes
             )
             print(f"{pair} expected profit: {expected_profit:.2f}")
             if (
@@ -126,7 +126,6 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
                 continue
 
             open_event["expected_profit"] = expected_profit
-            open_event["hedge_ratio"] = hedge_ratio
             open_event["spread_data"] = todays_spread_data
             open_position = True
 
@@ -152,4 +151,4 @@ simulation_data = {
     },
     "trade_events": trade_results,
 }
-save_to_json(simulation_data, simulation_path)
+JsonHelper.save_to_json(simulation_data, simulation_path)
