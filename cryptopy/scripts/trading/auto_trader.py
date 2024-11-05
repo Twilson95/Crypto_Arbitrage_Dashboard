@@ -111,6 +111,9 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
             hedge_ratio,
         )
         if close_event:
+            if "hedge_ratio" not in open_trade["open_event"]:
+                open_trade["open_event"]["hedge_ratio"] = hedge_ratio
+
             profit = get_trade_profit(
                 open_trade["open_event"],
                 close_event,
@@ -142,6 +145,7 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
             trade_results = [
                 event
                 for event in trade_results
+                # compare sets so reversed pairs are taken care of
                 if (event["pair"][0], event["pair"][1]) != pair
                 or "close_event" in event
             ]

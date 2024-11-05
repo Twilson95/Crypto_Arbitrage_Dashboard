@@ -21,7 +21,7 @@ class TradeManager:
         return max_leverage_by_symbol
 
     def get_max_leverage(self, symbol):
-        return self.max_leverage_by_symbol.get(symbol, None)
+        return float(self.max_leverage_by_symbol.get(symbol, None))
 
     def initialise(self, exchange_name):
         api_key = self.config[exchange_name]["api_key"]
@@ -76,10 +76,13 @@ class TradeManager:
             print(
                 f"Opening short position for {symbol}, amount: {amount}, leverage: {leverage}"
             )
+            params = {
+                "trading_agreement": "agree",
+            }
             self.client.options["defaultType"] = "margin"
             if self.make_trades:
                 order = self.client.create_market_sell_order(
-                    symbol, float(amount), params={"type": "margin"}
+                    symbol, float(amount), params=params
                 )
                 print("Short position opened:", order)
             else:
@@ -96,10 +99,14 @@ class TradeManager:
             print(
                 f"Closing short position for {symbol}, amount: {amount}, leverage: {leverage}"
             )
+            params = {
+                "reduceOnly": True,
+                "trading_agreement": "agree",
+            }
             self.client.options["defaultType"] = "margin"
             if self.make_trades:
                 order = self.client.create_market_buy_order(
-                    symbol, float(amount), params={"type": "margin"}
+                    symbol, float(amount), params=params
                 )
                 print("Short position closed:", order)
             else:
