@@ -28,7 +28,7 @@ class DataFetcher:
         self.market_symbols = []
         self.timeout = 60
         self.markets = markets
-        self.caching_folder = f"data/historical_data/{self.exchange_name}/"
+        self.caching_folder = f"data/historical_data/{self.exchange_name}_long_history/"
         self.balance = None
         self.open_orders = None
 
@@ -104,10 +104,12 @@ class DataFetcher:
 
     def update_cointegration_pairs(self):
         start_time = time()
-        df = self.get_df_of_all_historical_prices()
+        df = self.get_df_of_all_historical_data()
+
         self.cointegration_pairs = CointegrationCalculator.find_cointegration_pairs(
             df, self.cointegration_pairs
         )
+
         end_time = time()
         print(f"{(end_time - start_time):.2f} seconds to generate cointegrity pairs")
 
@@ -149,6 +151,7 @@ class DataFetcher:
             tasks = [self.update_historical_prices(currency) for currency in batch]
             await self._gather_with_timeout(tasks, "update_all_historical_prices")
             self.update_cointegration_pairs()
+
         # self.output_cointegration_pairs(
         #     f"data/historical_data/cointegration_pairs.csv"
         # )
@@ -420,7 +423,7 @@ class DataFetcher:
         safe_currency = currency.replace("/", "_")
         file_name = f"{safe_currency}.csv"
         file_path = os.path.join(self.caching_folder, file_name)
-
+        print(f"caching check for {currency}")
         if os.path.exists(file_path):
             cached_df = pd.read_csv(file_path, parse_dates=["datetime"])
             latest_cached_date = cached_df["datetime"].max().date()
@@ -434,6 +437,7 @@ class DataFetcher:
             # print(f"No cached data for {currency}")
 
         if latest_cached_date is None:
+
             # No cached data, fetch the last `days_to_fetch` days
             since = self.client.parse8601(
                 (datetime.today() - timedelta(days=days_to_fetch)).strftime(
@@ -474,10 +478,8 @@ class DataFetcher:
         safe_currency = currency.replace("/", "_")
         file_name = f"{safe_currency}.csv"
         file_path = os.path.join(self.caching_folder, file_name)
-
         if not os.path.exists(self.caching_folder):
             os.makedirs(self.caching_folder, exist_ok=True)
-
         historical_ohlc = self.get_historical_prices(currency)
         historical_df = historical_ohlc.to_dataframe()
         if historical_df.empty:
@@ -670,7 +672,7 @@ class DataFetcher:
     def get_order_book(self, currency):
         return self.order_books.get(currency)
 
-    def get_df_of_all_historical_prices(self):
+    def get_df_of_all_historical_data(self, field="close"):
         start_time = time()
         dataframes = []
 
@@ -679,12 +681,14 @@ class DataFetcher:
 
         for currency, historic_currency_data in historic_data_copy.items():
             datetime_values = historic_currency_data.datetime
-            closing_prices = historic_currency_data.close
+            if field == "volume":
+                data = historic_currency_data.volume
+            else:
+                data = historic_currency_data.close
 
             df_currency = pd.DataFrame(
-                data={currency: closing_prices}, index=pd.to_datetime(datetime_values)
+                data={currency: data}, index=pd.to_datetime(datetime_values)
             )
-            # print(df_currency)
             dataframes.append(df_currency)
 
         if not dataframes:

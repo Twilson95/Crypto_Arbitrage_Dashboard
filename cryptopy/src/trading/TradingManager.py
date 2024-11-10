@@ -77,6 +77,7 @@ class TradeManager:
                 f"Opening short position for {symbol}, amount: {amount}, leverage: {leverage}"
             )
             params = {
+                "leverage": leverage,
                 "trading_agreement": "agree",
             }
             self.client.options["defaultType"] = "margin"
@@ -100,6 +101,7 @@ class TradeManager:
                 f"Closing short position for {symbol}, amount: {amount}, leverage: {leverage}"
             )
             params = {
+                "leverage": leverage,
                 "reduceOnly": True,
                 "trading_agreement": "agree",
             }
@@ -117,6 +119,7 @@ class TradeManager:
             return None
 
     def open_arbitrage_positions(self, position_size):
+        print("-----------------------------------------------------------------------")
         long_position = position_size["long_position"]
         short_position = position_size["short_position"]
 
@@ -143,6 +146,8 @@ class TradeManager:
             return None
 
     def close_arbitrage_positions(self, position_size):
+        print("-----------------------------------------------------------------------")
+
         long_position = position_size["long_position"]
         short_position = position_size["short_position"]
 

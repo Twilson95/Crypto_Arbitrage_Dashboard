@@ -14,6 +14,7 @@ from cryptopy.scripts.simulations.simulation_helpers import (
     get_avg_price_difference,
     calculate_expected_profit,
     get_bought_and_sold_amounts,
+    is_volume_or_volatility_spike,
 )
 
 parameters = {
@@ -27,16 +28,20 @@ parameters = {
     "stop_loss_multiplier": 1.5,  # ratio of expected trade distance to use as stop loss location
     "max_coin_price_ratio": 5,
     "max_concurrent_trades": 10,
-    "trade_size": 0.08,  # amount of portfolio to buy during each trade
-    "min_expected_profit": 0.01,  # must expect at least half a percent of the portfolio amount
-    "max_expected_profit": 0.05,  # no more at risk as 5% percent of the portfolio amount
+    "trade_size": 0.06,  # amount of portfolio to buy during each trade
+    "min_expected_profit": 0.06,  # must expect at least half a percent of the portfolio amount
+    "max_expected_profit": 0.030,  # no more at risk as 5% percent of the portfolio amount
+    "volume_period": 30,
+    "volume_threshold": 2,
+    "volatility_period": 30,
+    "volatility_threshold": 1.5,
 }
 
 with open("cryptopy/config/trading_config.yaml", "r") as f:
     exchange_config = yaml.safe_load(f)
 
 exchange_name = "Kraken"
-write_output = False
+write_output = True
 make_trades = False
 
 data_manager = DataManager(exchange_config, live_trades=False, use_cache=False)
@@ -50,10 +55,16 @@ print(f"open_trades {open_trades}")
 
 
 usd_balance = 0
-historical_prices = data_manager.get_historical_prices_for_all_currencies("Kraken")
+historical_prices = data_manager.get_historical_data_for_all_currencies("Kraken")
 historical_prices.index = pd.to_datetime(historical_prices.index)
 historical_prices.index = historical_prices.index.date
 current_date = historical_prices.index[-1]
+
+historical_volume = data_manager.get_historical_data_for_all_currencies(
+    "Kraken", "volume"
+)
+historical_volume.index = pd.to_datetime(historical_volume.index)
+historical_volume.index = historical_volume.index.date
 
 for symbol, balance in current_balance.items():
     if symbol == "ZUSD/USD":
@@ -155,10 +166,13 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
     avg_price_ratio = get_avg_price_difference(historical_prices, pair, hedge_ratio)
 
     if open_trade is not None:
+        # print("No open trade")
         continue
     if portfolio_manager.is_at_max_trades():
+        # print("At max trades")
         continue
     if portfolio_manager.is_pair_traded(pair):
+        # print("Pair already traded")
         continue
 
     open_event = TradingOpportunities.check_for_opening_event(
@@ -187,6 +201,12 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
             expected_profit < parameters["min_expected_profit"] * current_funds
             or expected_profit > parameters["max_expected_profit"] * current_funds
         ):
+            print("Not within expected profit range")
+            continue
+
+        if is_volume_or_volatility_spike(
+            historical_prices, historical_volume, pair, parameters
+        ):
             continue
 
         open_trade = {
@@ -199,7 +219,6 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
         trading_manager.open_arbitrage_positions(open_trade["position_size"])
         # data_fetcher.open_arbitrage_positions_sync(open_trade["position_size"])
         trade_results.append(open_trade)
-        print(f"appended trade to results list")
         portfolio_manager.on_opening_trade(pair, open_trade)
 
 simulation_data = {

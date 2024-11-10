@@ -9,11 +9,12 @@ from cryptopy import (
 from cryptopy.scripts.simulations.simulation_helpers import (
     get_trade_profit,
     filter_df,
-    get_combined_df_of_prices,
+    get_combined_df_of_data,
     get_avg_price_difference,
     calculate_expected_profit,
     get_todays_spread_data,
     get_bought_and_sold_amounts,
+    is_volume_or_volatility_spike,
 )
 
 simulation_name = "expected_trading_strategy"
@@ -43,19 +44,21 @@ parameters = {
 }
 
 folder_path = "../../../data/historical_data/Kraken_300_days"
-df = get_combined_df_of_prices(folder_path)
+price_df = get_combined_df_of_data(folder_path, "close")
+volume_df = get_combined_df_of_data(folder_path, "volume")
+
 print("historic_data_combined")
 
 pair_combinations_df = pd.read_csv(cointegration_pairs_path)
 pair_combinations = list(pair_combinations_df.itertuples(index=False, name=None))
 
 portfolio_manager = PortfolioManager(parameters["max_concurrent_trades"], funds=1000)
-print(df.head())
+print(price_df.head())
 
-df.index = pd.to_datetime(df.index)
-df.index = df.index.date
+price_df.index = pd.to_datetime(price_df.index)
+price_df.index = price_df.index.date
 days_back = parameters["days_back"]
-for current_date in df.index[days_back:]:
+for current_date in price_df.index[days_back:]:
     print(f"{current_date}, {portfolio_manager.traded_pairs}, {cumulative_profit:.2f}")
     # in future we can sort these pairs based on profitability from other simulations
     for pair in sorted(pair_combinations, key=lambda x: x[0]):
@@ -63,7 +66,7 @@ for current_date in df.index[days_back:]:
             continue
         currency_fees = {pair[0]: {"taker": 0.002}, pair[1]: {"taker": 0.002}}
 
-        df_filtered = filter_df(df, current_date, days_back)
+        df_filtered = filter_df(price_df, current_date, days_back)
         coint_stat, p_value, crit_values = CointegrationCalculator.test_cointegration(
             df_filtered, pair
         )
@@ -130,7 +133,7 @@ for current_date in df.index[days_back:]:
             current_funds = portfolio_manager.get_funds()
             trade_amount = current_funds * parameters["trade_size"]
             position_size = get_bought_and_sold_amounts(
-                df, pair, open_event, current_date, trade_size=trade_amount
+                price_df, pair, open_event, current_date, trade_size=trade_amount
             )
             expected_profit = calculate_expected_profit(
                 pair, todays_spread_data, currency_fees, position_size
@@ -140,6 +143,10 @@ for current_date in df.index[days_back:]:
                 expected_profit < parameters["min_expected_profit"] * current_funds
                 or expected_profit > parameters["max_expected_profit"] * current_funds
             ):
+                print("Not within expected profit range")
+                continue
+
+            if is_volume_or_volatility_spike(price_df, volume_df, pair, parameters):
                 continue
 
             open_event["position_size"] = position_size

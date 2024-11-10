@@ -77,14 +77,14 @@ def get_trade_profit(
         return profit
 
 
-def get_combined_df_of_prices(folder_path):
+def get_combined_df_of_data(folder_path, field="close"):
     csv_files = glob.glob(os.path.join(folder_path, "*.csv"))
     dfs = []
     for file in csv_files:
         file_name = os.path.basename(file).replace(".csv", "")
         new_column_name = file_name.replace("_", "/")
         df = pd.read_csv(file, index_col=0)
-        df = df[["close"]].rename(columns={"close": new_column_name})
+        df = df[[field]].rename(columns={field: new_column_name})
         dfs.append(df)
     combined_df = pd.concat(dfs, axis=1, join="outer")
     return combined_df
@@ -135,3 +135,35 @@ def get_bought_and_sold_amounts(df, pair, open_event, current_date, trade_size=1
     }
 
     return trade_size
+
+
+def calculate_volume_spike(data, volume_period=30, volume_threshold=2):
+    avg_volume = data.rolling(window=volume_period).mean().iloc[-1]
+    current_volume = data.iloc[-1]
+    return current_volume > avg_volume * volume_threshold
+
+
+def calculate_volatility_spike(data, volatility_period=30, volatility_threshold=1.5):
+    returns = data.pct_change()
+    avg_volatility = returns.rolling(window=volatility_period).std().iloc[-1]
+    current_volatility = returns.iloc[-1]
+    return current_volatility > avg_volatility * volatility_threshold
+
+
+def is_volume_or_volatility_spike(price_data, volume_data, pair, parameters):
+    for coin in pair:
+        volumes = volume_data[coin]
+        prices = price_data[coin]
+        volume_spike = calculate_volume_spike(
+            volumes, parameters["volume_period"], parameters["volume_threshold"]
+        )
+        volatility_spike = calculate_volatility_spike(
+            prices, parameters["volatility_period"], parameters["volatility_threshold"]
+        )
+        date = price_data.index[-1]
+        if volume_spike:
+            print(f"Trade entry skipped due to high volume spike {coin} on {date}.")
+            return True
+        elif volatility_spike:
+            print(f"Trade entry skipped due to high volatility spike {coin} on {date}.")
+            return True

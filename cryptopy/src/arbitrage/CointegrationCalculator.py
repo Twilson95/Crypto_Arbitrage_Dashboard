@@ -58,7 +58,11 @@ class CointegrationCalculator:
                 coint_stat, p_value, crit_values = (
                     CointegrationCalculator.test_cointegration(df, pair)
                 )
+                if p_value is None:
+                    continue
+
                 spread, hedge_ratio = None, None
+
                 if p_value < 0.05:
                     spread, hedge_ratio = CointegrationCalculator.calculate_spread(
                         df, pair
