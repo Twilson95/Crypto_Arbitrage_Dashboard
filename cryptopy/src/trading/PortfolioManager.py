@@ -4,17 +4,18 @@ from cryptopy import JsonHelper
 
 
 class PortfolioManager:
-    def __init__(self, max_trades=6, funds=1000, trades_path=None):
+    def __init__(self, max_trades=6, funds=1000, trades_path=None, max_each_coin=1):
         self.trades_path = trades_path
         self.funds = funds
         self.portfolio = None
         self.traded_pairs = set()
         self.traded_coins = set()
-        self.bought_coins = set()
-        self.sold_coins = set()
+        self.bought_coins = dict()
+        self.sold_coins = dict()
         self.open_events = dict()
         self.max_trades = max_trades
         self.all_trade_events = None
+        self.max_each_coin = max_each_coin
 
     def get_funds(self):
         return self.funds
@@ -66,16 +67,24 @@ class PortfolioManager:
         return False
 
     def on_closing_trade(self, pair, profit):
+        position_size = self.open_events[pair]["position_size"]
+        long_coin = position_size["long_position"]["coin"]
+        short_coin = position_size["short_position"]["coin"]
+        self.bought_coins[long_coin] = self.bought_coins.get(long_coin, 0) - 1
+        self.sold_coins[short_coin] = self.sold_coins.get(short_coin, 0) - 1
+
         self.traded_pairs.remove(pair)
         self.funds += profit
-        # self.traded_coins.remove(pair[0])
-        # self.traded_coins.remove(pair[1])
         del self.open_events[pair]
 
     def on_opening_trade(self, pair, open_event):
+        position_size = open_event["position_size"]
+        long_coin = position_size["long_position"]["coin"]
+        short_coin = position_size["short_position"]["coin"]
+        self.bought_coins[long_coin] = self.bought_coins.get(long_coin, 0) + 1
+        self.sold_coins[short_coin] = self.sold_coins.get(short_coin, 0) + 1
+
         self.traded_pairs.add(pair)
-        # self.traded_coins.add(pair[0])
-        # self.traded_coins.add(pair[1])
         self.open_events[pair] = open_event
 
     def get_open_trades(self, pair):
@@ -86,3 +95,12 @@ class PortfolioManager:
 
     def is_at_max_trades(self):
         return len(self.traded_pairs) == self.max_trades
+
+    def already_hold_coin_position(self, position_size):
+        long_coin = position_size["long_position"]["coin"]
+        short_coin = position_size["short_position"]["coin"]
+        if self.bought_coins.get(long_coin, 0) > self.max_each_coin:
+            return True
+        if self.sold_coins.get(short_coin, 0) > self.max_each_coin:
+            return True
+        return False

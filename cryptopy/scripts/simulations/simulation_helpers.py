@@ -32,16 +32,27 @@ def get_todays_spread_data(parameters, spread, current_date):
     spread_mean = spread.rolling(window=rolling_window).mean()
     spread_std = spread.rolling(window=rolling_window).std()
     spread_threshold = parameters["spread_threshold"]
+
     upper_threshold = spread_mean + spread_threshold * spread_std
     lower_threshold = spread_mean - spread_threshold * spread_std
 
+    upper_spread_threshold = parameters["spread_limit"]
+    upper_spread_limit = spread_mean + upper_spread_threshold * spread_std
+    lower_spread_limit = spread_mean - upper_spread_threshold * spread_std
+
+    todays_spread = filter_list_to_current_date(spread, current_date)
+    todays_spread_mean = filter_list_to_current_date(spread_mean, current_date)
+    todays_spread_std = filter_list_to_current_date(spread_std, current_date)
     return {
         "date": current_date,
-        "spread": filter_list_to_current_date(spread, current_date),
-        "spread_mean": filter_list_to_current_date(spread_mean, current_date),
-        "spread_std": filter_list_to_current_date(spread_std, current_date),
+        "spread": todays_spread,
+        "spread_mean": todays_spread_mean,
+        "spread_std": todays_spread_std,
         "upper_threshold": filter_list_to_current_date(upper_threshold, current_date),
+        "upper_limit": filter_list_to_current_date(upper_spread_limit, current_date),
         "lower_threshold": filter_list_to_current_date(lower_threshold, current_date),
+        "lower_limit": filter_list_to_current_date(lower_spread_limit, current_date),
+        "spread_deviation": abs(todays_spread - todays_spread_mean) / todays_spread_std,
     }
 
 
@@ -53,7 +64,6 @@ def get_trade_profit(
     df_filtered,
     trade_amount,
 ):
-
     arbitrage = StatisticalArbitrage.statistical_arbitrage_iteration(
         entry=(
             open_event["date"],
@@ -87,6 +97,8 @@ def get_combined_df_of_data(folder_path, field="close"):
         df = df[[field]].rename(columns={field: new_column_name})
         dfs.append(df)
     combined_df = pd.concat(dfs, axis=1, join="outer")
+    combined_df.index = pd.to_datetime(combined_df.index)
+    combined_df.index = combined_df.index.date
     return combined_df
 
 
@@ -140,30 +152,43 @@ def get_bought_and_sold_amounts(df, pair, open_event, current_date, trade_size=1
 def calculate_volume_spike(data, volume_period=30, volume_threshold=2):
     avg_volume = data.rolling(window=volume_period).mean().iloc[-1]
     current_volume = data.iloc[-1]
-    return current_volume > avg_volume * volume_threshold
+    return current_volume > avg_volume * volume_threshold, current_volume / avg_volume
 
 
 def calculate_volatility_spike(data, volatility_period=30, volatility_threshold=1.5):
     returns = data.pct_change()
     avg_volatility = returns.rolling(window=volatility_period).std().iloc[-1]
     current_volatility = returns.iloc[-1]
-    return current_volatility > avg_volatility * volatility_threshold
+    if avg_volatility < 0:
+        return (
+            current_volatility < avg_volatility * volatility_threshold,
+            current_volatility / avg_volatility,
+        )
+    else:
+        return (
+            current_volatility > avg_volatility * volatility_threshold,
+            current_volatility / avg_volatility,
+        )
 
 
 def is_volume_or_volatility_spike(price_data, volume_data, pair, parameters):
+    is_spike = False
+    volume_ratio, volatility_ratio = 0, 0
     for coin in pair:
         volumes = volume_data[coin]
         prices = price_data[coin]
-        volume_spike = calculate_volume_spike(
+        volume_spike, volume_ratio = calculate_volume_spike(
             volumes, parameters["volume_period"], parameters["volume_threshold"]
         )
-        volatility_spike = calculate_volatility_spike(
+        volatility_spike, volatility_ratio = calculate_volatility_spike(
             prices, parameters["volatility_period"], parameters["volatility_threshold"]
         )
         date = price_data.index[-1]
         if volume_spike:
             print(f"Trade entry skipped due to high volume spike {coin} on {date}.")
-            return True
+            is_spike = True
         elif volatility_spike:
             print(f"Trade entry skipped due to high volatility spike {coin} on {date}.")
-            return True
+            is_spike = True
+
+    return is_spike, volume_ratio, volatility_ratio

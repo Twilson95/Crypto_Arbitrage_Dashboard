@@ -10,9 +10,9 @@ from cryptopy import JsonHelper
 
 matplotlib.use("TkAgg")  # Or another backend like 'Qt5Agg' depending on your system
 
-simulation_name = "long_history_baseline"
-# simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
-simulation_path = f"../../../data/simulations/all_trades/{simulation_name}.json"
+simulation_name = "long_history_limit_short_risk"
+simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
+# simulation_path = f"../../../data/simulations/all_trades/{simulation_name}.json"
 
 json_data = JsonHelper.read_from_json(simulation_path)
 flattened_data = []
@@ -25,6 +25,8 @@ for entry in results:
         "open_spread": entry["open_event"]["spread_data"]["spread"],
         "open_direction": entry["open_event"]["direction"],
         "open_avg_price_ratio": entry["open_event"]["avg_price_ratio"],
+        # "volume_ratio": entry["open_event"]["volume_ratio"],
+        # "volatility_ratio": entry["open_event"]["volatility_ratio"],
         "open_stop_loss": entry["open_event"]["stop_loss"],
         "open_expected_profit": entry["open_event"]["expected_profit"],
         "close_date": entry["close_event"]["date"],
@@ -133,5 +135,64 @@ sns.lmplot(
 )
 plt.title("Scatter Plot of Price Ratio vs Profit with Separate Trend Lines")
 plt.xlabel("Expected")
+plt.ylabel("Profit")
+plt.show()
+
+sns.lmplot(
+    data=df,
+    x="volume_ratio",
+    y="profit",
+    hue="open_direction",
+    height=6,
+    aspect=1.5,
+    scatter_kws={"s": 10},
+)
+plt.title("Scatter Plot of Price Ratio vs Profit with Separate Trend Lines")
+plt.xlabel("volume_ratio")
+plt.ylabel("Profit")
+plt.show()
+
+sns.lmplot(
+    data=df,
+    x="volatility_ratio",
+    y="profit",
+    hue="open_direction",
+    height=6,
+    aspect=1.5,
+    scatter_kws={"s": 10},
+)
+plt.title("Scatter Plot of Price Ratio vs Profit with Separate Trend Lines")
+plt.xlabel("volatility_ratio")
+plt.ylabel("Profit")
+plt.show()
+
+df["multi_volatility"] = df["volume_ratio"] * abs(df["volatility_ratio"])
+df["div_volatility"] = df["volume_ratio"] / abs(df["volatility_ratio"])
+
+sns.lmplot(
+    data=df,
+    x="multi_volatility",
+    y="profit",
+    hue="open_direction",
+    height=6,
+    aspect=1.5,
+    scatter_kws={"s": 10},
+)
+plt.title("Scatter Plot of Price Ratio vs Profit with Separate Trend Lines")
+plt.xlabel("multi_volatility")
+plt.ylabel("Profit")
+plt.show()
+
+sns.lmplot(
+    data=df,
+    x="div_volatility",
+    y="profit",
+    hue="open_direction",
+    height=6,
+    aspect=1.5,
+    scatter_kws={"s": 10},
+)
+plt.title("Scatter Plot of Price Ratio vs Profit with Separate Trend Lines")
+plt.xlabel("div_volatility")
 plt.ylabel("Profit")
 plt.show()

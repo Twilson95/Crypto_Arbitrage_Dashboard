@@ -7,6 +7,7 @@ from cryptopy import (
     JsonHelper,
     TradingOpportunities,
     TradeManager,
+    TradeManagerKraken,
 )
 from cryptopy.scripts.simulations.simulation_helpers import (
     get_todays_spread_data,
@@ -24,17 +25,19 @@ parameters = {
     "p_value_close_threshold": 1,
     "expiry_days_threshold": 30,
     "spread_threshold": 2,
+    "spread_limit": 5,
     "hedge_ratio_positive": True,
     "stop_loss_multiplier": 1.5,  # ratio of expected trade distance to use as stop loss location
     "max_coin_price_ratio": 5,
     "max_concurrent_trades": 10,
     "trade_size": 0.06,  # amount of portfolio to buy during each trade
-    "min_expected_profit": 0.06,  # must expect at least half a percent of the portfolio amount
+    "min_expected_profit": 0.006,  # must expect at least half a percent of the portfolio amount
     "max_expected_profit": 0.030,  # no more at risk as 5% percent of the portfolio amount
     "volume_period": 30,
     "volume_threshold": 2,
     "volatility_period": 30,
     "volatility_threshold": 1.5,
+    "max_each_coin": 2,
 }
 
 with open("cryptopy/config/trading_config.yaml", "r") as f:
@@ -45,7 +48,8 @@ write_output = True
 make_trades = False
 
 data_manager = DataManager(exchange_config, live_trades=False, use_cache=False)
-trading_manager = TradeManager(exchange_config, exchange_name, make_trades)
+# trading_manager = TradeManager(exchange_config, exchange_name, make_trades)
+trading_manager = TradeManagerKraken(exchange_config, exchange_name, make_trades)
 
 data_fetcher = data_manager.get_exchange(exchange_name)
 current_balance = data_fetcher.get_balance()
@@ -207,6 +211,10 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
         if is_volume_or_volatility_spike(
             historical_prices, historical_volume, pair, parameters
         ):
+            continue
+
+        if portfolio_manager.already_hold_coin_position(position_size):
+            print("Already hold position in one of the coins")
             continue
 
         open_trade = {

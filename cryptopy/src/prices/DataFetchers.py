@@ -28,7 +28,7 @@ class DataFetcher:
         self.market_symbols = []
         self.timeout = 60
         self.markets = markets
-        self.caching_folder = f"data/historical_data/{self.exchange_name}_long_history/"
+        self.caching_folder = f"data/historical_data/{self.exchange_name}/"
         self.balance = None
         self.open_orders = None
 
