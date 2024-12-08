@@ -225,9 +225,9 @@ class DataManager:
         order_book = exchange.get_order_book(symbol)
         return order_book
 
-    def get_historical_prices_for_all_currencies(self, exchange_name):
+    def get_historical_data_for_all_currencies(self, exchange_name, field="close"):
         data_fetcher = self.exchanges[exchange_name]
-        prices = data_fetcher.get_df_of_all_historical_prices()
+        prices = data_fetcher.get_df_of_all_historical_data(field)
         return prices
 
     def get_df_of_historical_prices_pairs(self, exchange_name, pair):

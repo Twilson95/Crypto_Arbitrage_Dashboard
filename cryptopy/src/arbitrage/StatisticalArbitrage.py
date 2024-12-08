@@ -113,7 +113,10 @@ class StatisticalArbitrage:
             entry_price_coin2,
             exit_price_coin1,
             exit_price_coin2,
+            entry_type,
             hedge_ratio,
+            entry_spread,
+            exit_spread,
         )
 
         # Create waterfall and summary data
@@ -125,6 +128,7 @@ class StatisticalArbitrage:
             pair1,
             pair2,
             exchange,
+            exit_time,
         )
 
         # Combine all data into a single dictionary for this opportunity
@@ -342,9 +346,14 @@ class StatisticalArbitrage:
         pair1,
         pair2,
         exchange,
+        exit_time,
     ):
         total_fees = coin1_fees_usd + coin2_fees_usd
-        potential_profit = total_profit + total_fees
+
+        if exit_time is not None:
+            potential_profit = total_profit + total_fees
+        else:
+            total_profit = potential_profit - total_fees
 
         waterfall_data = {
             "Potential Profit": potential_profit,
@@ -367,18 +376,25 @@ class StatisticalArbitrage:
         entry_price_coin2,
         exit_price_coin1,
         exit_price_coin2,
+        direction,
         hedge_ratio,
+        entry_spread,
+        exit_spread,
     ):
-        if exit_price_coin1 is None:
-            return 0
+        # if exit_price_coin1 is None:
+        #     return 0
 
-        potential_profit = (usd_start / entry_price_coin1) * (
-            exit_price_coin1 - entry_price_coin1
-        ) + ((usd_start / entry_price_coin1) * hedge_ratio) * (
-            entry_price_coin2 - exit_price_coin2
-        )
+        # potential_profit = (usd_start / entry_price_coin1) * (
+        #     exit_price_coin1 - entry_price_coin1
+        # ) + ((usd_start / entry_price_coin1) * hedge_ratio) * (
+        #     entry_price_coin2 - exit_price_coin2
+        # )
+        bought_amount = usd_start / entry_price_coin1
 
-        return potential_profit
+        if direction == "short":
+            bought_amount *= hedge_ratio
+
+        return bought_amount * abs(entry_spread - exit_spread)
 
     @staticmethod
     def identify_all_statistical_arbitrage(
@@ -440,7 +456,7 @@ class StatisticalArbitrage:
                 below_lower = False
 
         while len(exit_points) < len(entry_points):
-            exit_points.append((None, None))
+            exit_points.append((None, spread_mean.iloc[-1]))
 
         trade_details = {
             "entry_points": entry_points,
@@ -450,7 +466,7 @@ class StatisticalArbitrage:
             "upper_threshold": upper_threshold,
             "trade_status": (
                 "open"
-                if exit_points[-1] == (None, None)
+                if exit_points[-1][0] is None
                 else None if len(entry_points) == 0 else "closed"
             ),
         }

@@ -17,6 +17,7 @@ setup(
         "PyYAML~=6.0.1",
         "streamlit~=1.36.0",
         "setuptools~=70.3.0",
+        "krakenex~=2.2.2",
     ],
     test_suite="tests",  # This points to the folder where your test cases are located
 )

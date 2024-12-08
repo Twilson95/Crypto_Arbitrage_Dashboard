@@ -12,7 +12,9 @@ class TradingOpportunities:
         current_date,
     ):
         upper_threshold = todays_spread_data["upper_threshold"]
+        upper_limit = todays_spread_data["upper_limit"]
         lower_threshold = todays_spread_data["lower_threshold"]
+        lower_limit = todays_spread_data["lower_limit"]
         spread = todays_spread_data["spread"]
         spread_mean = todays_spread_data["spread_mean"]
 
@@ -24,7 +26,7 @@ class TradingOpportunities:
 
         if p_value < parameters["p_value_open_threshold"]:
             spread_distance = abs(spread - spread_mean)
-            if spread > upper_threshold:
+            if upper_limit > spread > upper_threshold:
                 short_stop_loss = (
                     spread + spread_distance * parameters["stop_loss_multiplier"]
                 )
@@ -37,7 +39,7 @@ class TradingOpportunities:
                     "avg_price_ratio": avg_price_ratio,
                     "stop_loss": short_stop_loss,
                 }
-            elif spread < lower_threshold:
+            elif lower_limit < spread < lower_threshold:
                 long_stop_loss = (
                     spread - spread_distance * parameters["stop_loss_multiplier"]
                 )
@@ -64,7 +66,11 @@ class TradingOpportunities:
         spread_mean = todays_data["spread_mean"]
 
         if p_value > parameters["p_value_close_threshold"]:
-            return {"date": current_date, "spread_data": spread, "reason": "p_value"}
+            return {
+                "date": current_date,
+                "spread_data": todays_data,
+                "reason": "p_value",
+            }
 
         if hedge_ratio < 0:
             return {
