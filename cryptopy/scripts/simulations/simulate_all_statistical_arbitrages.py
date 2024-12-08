@@ -12,7 +12,7 @@ from cryptopy.scripts.simulations.simulation_helpers import (
     is_volume_or_volatility_spike,
 )
 
-simulation_name = "long_history_expiry_days_25"
+simulation_name = "long_history_volume_&_volatility_100_periods"
 exchange_name = "Kraken"
 # historic_data_folder = f"../../../data/historical_data/{exchange_name}_300_days/"
 historic_data_folder = f"../../../data/historical_data/{exchange_name}_long_history/"
@@ -37,9 +37,9 @@ parameters = {
     "min_expected_profit": 0.004,  # must expect at least half a percent of the portfolio amount
     "max_expected_profit": 0.04,  # no more at risk as 5% percent of the portfolio amount
     "trade_size": 0.08,  # proportion of portfolio bought in each trade
-    "volume_period": 30,
+    "volume_period": 100,
     "volume_threshold": 2,  # default 2
-    "volatility_period": 30,
+    "volatility_period": 100,
     "volatility_threshold": 1.5,  # default 1.5
     "max_each_coin": 2,
 }

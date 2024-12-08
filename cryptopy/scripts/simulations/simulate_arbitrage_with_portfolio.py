@@ -17,7 +17,7 @@ from cryptopy.scripts.simulations.simulation_helpers import (
     is_volume_or_volatility_spike,
 )
 
-simulation_name = "long_history_limit_short_risk_2"
+simulation_name = "long_history_15_concurrent_trades"
 exchange_name = "Kraken"
 historic_data_folder = f"../../../data/historical_data/{exchange_name}_long_history/"
 cointegration_pairs_path = f"../../../data/historical_data/cointegration_pairs.csv"
@@ -59,10 +59,10 @@ parameters = {
     "hedge_ratio_positive": True,
     "stop_loss_multiplier": 1.5,  # optimised 1.5-1.8
     "max_coin_price_ratio": 50,  # default 50
-    "max_concurrent_trades": 12,
-    "min_expected_profit": 0.003,  # must expect at least half a percent of the portfolio amount
-    "max_expected_profit": 0.03,  # no more at risk as 5% percent of the portfolio amount
-    "trade_size": 0.06,  # proportion of portfolio bought in each trade
+    "max_concurrent_trades": 15,  # default 12
+    "min_expected_profit": 0.0025,  # must expect at least half a percent of the portfolio amount
+    "max_expected_profit": 0.025,  # no more at risk as 5% percent of the portfolio amount
+    "trade_size": 0.05,  # proportion of portfolio bought in each trade - default 0.06
     "trade_size_same_risk": True,
     "volume_period": 30,
     "volume_threshold": 2,  # default 2
@@ -162,12 +162,30 @@ for current_date in price_df.index[days_back:]:
             current_funds = portfolio_manager.get_funds()
             trade_amount = current_funds * parameters["trade_size"]
 
+            if (
+                parameters["trade_size_same_risk"]
+                and open_event["direction"] == "short"
+            ):
+                trade_amount /= open_event["hedge_ratio"]
+
             position_size = get_bought_and_sold_amounts(
                 price_df, pair, open_event, current_date, trade_size=trade_amount
             )
             expected_profit = calculate_expected_profit(
                 pair, open_event, position_size, currency_fees
             )
+
+            if expected_profit > parameters["max_expected_profit"] * current_funds:
+                scale_factor = parameters["max_expected_profit"] / expected_profit
+                trade_amount *= scale_factor
+
+                position_size = get_bought_and_sold_amounts(
+                    price_df, pair, open_event, current_date, trade_size=trade_amount
+                )
+                expected_profit = calculate_expected_profit(
+                    pair, open_event, position_size, currency_fees
+                )
+
             print(f"{pair} expected profit: {expected_profit:.2f}")
             if (
                 expected_profit < parameters["min_expected_profit"] * current_funds

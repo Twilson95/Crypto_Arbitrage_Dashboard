@@ -10,7 +10,7 @@ from cryptopy import JsonHelper
 
 matplotlib.use("TkAgg")  # Or another backend like 'Qt5Agg' depending on your system
 
-simulation_name = "long_history_limit_short_risk"
+simulation_name = "long_history_limit_shorts_and_scale_extremes"
 simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
 # simulation_path = f"../../../data/simulations/all_trades/{simulation_name}.json"
 
@@ -70,38 +70,65 @@ plt.xlabel("open_days")
 plt.ylabel("profit")
 plt.title("profit per open day")
 plt.show()
-#
-profits_by_pair = df["profit"]
-profits_by_pair.hist(bins=30)
+
+# ----------- histogram of profit per trade --------------
+sns.histplot(
+    data=df,
+    x="profit",
+    hue="open_direction",
+    bins=30,
+    kde=False,  # Set to True if you want a kernel density estimate
+)
+
 plt.xlabel("Profit")
 plt.ylabel("Frequency")
-plt.title("Histogram of Profits by Pairs")
+plt.title("Histogram of Profits by Pairs (Colored by Open_Direction)")
+plt.tight_layout()
 plt.show()
 
 scatter_plot_with_trend(df)
 print(df.groupby(["open_direction"])["profit"].sum())
 
+
+# ------------- box plot of profits per coin ----------
 df["coin"] = df["coin_1"]
 df_copy = df.copy()
 df_copy["coin"] = df["coin_2"]
 df_combined = pd.concat([df, df_copy])
 box_plot_coins(df_combined, "coin")
 
+
+# ----------- Cumulative profit line chart -------------
 df["pair_str"] = df["pair"].astype(str)
 # box_plot_coins(df, "pair_str")
 df.sort_values(by="close_date", inplace=True)
 df["extra_fees"] = 0
 df["net_profit"] = df["profit"] - df["extra_fees"]
 df["cumulative_profit"] = df["net_profit"].cumsum()
-plt.figure(figsize=(12, 6))
-plt.plot(
-    # df.index,
-    df["close_date"],
-    df["cumulative_profit"],
-    marker="o",
-    linestyle="-",
+
+fig, ax = plt.subplots(figsize=(12, 6))
+
+sns.lineplot(
+    x="close_date",
+    y="cumulative_profit",
+    data=df,
+    ax=ax,
     color="blue",
+    legend=False,  # We'll handle the legend/colorbar manually
 )
+
+points = sns.scatterplot(
+    x="close_date",
+    y="cumulative_profit",
+    data=df,
+    hue="open_direction",
+    palette="viridis",
+    edgecolor="black",
+    s=60,
+    ax=ax,
+    legend=True,
+)
+
 plt.title("Cumulative Profit Over Each Row")
 plt.xlabel("Row Index")
 plt.ylabel("Cumulative Profit")

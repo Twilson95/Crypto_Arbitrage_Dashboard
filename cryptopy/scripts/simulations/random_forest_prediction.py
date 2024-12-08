@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score
 from sklearn.tree import plot_tree
 
-simulation_name = "long_history_unconstrained_parameter_expire_15"
+simulation_name = "long_history_expiry_days_30"
 # simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
 simulation_path = f"../../../data/simulations/all_trades/{simulation_name}.json"
 
