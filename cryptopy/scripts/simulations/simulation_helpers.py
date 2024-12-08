@@ -20,10 +20,8 @@ def filter_df(df, current_date, days_back):
     return df[(df.index >= start_date) & (df.index <= current_date)]
 
 
-def filter_list_to_current_date(list_data, current_date):
-    todays_data = (
-        list_data.loc[current_date] if current_date in list_data.index else None
-    )
+def filter_list(list_data, date):
+    todays_data = list_data.loc[date] if date in list_data.index else None
     return todays_data
 
 
@@ -40,18 +38,18 @@ def get_todays_spread_data(parameters, spread, current_date):
     upper_spread_limit = spread_mean + upper_spread_threshold * spread_std
     lower_spread_limit = spread_mean - upper_spread_threshold * spread_std
 
-    todays_spread = filter_list_to_current_date(spread, current_date)
-    todays_spread_mean = filter_list_to_current_date(spread_mean, current_date)
-    todays_spread_std = filter_list_to_current_date(spread_std, current_date)
+    todays_spread = filter_list(spread, current_date)
+    todays_spread_mean = filter_list(spread_mean, current_date)
+    todays_spread_std = filter_list(spread_std, current_date)
     return {
         "date": current_date,
         "spread": todays_spread,
         "spread_mean": todays_spread_mean,
         "spread_std": todays_spread_std,
-        "upper_threshold": filter_list_to_current_date(upper_threshold, current_date),
-        "upper_limit": filter_list_to_current_date(upper_spread_limit, current_date),
-        "lower_threshold": filter_list_to_current_date(lower_threshold, current_date),
-        "lower_limit": filter_list_to_current_date(lower_spread_limit, current_date),
+        "upper_threshold": filter_list(upper_threshold, current_date),
+        "upper_limit": filter_list(upper_spread_limit, current_date),
+        "lower_threshold": filter_list(lower_threshold, current_date),
+        "lower_limit": filter_list(lower_spread_limit, current_date),
         "spread_deviation": abs(todays_spread - todays_spread_mean) / todays_spread_std,
     }
 
@@ -127,14 +125,14 @@ def get_bought_and_sold_amounts(df, pair, open_event, current_date, trade_size=1
     if open_event["direction"] == "short":
         bought_coin = pair[1]
         sold_coin = pair[0]
-        buy_coin_price = filter_list_to_current_date(df[bought_coin], current_date)
+        buy_coin_price = filter_list(df[bought_coin], current_date)
         adjusted_value = buy_coin_price
         bought_amount = trade_size / adjusted_value
         sold_amount = bought_amount / hedge_ratio
     elif open_event["direction"] == "long":
         bought_coin = pair[0]
         sold_coin = pair[1]
-        buy_coin_price = filter_list_to_current_date(df[bought_coin], current_date)
+        buy_coin_price = filter_list(df[bought_coin], current_date)
         bought_amount = trade_size / buy_coin_price
         sold_amount = bought_amount * hedge_ratio
     else:

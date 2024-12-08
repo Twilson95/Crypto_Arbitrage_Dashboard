@@ -26,28 +26,6 @@ simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.js
 trade_results = []
 cumulative_profit = 0
 
-# parameters = {
-#     "days_back": 100,  # hedge ratio and p_value based off this
-#     "rolling_window": 30,  # controls moving avg for mean and thresholds
-#     "p_value_open_threshold": 0.01,
-#     "p_value_close_threshold": 1,
-#     "expiry_days_threshold": 30,
-#     "spread_threshold": 2,
-#     "spread_limit": 5,
-#     "hedge_ratio_positive": True,
-#     "stop_loss_multiplier": 1.5,  # ratio of expected trade distance to use as stop loss location
-#     "max_coin_price_ratio": 5,
-#     "max_concurrent_trades": 10,
-#     "trade_size": 0.06,  # amount of portfolio to buy during each trade
-#     "min_expected_profit": 0.006,  # must expect at least half a percent of the portfolio amount
-#     "max_expected_profit": 0.030,  # no more at risk as 5% percent of the portfolio amount
-#     "volume_period": 30,
-#     "volume_threshold": 2,
-#     "volatility_period": 30,
-#     "volatility_threshold": 1.5,
-#     "max_each_coin": 2,
-# }
-
 parameters = {
     "days_back": 100,  # hedge ratio and p_value based off this
     "rolling_window": 30,  # controls moving avg for mean and thresholds
@@ -174,17 +152,6 @@ for current_date in price_df.index[days_back:]:
             expected_profit = calculate_expected_profit(
                 pair, open_event, position_size, currency_fees
             )
-
-            if expected_profit > parameters["max_expected_profit"] * current_funds:
-                scale_factor = parameters["max_expected_profit"] / expected_profit
-                trade_amount *= scale_factor
-
-                position_size = get_bought_and_sold_amounts(
-                    price_df, pair, open_event, current_date, trade_size=trade_amount
-                )
-                expected_profit = calculate_expected_profit(
-                    pair, open_event, position_size, currency_fees
-                )
 
             print(f"{pair} expected profit: {expected_profit:.2f}")
             if (

@@ -24,3 +24,4 @@ from cryptopy.src.trading.PortfolioManager import PortfolioManager
 from cryptopy.src.trading.TradingOpportunities import TradingOpportunities
 from cryptopy.src.trading.TradingManager import TradeManager
 from cryptopy.src.trading.TradingManagerKraken import TradeManagerKraken
+from cryptopy.src.trading.ArbitrageSimulator import ArbitrageSimulator
