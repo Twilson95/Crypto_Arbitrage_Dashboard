@@ -25,7 +25,7 @@ exchange = exchange_class(
 markets = exchange.load_markets()
 
 # Define the folder where historical data is stored
-historic_data_folder = f"../../data/historical_data/{exchange_name}/"
+historic_data_folder = f"../../../data/historical_data/{exchange_name}/"
 
 
 # Helper function to read all files in a directory

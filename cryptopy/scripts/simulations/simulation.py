@@ -1,9 +1,9 @@
 import pandas as pd
 
-from cryptopy import PortfolioManager, JsonHelper, ArbitrageSimulator
+from cryptopy import PortfolioManager, JsonHelper, ArbitrageSimulator, RiverPredictor
 from cryptopy.scripts.simulations.simulation_helpers import get_combined_df_of_data
 
-simulation_name = "long_history_15_concurrent_trades"
+simulation_name = "long_history_river_PAClassifier"
 exchange_name = "Kraken"
 historic_data_folder = f"../../../data/historical_data/{exchange_name}_long_history/"
 cointegration_pairs_path = f"../../../data/historical_data/cointegration_pairs.csv"
@@ -26,10 +26,11 @@ parameters = {
     "trade_size": 0.05,  # proportion of portfolio bought in each trade - default 0.06
     "trade_size_same_risk": True,
     "volume_period": 30,
-    "volume_threshold": 2,  # default 2
+    "volume_threshold": 5,  # default 2
     "volatility_period": 30,
-    "volatility_threshold": 1.5,  # default 1.5
+    "volatility_threshold": 5,  # default 1.5
     "max_each_coin": 3,
+    "trades_before_predictions": 100,
 }
 
 folder_path = "../../../data/historical_data/Kraken_long_history"
@@ -45,8 +46,16 @@ portfolio_manager = PortfolioManager(
     max_each_coin=parameters["max_each_coin"],
 )
 
+river_predictor = RiverPredictor(prediction_threshold=0.5)
+
 arbitrage_simulator = ArbitrageSimulator(
-    parameters, price_df, volume_df, portfolio_manager, pair_combinations, ml_model=None
+    parameters,
+    price_df,
+    volume_df,
+    portfolio_manager,
+    pair_combinations,
+    ml_model=river_predictor,
+    trades_before_prediction=parameters["trades_before_predictions"],
 )
 trade_results, cumulative_profit = arbitrage_simulator.run_simulation()
 

@@ -16,6 +16,7 @@ class PortfolioManager:
         self.max_trades = max_trades
         self.all_trade_events = None
         self.max_each_coin = max_each_coin
+        self.cumulative_profit = 0
 
     def get_funds(self):
         return self.funds
@@ -55,6 +56,9 @@ class PortfolioManager:
     def get_all_trade_events(self):
         return self.all_trade_events
 
+    def get_cumulative_profit(self):
+        return self.cumulative_profit
+
     def is_pair_traded(self, pair):
         if pair in self.traded_pairs:
             return True
@@ -66,7 +70,12 @@ class PortfolioManager:
         #     return True
         return False
 
-    def on_closing_trade(self, pair, profit):
+    def on_closing_trade(self, pair, closed_trade):
+        if pair not in self.open_events:
+            return
+
+        self.all_trade_events.append(closed_trade)
+
         position_size = self.open_events[pair]["position_size"]
         long_coin = position_size["long_position"]["coin"]
         short_coin = position_size["short_position"]["coin"]
@@ -74,6 +83,8 @@ class PortfolioManager:
         self.sold_coins[short_coin] = self.sold_coins.get(short_coin, 0) - 1
 
         self.traded_pairs.remove(pair)
+        profit = closed_trade["profit"]
+        self.cumulative_profit += profit
         self.funds += profit
         del self.open_events[pair]
 

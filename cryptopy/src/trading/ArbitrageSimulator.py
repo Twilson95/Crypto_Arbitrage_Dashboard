@@ -1,4 +1,4 @@
-from cryptopy import CointegrationCalculator, TradingOpportunities
+from cryptopy import CointegrationCalculator, TradingOpportunities, RiverPredictor
 
 from cryptopy.scripts.simulations.simulation_helpers import (
     get_trade_profit,
@@ -18,7 +18,8 @@ class ArbitrageSimulator:
         volume_df,
         portfolio_manager,
         pair_combinations,
-        ml_model=None,
+        ml_model: RiverPredictor,
+        trades_before_prediction=100,
     ):
         self.parameters = parameters
         self.price_df = price_df
@@ -26,33 +27,55 @@ class ArbitrageSimulator:
         self.portfolio_manager = portfolio_manager
         self.pair_combinations = pair_combinations
         self.ml_model = ml_model
+        self.trades_before_prediction = trades_before_prediction
         self.trade_results = []
-        self.cumulative_profit = 0.0
+        self.daily_trade_results = []
+        self.open_opportunities = {}
 
     def run_simulation(self):
         days_back = self.parameters["days_back"]
 
         for current_date in self.price_df.index[days_back:]:
             self.simulate_day(current_date, days_back)
+            cumulative_profit = self.portfolio_manager.get_cumulative_profit()
 
             print(
-                f"{current_date}, {self.portfolio_manager.traded_pairs}, {self.cumulative_profit:.2f}"
+                f"{current_date}, {self.portfolio_manager.traded_pairs}, {cumulative_profit:.2f}"
             )
 
-        return self.trade_results, self.cumulative_profit
+        all_trades = self.portfolio_manager.get_all_trade_events()
+        cumulative_profit = self.portfolio_manager.get_cumulative_profit()
+        return all_trades, cumulative_profit
+        # return self.all_trades, self.cumulative_profit
 
     def simulate_day(self, current_date, days_back):
+        daily_opportunities, closed_trades = self.find_daily_opportunities(
+            current_date, days_back
+        )
 
-        daily_opportunities = self.find_daily_opportunities(current_date, days_back)
-
-        if self.ml_model and daily_opportunities:
-            daily_opportunities = self.apply_ml_decision(daily_opportunities)
+        if self.ml_model and closed_trades:
+            self.ml_model.learn_from_data(closed_trades)
 
         for opp in daily_opportunities:
-            self.portfolio_manager.on_opening_trade(opp["pair"], opp["open_event"])
+
+            if (
+                self.ml_model
+                and len(self.trade_results) > self.trades_before_prediction
+            ):
+                should_trade = self.ml_model.predict_opportunity(opp)
+                if should_trade and not self.portfolio_manager.is_at_max_trades():
+                    print("Successful opportunity predicted")
+                    self.portfolio_manager.on_opening_trade(
+                        opp["pair"], opp["open_event"]
+                    )
+                else:
+                    print("Should not trade")
+            else:
+                self.portfolio_manager.on_opening_trade(opp["pair"], opp["open_event"])
 
     def find_daily_opportunities(self, current_date, days_back):
         daily_opportunities = []
+        closed_trades = []
 
         for pair in sorted(self.pair_combinations, key=lambda x: x[0]):
             if "XRP/USD" in pair:
@@ -61,26 +84,28 @@ class ArbitrageSimulator:
             price_df_filtered = filter_df(self.price_df, current_date, days_back)
             volume_df_filtered = filter_df(self.volume_df, current_date, days_back)
 
-            opportunity = self.review_pair_opportunity(
+            opportunity, closed_trade = self.review_pair(
                 pair, current_date, price_df_filtered, volume_df_filtered
             )
+            if closed_trade:
+                closed_trades.append(closed_trade)
+                del self.open_opportunities[pair]
             if opportunity:
                 daily_opportunities.append(opportunity)
+                self.open_opportunities[pair] = opportunity
 
-        return daily_opportunities
+        return daily_opportunities, closed_trades
 
-    def review_pair_opportunity(
-        self, pair, current_date, price_df_filtered, volume_df_filtered
-    ):
+    def review_pair(self, pair, current_date, price_df_filtered, volume_df_filtered):
         result = self.get_cointegration_and_spread_info(
             pair, price_df_filtered, current_date
         )
         if result is None:
-            return
+            return None, None
         p_value, hedge_ratio, todays_spread_data, currency_fees = result
 
         # Attempt to close an existing trade if any
-        self.attempt_closing_trade(
+        closed_trade = self.attempt_closing_trade(
             pair,
             p_value,
             hedge_ratio,
@@ -101,7 +126,7 @@ class ArbitrageSimulator:
             currency_fees,
         )
 
-        return opportunity
+        return opportunity, closed_trade
 
     def get_cointegration_and_spread_info(self, pair, price_df_filtered, current_date):
         currency_fees = {pair[0]: {"taker": 0.002}, pair[1]: {"taker": 0.002}}
@@ -131,7 +156,9 @@ class ArbitrageSimulator:
         price_df_filtered,
         currency_fees,
     ):
-        open_event = self.portfolio_manager.get_open_trades(pair)
+        # get all open events even those we aren't trading because we'll use these for training the model
+        open_event = self.open_opportunities.get(pair, None)
+        # open_event = self.portfolio_manager.get_open_trades(pair)
         if not open_event:
             return
 
@@ -148,18 +175,18 @@ class ArbitrageSimulator:
                 price_df_filtered,
                 open_event["trade_amount"],
             )
-            self.portfolio_manager.on_closing_trade(pair, profit)
-            self.cumulative_profit += profit
-            open_event["hedge_ratio"] = hedge_ratio
-            open_event["spread_data"] = todays_spread_data
-            self.trade_results.append(
-                {
-                    "pair": pair,
-                    "open_event": open_event,
-                    "close_event": close_event,
-                    "profit": profit,
-                }
-            )
+            # open_event["hedge_ratio"] = hedge_ratio
+            # open_event["spread_data"] = todays_spread_data
+
+            closing_trade = {
+                "pair": pair,
+                "open_event": open_event,
+                "close_event": close_event,
+                "profit": profit,
+            }
+            self.portfolio_manager.on_closing_trade(pair, closing_trade)
+            self.trade_results.append(closing_trade)
+            return closing_trade
 
     def check_opening_conditions(
         self,
@@ -173,7 +200,8 @@ class ArbitrageSimulator:
         currency_fees,
     ):
         # Check if there's an open trade or if conditions prevent new trades
-        if self.portfolio_manager.get_open_trades(pair) is not None:
+        # if self.portfolio_manager.get_open_trades(pair) is not None:
+        if self.open_opportunities.get(pair) is not None:
             return
         if self.portfolio_manager.is_at_max_trades():
             return
@@ -227,6 +255,7 @@ class ArbitrageSimulator:
         # Set the necessary fields in the event
         new_open_event.update(
             {
+                "p_value": p_value,
                 "position_size": position_size,
                 "trade_amount": trade_amount,
                 "expected_profit": expected_profit,
@@ -331,31 +360,32 @@ class ArbitrageSimulator:
             / todays_spread_std,
         }
 
-    def apply_ml_decision(self, opportunities):
-        """Use the ML model to decide which of the daily opportunities to actually execute."""
-        # Extract features from opportunities for ML model
-        # This might vary depending on your ML model and feature engineering
-        feature_matrix = []
-        for opp in opportunities:
-            oe = opp["open_event"]
-            # Example: Construct a feature vector from event data
-            features = [
-                oe["p_value"],
-                oe["spread_data"]["spread_deviation"],
-                oe["hedge_ratio"],
-                1 if oe["direction"] == "long" else 0,
-                oe["avg_price_ratio"],
-                oe["expected_profit"],
-                oe["volume_ratio"],
-                oe["volatility_ratio"],
-            ]
-            feature_matrix.append(features)
+    @staticmethod
+    def extract_features_from_trade_data(daily_trade_data):
+        x = []
+        y = []
+        for trade in daily_trade_data:
+            open_event = trade["open_event"]
+            close_event = trade["close_event"]
+            # Build the feature dictionary
+            features = {
+                "coin_1": trade["pair"][0].split("/")[0],
+                "coin_2": trade["pair"][1].split("/")[0],
+                "p_value": open_event["p_value"],
+                "spread_deviation": open_event["spread_data"]["spread_deviation"],
+                "hedge_ratio": open_event["hedge_ratio"],
+                "direction": 1 if open_event["direction"] == "long" else 0,
+                "avg_price_ratio": open_event["avg_price_ratio"],
+                "expected_profit": open_event["expected_profit"],
+                "volume_ratio": open_event["volume_ratio"],
+                "volatility_ratio": open_event["volatility_ratio"],
+                # target stored internally, but here we just record features
+                # "target": 1 if close_event["reason"] == "crossed_mean" else 0,
+            }
 
-        predictions = self.ml_model.predict(feature_matrix)
+            x.append(features)
+            # Target: profit > 0 or not
+            # y.append(1 if trade["profit"] > 0 else 0)
+            y.append(1 if close_event["reason"] == "crossed_mean" else 0)
 
-        selected = []
-        for opp, pred in zip(opportunities, predictions):
-            if pred == 1:  # If model recommends to trade
-                selected.append(opp)
-
-        return selected
+        return x, y
