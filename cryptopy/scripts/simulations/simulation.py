@@ -3,7 +3,7 @@ import pandas as pd
 from cryptopy import PortfolioManager, JsonHelper, ArbitrageSimulator, RiverPredictor
 from cryptopy.scripts.simulations.simulation_helpers import get_combined_df_of_data
 
-simulation_name = "long_history_river_PAClassifier"
+simulation_name = "long_history_all_trades"
 exchange_name = "Kraken"
 historic_data_folder = f"../../../data/historical_data/{exchange_name}_long_history/"
 cointegration_pairs_path = f"../../../data/historical_data/cointegration_pairs.csv"
@@ -20,17 +20,23 @@ parameters = {
     "hedge_ratio_positive": True,
     "stop_loss_multiplier": 1.5,  # optimised 1.5-1.8
     "max_coin_price_ratio": 50,  # default 50
-    "max_concurrent_trades": 15,  # default 12
+    "max_concurrent_trades": 999,  # default 12
     "min_expected_profit": 0.0025,  # must expect at least half a percent of the portfolio amount
     "max_expected_profit": 0.025,  # no more at risk as 5% percent of the portfolio amount
     "trade_size": 0.05,  # proportion of portfolio bought in each trade - default 0.06
     "trade_size_same_risk": True,
-    "volume_period": 30,
-    "volume_threshold": 5,  # default 2
-    "volatility_period": 30,
-    "volatility_threshold": 5,  # default 1.5
-    "max_each_coin": 3,
-    "trades_before_predictions": 100,
+    "volume_period": 30,  # default 30
+    "volume_threshold": 999,  # default 2
+    "volatility_period": 30,  # default 30
+    "volatility_threshold": 999,  # default 1.5
+    "max_each_coin": 999,  # default 3
+    "use_ml_predictor": False,
+    "trades_before_predictions": 100,  # default 100
+    "trend_parameters": {
+        "short_window": 30,
+        "long_window": 100,
+        "change_threshold": 0.01,
+    },
 }
 
 folder_path = "../../../data/historical_data/Kraken_long_history"
@@ -46,7 +52,10 @@ portfolio_manager = PortfolioManager(
     max_each_coin=parameters["max_each_coin"],
 )
 
-river_predictor = RiverPredictor(prediction_threshold=0.5)
+if parameters["use_ml_predictor"]:
+    river_predictor = RiverPredictor(prediction_threshold=0.5)
+else:
+    river_predictor = None
 
 arbitrage_simulator = ArbitrageSimulator(
     parameters,

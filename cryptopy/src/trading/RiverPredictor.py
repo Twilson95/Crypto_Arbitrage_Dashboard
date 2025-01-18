@@ -1,4 +1,13 @@
-from river import compose, preprocessing, linear_model, feature_extraction
+from river import (
+    compose,
+    preprocessing,
+    linear_model,
+    feature_extraction,
+    naive_bayes,
+    tree,
+    forest,
+    ensemble,
+)
 import copy
 
 
@@ -22,13 +31,14 @@ class RiverPredictor:
             preprocessing.StandardScaler()
             |
             # models
-            # linear_model.LogisticRegression(),
+            # linear_model.LogisticRegression()
             # linear_model.Perceptron()
-            linear_model.PAClassifier()
+            # linear_model.PAClassifier()
             # naive_bayes.GaussianNB()
             # tree.HoeffdingTreeClassifier()
-            # ensemble.HoeffdingAdaptiveTreeClassifier()
-            # ensemble.AdaptiveRandomForestClassifier()
+            # tree.HoeffdingAdaptiveTreeClassifier()
+            # forest.ARFClassifier()
+            forest.AMFClassifier()
         )
 
     def learn_from_data(self, trade_data):
@@ -79,4 +89,4 @@ class RiverPredictor:
 
         proba = self.model.predict_proba_one(features)
         print(f"Predicted probability of success: {proba[0]} {proba[1]:.2f}")
-        return proba[1] > self.prediction_threshold
+        return proba[1] > self.prediction_threshold, proba[1]

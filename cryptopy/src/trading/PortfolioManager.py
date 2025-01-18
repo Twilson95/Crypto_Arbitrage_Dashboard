@@ -14,7 +14,7 @@ class PortfolioManager:
         self.sold_coins = dict()
         self.open_events = dict()
         self.max_trades = max_trades
-        self.all_trade_events = None
+        self.all_trade_events = []
         self.max_each_coin = max_each_coin
         self.cumulative_profit = 0
 

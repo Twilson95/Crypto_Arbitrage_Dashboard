@@ -8,6 +8,7 @@ from cryptopy.scripts.simulations.simulation_helpers import (
     get_bought_and_sold_amounts,
     filter_list,
 )
+from typing import Optional
 
 
 class ArbitrageSimulator:
@@ -18,7 +19,7 @@ class ArbitrageSimulator:
         volume_df,
         portfolio_manager,
         pair_combinations,
-        ml_model: RiverPredictor,
+        ml_model: Optional[RiverPredictor] = None,
         trades_before_prediction=100,
     ):
         self.parameters = parameters
@@ -31,6 +32,7 @@ class ArbitrageSimulator:
         self.trade_results = []
         self.daily_trade_results = []
         self.open_opportunities = {}
+        self.current_market_trend = None
 
     def run_simulation(self):
         days_back = self.parameters["days_back"]
@@ -54,35 +56,55 @@ class ArbitrageSimulator:
         )
 
         if self.ml_model and closed_trades:
+            print("Training Model")
             self.ml_model.learn_from_data(closed_trades)
 
+        predicted_success_trades = []
         for opp in daily_opportunities:
-
             if (
                 self.ml_model
                 and len(self.trade_results) > self.trades_before_prediction
             ):
-                should_trade = self.ml_model.predict_opportunity(opp)
-                if should_trade and not self.portfolio_manager.is_at_max_trades():
+                should_trade, probability_of_success = (
+                    self.ml_model.predict_opportunity(opp)
+                )
+                if should_trade:
                     print("Successful opportunity predicted")
-                    self.portfolio_manager.on_opening_trade(
-                        opp["pair"], opp["open_event"]
-                    )
+                    opp["probability_of_success"] = probability_of_success
+                    predicted_success_trades.append(opp)
                 else:
                     print("Should not trade")
             else:
+                if not self.portfolio_manager.is_at_max_trades():
+                    self.portfolio_manager.on_opening_trade(
+                        opp["pair"], opp["open_event"]
+                    )
+
+        predicted_success_trades.sort(
+            key=lambda x: x["probability_of_success"], reverse=True
+        )
+
+        for opp in predicted_success_trades:
+            if not self.portfolio_manager.is_at_max_trades():
                 self.portfolio_manager.on_opening_trade(opp["pair"], opp["open_event"])
 
     def find_daily_opportunities(self, current_date, days_back):
         daily_opportunities = []
         closed_trades = []
 
+        price_df_filtered = filter_df(self.price_df, current_date, days_back)
+        volume_df_filtered = filter_df(self.volume_df, current_date, days_back)
+
+        trend_parameters = self.parameters["trend_parameters"]
+        price_field = "BTC/USD"
+        market_prices = price_df_filtered[[price_field]]
+        market_trend = ArbitrageSimulator.get_current_trend(
+            market_prices, price_field, trend_parameters
+        )
+
         for pair in sorted(self.pair_combinations, key=lambda x: x[0]):
             if "XRP/USD" in pair:
                 continue
-
-            price_df_filtered = filter_df(self.price_df, current_date, days_back)
-            volume_df_filtered = filter_df(self.volume_df, current_date, days_back)
 
             opportunity, closed_trade = self.review_pair(
                 pair, current_date, price_df_filtered, volume_df_filtered
@@ -92,7 +114,28 @@ class ArbitrageSimulator:
                 del self.open_opportunities[pair]
             if opportunity:
                 daily_opportunities.append(opportunity)
-                self.open_opportunities[pair] = opportunity
+                self.open_opportunities[pair] = opportunity["open_event"]
+
+                price_df_for_trend = filter_df(
+                    self.price_df[[pair[0], pair[1]]],
+                    current_date,
+                    trend_parameters["long_window"],
+                )
+
+                coin_1_trend = ArbitrageSimulator.get_current_trend(
+                    price_df_for_trend, pair[0], trend_parameters
+                )
+                coin_2_trend = ArbitrageSimulator.get_current_trend(
+                    price_df_for_trend, pair[1], trend_parameters
+                )
+
+                opportunity["open_event"].update(
+                    {
+                        "market_trend": market_trend,
+                        "coin_1_trend": coin_1_trend,
+                        "coin_2_trend": coin_2_trend,
+                    }
+                )
 
         return daily_opportunities, closed_trades
 
@@ -127,6 +170,29 @@ class ArbitrageSimulator:
         )
 
         return opportunity, closed_trade
+
+    @staticmethod
+    def get_current_trend(price_df, price_field, trend_parameters):
+        price_df = price_df.copy()
+        short_window = trend_parameters["short_window"]
+        long_window = trend_parameters["long_window"]
+        change_threshold = trend_parameters["change_threshold"]
+
+        price_df["short_MA"] = price_df[price_field].rolling(window=short_window).mean()
+        price_df["long_MA"] = price_df[price_field].rolling(window=long_window).mean()
+
+        sma_difference = abs(
+            price_df["short_MA"].iloc[-1] - price_df["long_MA"].iloc[-1]
+        )
+        sma_percentage_difference = sma_difference / price_df["long_MA"].iloc[-1]
+
+        if sma_percentage_difference < change_threshold:
+            trend = "Flat"
+        elif price_df["short_MA"].iloc[-1] > price_df["long_MA"].iloc[-1]:
+            trend = "Uptrend"
+        else:
+            trend = "Downtrend"
+        return trend
 
     def get_cointegration_and_spread_info(self, pair, price_df_filtered, current_date):
         currency_fees = {pair[0]: {"taker": 0.002}, pair[1]: {"taker": 0.002}}

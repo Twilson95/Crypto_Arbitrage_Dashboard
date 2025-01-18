@@ -11,9 +11,9 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score
 from sklearn.tree import plot_tree
 
-simulation_name = "long_history_expiry_days_30"
-# simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
-simulation_path = f"../../../data/simulations/all_trades/{simulation_name}.json"
+simulation_name = "long_history_all_trades_sensible_parameters"
+simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
+# simulation_path = f"../../../data/simulations/all_trades/{simulation_name}.json"
 
 data = JsonHelper.read_from_json(simulation_path)
 
@@ -37,17 +37,24 @@ for trade in data["trade_events"]:
         "direction": 1 if open_event["direction"] == "long" else 0,
         "avg_price_ratio": open_event["avg_price_ratio"],
         # "stop_loss": open_event["stop_loss"],
-        "expected_profit": open_event["expected_profit"],
+        # "expected_profit": open_event["expected_profit"],
         "volume_ratio": open_event["volume_ratio"],
         "volatility_ratio": open_event["volatility_ratio"],
+        "market_trend": open_event["market_trend"],
+        "coin_1_trend": open_event["coin_1_trend"],
+        "coin_2_trend": open_event["coin_2_trend"],
         # "target": 1 if profit > 0 else 0,
         "target": 1 if close_event["reason"] == "crossed_mean" else 0,
+        "profit": profit,
     }
     rows.append(row)
 
 df = pd.DataFrame(rows)
+df["market_coin_1_match"] = df["market_trend"] == df["coin_1_trend"]
+df["market_coin_2_match"] = df["market_trend"] == df["coin_2_trend"]
+df["coin_1_coin_2_match"] = df["coin_1_trend"] == df["coin_2_trend"]
 
-X = df.drop(columns="target")
+X = df.drop(columns=["target", "profit"])
 y = df["target"]
 
 numeric_features = [
@@ -55,12 +62,20 @@ numeric_features = [
     "spread_deviation",
     "hedge_ratio",
     "avg_price_ratio",
-    "expected_profit",
+    # "expected_profit",
     "volume_ratio",
     "volatility_ratio",
 ]
 # categorical_features = ["coin_1", "coin_2", "direction"]
-categorical_features = ["direction"]
+categorical_features = [
+    "direction",
+    "market_trend",
+    "coin_1_trend",
+    "coin_2_trend",
+    "market_coin_1_match",
+    "market_coin_2_match",
+    "coin_1_coin_2_match",
+]
 # Preprocessing pipeline
 preprocessor = ColumnTransformer(
     transformers=[
@@ -74,38 +89,27 @@ pipeline = Pipeline(
         ("preprocessor", preprocessor),
         (
             "classifier",
-            RandomForestClassifier(
-                max_depth=12,
-                max_features=0.572843881667746,
-                min_samples_leaf=1,
-                min_samples_split=2,
-                n_estimators=50,
-            ),
+            RandomForestClassifier(),
         ),
     ]
 )
-# max_depth=15,
-# max_features=0.6717246151331688,
-# min_samples_leaf=3,
-# min_samples_split=2,
-# n_estimators=50,
 
-
-# Train-test split
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
 )
 
-# Train the model
 pipeline.fit(X_train, y_train)
 print(X_test)
-# Predict and evaluate
 y_pred = pipeline.predict(X_test)
 print(classification_report(y_test, y_pred))
 
-# Access the trained RandomForestClassifier from the pipeline
-rf_model = pipeline.named_steps["classifier"]
+df_test = df.loc[X_test.index].copy()
+df_test["predicted"] = y_pred
+total_profit = df_test.loc[df_test["predicted"] == 1, "profit"].sum()
+print(total_profit)
 
+
+rf_model = pipeline.named_steps["classifier"]
 tree = rf_model.estimators_[0]  # You can change the index to view other trees
 
 # Plot the best tree
@@ -142,4 +146,4 @@ viz = model(
     ),
     class_names=["Not Successful", "Successful"],
 )
-viz.show()
+# viz.show()
