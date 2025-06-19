@@ -5,7 +5,7 @@ setup(
     version="0.1",
     packages=find_packages(),
     install_requires=[
-        "dash~=2.17.1",
+        "dash~=3.0.4",
         "pandas~=2.2.2",
         "vaderSentiment~=3.3.2",
         "plotly~=5.22.0",
@@ -15,7 +15,6 @@ setup(
         "numpy~=1.26.4",
         "statsmodels~=0.14.2",
         "PyYAML~=6.0.1",
-        "streamlit~=1.36.0",
         "setuptools~=70.3.0",
         "krakenex~=2.2.2",
     ],

@@ -284,7 +284,6 @@ def create_figure(traces):
         data=traces,  # Changed from [traces] to traces directly
         layout=go.Layout(
             title="Cryptocurrency Exchange Network",
-            titlefont_size=16,
             showlegend=False,
             hovermode="closest",
             margin=dict(b=20, l=5, r=5, t=40),

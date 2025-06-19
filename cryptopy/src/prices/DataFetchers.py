@@ -94,11 +94,13 @@ class DataFetcher:
         )
 
         self.extract_exchange_fees()
+
         await self.extract_currency_fees()
 
         self.currency_fees = DataFetcher.generate_crypto_to_crypto_fees(
             self.currency_fees, self.inter_coin_symbols
         )
+
         await self.set_balance()
         await self.set_open_trades()
 
@@ -546,6 +548,7 @@ class DataFetcher:
             matched_symbol1 = DataFetcher.find_matching_symbol(
                 market_symbols, synthetic_symbol1
             )
+
             matched_symbol2 = DataFetcher.find_matching_symbol(
                 market_symbols, synthetic_symbol2
             )
@@ -561,7 +564,6 @@ class DataFetcher:
 
             # inter_coin_symbols.pop("ETHXBT")
             # all_currencies.pop("XBTETH")
-
         return inter_coin_symbols
 
     def update_all_cointegration_spreads(self):
@@ -610,11 +612,13 @@ class DataFetcher:
             # skip futures
             if "-" in market_symbol:
                 continue
+
             # Remove delimiter for matching
             base_market_symbol = market_symbol.split(":")[0]
             normalized_market_symbol = (
                 base_market_symbol.replace("/", "").lower().replace("xbt", "btc")
             )
+
             # Exact match without delimiter
             if normalized_market_symbol == normalized_synthetic_symbol:
                 return market_symbol
