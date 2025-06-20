@@ -394,11 +394,14 @@ class DataFetcher:
         if currency not in self.historical_data.keys():
             self.initialize_historic_data(currency)
 
+        print("test")
+
         if self.use_cache:
             cached_df, since, missing_days = await self.check_for_cached_data(
                 currency, days_to_fetch
             )
-            self.historical_data[currency].update_from_dataframe(cached_df)
+            if not cached_df.empty:
+                self.historical_data[currency].update_from_dataframe(cached_df)
         else:
             missing_days = days_to_fetch
             since = self.client.parse8601(
@@ -412,6 +415,7 @@ class DataFetcher:
 
         new_data = await self.query_historical_data(symbol, timeframe, since)
         if new_data is None:
+            print(f"no historical data from query {self.exchange_name}")
             return
 
         self.historical_data[currency].update_from_dataframe(new_data)

@@ -63,7 +63,7 @@ class ArbitrageHandler:
             funds,
             window=30,
         )
-        print(f"found arbitrages {arbitrages}")
+
         if not arbitrages:
             return html.Div(), html.Div()
 
