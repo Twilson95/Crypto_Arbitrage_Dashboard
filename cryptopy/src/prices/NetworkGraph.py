@@ -92,6 +92,9 @@ def create_graph_from_prices(live_prices):
     G = nx.DiGraph()
     for pair, rate in live_prices.items():
         base, quote = pair.split("/")
+        if rate is None:
+            print(f"rate for {pair} is none, will not add edge to networkx graph")
+            continue
         G.add_edge(base, quote, weight=rate)
     return G
 
