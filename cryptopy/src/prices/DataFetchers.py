@@ -394,8 +394,6 @@ class DataFetcher:
         if currency not in self.historical_data.keys():
             self.initialize_historic_data(currency)
 
-        print("test")
-
         if self.use_cache:
             cached_df, since, missing_days = await self.check_for_cached_data(
                 currency, days_to_fetch

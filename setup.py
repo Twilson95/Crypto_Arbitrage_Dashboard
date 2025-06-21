@@ -6,10 +6,10 @@ setup(
     packages=find_packages(),
     install_requires=[
         "dash~=3.0.4",
-        "pandas~=2.2.2",
+        "pandas>=2.2.2",
         "vaderSentiment~=3.3.2",
-        "plotly~=5.22.0",
-        "ccxt~=4.4.14",
+        "plotly~=6.1.2",
+        "ccxt~=4.4.90",
         "pytz~=2024.1",
         "networkx~=3.3",
         "numpy~=1.26.4",

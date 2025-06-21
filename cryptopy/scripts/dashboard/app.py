@@ -359,7 +359,6 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
                 window=30,
             )
         )
-        print(f"returned arbitrage instructions {arbitrage_instructions}")
 
     spread_chart, entry_dates, exit_dates = price_chart.plot_spread(
         cointegration_data.spread, cointegration_pair, 30
