@@ -92,6 +92,9 @@ def create_graph_from_prices(live_prices):
     G = nx.DiGraph()
     for pair, rate in live_prices.items():
         base, quote = pair.split("/")
+        if rate is None:
+            print(f"rate for {pair} is none, will not add edge to networkx graph")
+            continue
         G.add_edge(base, quote, weight=rate)
     return G
 
@@ -284,7 +287,6 @@ def create_figure(traces):
         data=traces,  # Changed from [traces] to traces directly
         layout=go.Layout(
             title="Cryptocurrency Exchange Network",
-            titlefont_size=16,
             showlegend=False,
             hovermode="closest",
             margin=dict(b=20, l=5, r=5, t=40),

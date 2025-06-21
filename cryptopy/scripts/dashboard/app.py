@@ -1,3 +1,7 @@
+import asyncio
+import logging
+import sys
+
 from dash import Dash, dcc, html
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
@@ -18,10 +22,22 @@ from cryptopy import (
     PortfolioManager,
 )
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    force=True,  # Ensures it applies even if something already configured logging
+)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # Change to DEBUG for verbose logs
+
 app = Dash(
     __name__, external_stylesheets=[dbc.themes.SLATE], assets_folder="../../assets"
 )
+
 app.title = "Crypto Dashboard"
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 with open("cryptopy/config/exchange_config.yaml", "r") as f:
     exchange_config = yaml.safe_load(f)
@@ -169,7 +185,6 @@ def update_historic_price_chart(currency, exchange, selected_indicators):
     ],
 )
 def update_live_price_chart(currency, exchange_name, n_intervals, indicator):
-    # print(currency, exchange)
     if not (currency or exchange_name):
         return app_layout.default_figure
 
@@ -241,7 +256,10 @@ def update_arbitrage_graphs(
             exchange, funds, cointegration_pair_str
         )
     else:
-        main_chart, instructions = {}, {}
+        main_chart, instructions = (
+            html.Div("No arbitrage strategy selected"),
+            html.Div(),
+        )
 
     # end_time = time()
     # print(end_time - start_time)
@@ -250,7 +268,7 @@ def update_arbitrage_graphs(
 
 def simple_arbitrage_graphs(currency, funds):
     if currency is None:
-        return {}, {}
+        return html.Div(), html.Div()
 
     prices = data_manager.get_live_prices_for_all_exchanges(currency)
     currency_fees = data_manager.get_maker_taker_fees_for_all_exchanges(currency)
@@ -258,7 +276,7 @@ def simple_arbitrage_graphs(currency, funds):
     network_fees = data_manager.get_network_fees(currency)
 
     if not prices:
-        return {}, {}
+        return html.Div(), html.Div()
 
     prices = {
         exchange: price_list
@@ -283,7 +301,7 @@ def simple_arbitrage_graphs(currency, funds):
 
 def triangular_arbitrage_graphs(exchange, funds):
     if exchange is None:
-        return {}, {}
+        return html.Div(), html.Div()
 
     prices, currency_fees = data_manager.get_live_prices_and_fees_for_single_exchange(
         exchange
@@ -295,7 +313,7 @@ def triangular_arbitrage_graphs(exchange, funds):
     }
 
     if not prices or not currency_fees:
-        return {}, {}
+        return html.Div(), html.Div()
 
     exchange_network_graph, arbitrage_instructions = (
         arbitrage_handler.return_triangle_arbitrage_instructions(
@@ -310,7 +328,7 @@ def triangular_arbitrage_graphs(exchange, funds):
 
 def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
     if exchange is None or cointegration_pair_str is None:
-        return {}, {}
+        return html.Div(), html.Div()
 
     cointegration_pair = tuple(ast.literal_eval(cointegration_pair_str))
 
@@ -329,7 +347,7 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
     _, currency_fees = data_manager.get_live_prices_and_fees_for_single_exchange(
         exchange
     )
-    arbitrage_instructions = {}
+    arbitrage_instructions = html.Div()
     if cointegration_data.spread is not None:
         arbitrage_instructions = (
             ArbitrageHandler.return_statistical_arbitrage_instructions(
@@ -353,6 +371,9 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
         entry_dates,
         exit_dates,
     )
+
+    if arbitrage_instructions == {}:
+        arbitrage_instructions = html.Div()
 
     return (
         [
@@ -490,5 +511,9 @@ def create_filter_label(cointegration_data, coins_in_portfolio):
     )
 
 
+def main():
+    app.run(debug=True, use_reloader=False)
+
+
 if __name__ == "__main__":
-    app.run_server(debug=True, use_reloader=False)
+    main()

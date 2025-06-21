@@ -68,7 +68,7 @@ class AppLayout:
                 html.Label("Exchange"),
                 dcc.Dropdown(
                     id="exchange-selector",
-                    options=[],
+                    options=self.filter_component.get_exchange_options(),
                     placeholder="Select an exchange",
                     value=None,
                 ),
@@ -83,7 +83,7 @@ class AppLayout:
                 html.Label("Currency"),
                 dcc.Dropdown(
                     id="currency-selector",
-                    options=[],
+                    options=self.filter_component.get_currency_options(),
                     placeholder="Select a currency",
                     value="BTC/USD",
                 ),

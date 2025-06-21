@@ -138,8 +138,6 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
                 open_trade["position_size"]["trade_amount_usd"],
             )
             portfolio_manager.on_closing_trade(pair, profit)
-            # open_trade["close_event"]["hedge_ratio"] = hedge_ratio
-            # open_trade["close_event"]["spread_data"] = todays_spread_data
 
             position_size = open_trade.get("position_size")
             if position_size is None:

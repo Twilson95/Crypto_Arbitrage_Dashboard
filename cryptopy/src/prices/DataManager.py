@@ -1,4 +1,6 @@
 import asyncio
+import logging
+
 import ccxt.async_support as ccxt
 from cryptopy import DataFetcher
 from threading import Thread
@@ -95,13 +97,16 @@ class DataManager:
 
         try:
             markets = await exchange.load_markets()
-        except:
+        except Exception as e:
+            print(f"[{exchange_name}] Failed to load markets: {e}")
             markets = None
 
         data_fetcher = DataFetcher(
             exchange, exchange_name, pairs_mapping, markets, self.use_cache
         )
+
         await data_fetcher.async_init()
+
         self.exchanges[exchange_name] = data_fetcher
         print(f"{exchange_name} initialized successfully")
 

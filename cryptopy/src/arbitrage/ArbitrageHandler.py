@@ -4,6 +4,8 @@ from cryptopy import (
     TriangularArbitrage,
     StatisticalArbitrage,
 )
+from dash import html
+
 from cryptopy.src.prices.NetworkGraph import create_network_graph
 
 
@@ -21,7 +23,7 @@ class ArbitrageHandler:
             currency, exchange_prices, currency_fees, exchange_fees, network_fees, funds
         )
         if not arbitrages:
-            return {}
+            return html.Div()
 
         instruction_diagrams = []
         for arbitrage in arbitrages:
@@ -39,7 +41,7 @@ class ArbitrageHandler:
         exchange_network_graph = create_network_graph(prices, arbitrages)
 
         if not arbitrages:
-            return exchange_network_graph, {}
+            return exchange_network_graph, html.Div()
 
         instruction_diagrams = []
 
@@ -61,10 +63,12 @@ class ArbitrageHandler:
             funds,
             window=30,
         )
+
         if not arbitrages:
-            return {}, {}
+            return html.Div(), html.Div()
 
         arbitrages.reverse()
+        arbitrages = arbitrages[:3]
 
         instruction_diagrams = []
 

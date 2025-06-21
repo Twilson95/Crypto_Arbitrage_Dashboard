@@ -10,7 +10,7 @@ from cryptopy import JsonHelper
 
 matplotlib.use("TkAgg")  # Or another backend like 'Qt5Agg' depending on your system
 
-simulation_name = "long_history_limit_shorts_and_scale_extremes"
+simulation_name = "long_history_all_trades_sensible_parameters"
 simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
 # simulation_path = f"../../../data/simulations/all_trades/{simulation_name}.json"
 
@@ -104,6 +104,7 @@ df["pair_str"] = df["pair"].astype(str)
 df.sort_values(by="close_date", inplace=True)
 df["extra_fees"] = 0
 df["net_profit"] = df["profit"] - df["extra_fees"]
+df["net_profit"] = df["profit"].apply(lambda x: max(x, -30))
 df["cumulative_profit"] = df["net_profit"].cumsum()
 
 fig, ax = plt.subplots(figsize=(12, 6))

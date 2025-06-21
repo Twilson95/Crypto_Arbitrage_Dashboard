@@ -21,8 +21,12 @@ class TriangularArbitrage:
             # If the pair is reversed, return the inverse rate
             reversed_pair = f"{pair.split('/')[1]}/{pair.split('/')[0]}"
             if reversed_pair in prices:
-                return 1 / prices[reversed_pair]
-        return None
+                reversed_price = prices[reversed_pair]
+                if reversed_price is not None:
+                    return 1 / prices[reversed_pair]
+                else:
+                    print("We do not have prices for pair or its reverse")
+                    return None
 
     @staticmethod
     def identify_triangle_arbitrage(prices, currency_fees, exchange, funds):
