@@ -10,17 +10,9 @@ class PriceChart:
     @staticmethod
     def create_ohlc_chart(prices, indicators=None, mark_limit=30, title="Price Chart"):
         fig = go.Figure()
-        # fig = make_subplots(
-        #     rows=3,
-        #     cols=1,
-        #     shared_xaxes=True,
-        #     row_heights=[0.5, 0.25, 0.25],
-        #     vertical_spacing=0.05,
-        #     subplot_titles=("Price", "MACD", "RSI"),
-        # )
 
         x = [dt.strftime("%Y-%m-%d %H:%M:%S") for dt in prices.datetime[-mark_limit:]]
-        # print("dates: ", input_from, x)
+
         close_prices = prices.close[-mark_limit:]
         open_prices = prices.open[-mark_limit:]
         high_prices = prices.high[-mark_limit:]
@@ -35,10 +27,6 @@ class PriceChart:
                 low=low_prices,
                 close=close_prices,
                 name="Price",
-                # increasing=dict(
-                #     line=dict(color="green")
-                # ),  # Green for increasing prices
-                # decreasing=dict(line=dict(color="red")),  # Red for decreasing prices
             )
         )
 
@@ -60,9 +48,6 @@ class PriceChart:
         fig.update_layout(
             title=title,
             xaxis=dict(
-                # title="Time",
-                #  type="date",
-                #  tickformat="%Y-%m-%d %H:%M:%S",
                 tickangle=0,
                 rangeslider=dict(visible=False),
             ),  # Disable the range slider
@@ -73,6 +58,57 @@ class PriceChart:
         )
 
         return fig
+
+    @staticmethod
+    def get_ohlc_chart_data(
+        prices, indicators=None, mark_limit=30, title="Price Chart"
+    ):
+        x = [dt.strftime("%Y-%m-%d %H:%M:%S") for dt in prices.datetime[-mark_limit:]]
+
+        open_prices = prices.open[-mark_limit:]
+        high_prices = prices.high[-mark_limit:]
+        low_prices = prices.low[-mark_limit:]
+        close_prices = prices.close[-mark_limit:]
+
+        chart_data = [
+            {
+                "type": "candlestick",
+                "x": x,
+                "open": open_prices,
+                "high": high_prices,
+                "low": low_prices,
+                "close": close_prices,
+                "name": "Price",
+            }
+        ]
+
+        if indicators:
+            for name, values in indicators.items():
+                if name == "datetime":
+                    continue
+                chart_data.append(
+                    {
+                        "type": "scatter",
+                        "mode": "lines",
+                        "name": name,
+                        "x": x,
+                        "y": values[-mark_limit:],
+                    }
+                )
+
+        return {
+            "data": chart_data,
+            "layout": {
+                "title": title,
+                "xaxis": {
+                    "tickangle": 0,
+                    "rangeslider": {"visible": False},
+                },
+                "yaxis": {"title": "Price (USD)"},
+                "template": "plotly_dark",
+                "margin": {"l": 10, "r": 10, "t": 40, "b": 10},
+            },
+        }
 
     @staticmethod
     def create_line_charts(prices, indicators=None, mark_limit=30, title="Price Chart"):
@@ -190,6 +226,41 @@ class PriceChart:
         )
 
         return fig
+
+    @staticmethod
+    def get_depth_chart_data(order_book):
+        df_bids, df_asks = PriceChart.format_order_book_for_plotly(order_book)
+
+        # Return data in Taipy-compatible dictionary format
+        return {
+            "data": [
+                {
+                    "x": df_bids["price"].tolist(),
+                    "y": df_bids["cumulative_quantity"].tolist(),
+                    "type": "scatter",
+                    "mode": "lines",
+                    "name": "Bids",
+                    "fill": "tozeroy",
+                    "line": {"color": "rgba(0, 204, 150, 0.6)"},
+                },
+                {
+                    "x": df_asks["price"].tolist(),
+                    "y": df_asks["cumulative_quantity"].tolist(),
+                    "type": "scatter",
+                    "mode": "lines",
+                    "name": "Asks",
+                    "fill": "tozeroy",
+                    "line": {"color": "rgba(239, 85, 59, 0.6)"},
+                },
+            ],
+            "layout": {
+                "title": "Order Book Depth Chart",
+                "xaxis": {"title": "Price"},
+                "yaxis": {"title": "Cumulative Quantity"},
+                "template": "plotly_dark",
+                "margin": {"l": 10, "r": 10, "t": 40, "b": 10},
+            },
+        }
 
     @staticmethod
     def plot_spread(spread, pair, avg_window=30, view_window=70):
