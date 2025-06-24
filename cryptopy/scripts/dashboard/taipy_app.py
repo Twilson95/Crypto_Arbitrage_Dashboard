@@ -1,10 +1,12 @@
 import asyncio
 import sys
 import time
+from threading import Thread
 
+import pandas as pd
 import taipy as tp
 import yaml
-from taipy.gui import invoke_long_callback
+from taipy.gui import invoke_long_callback, get_state_id, invoke_callback
 
 from cryptopy.src.arbitrage.ArbitrageHandler import ArbitrageHandler
 from cryptopy.src.layout.AppLayout import AppLayout
@@ -19,6 +21,7 @@ from cryptopy.src.taipy_src.callbacks import (
     update_live_price_chart,
     update_historic_price_chart,
     update_depth_chart,
+    update_news_chart,
 )
 from cryptopy.src.taipy_src.simulation_page import simulation_page
 from cryptopy.src.taipy_src.summary_page import summary_page
@@ -65,22 +68,24 @@ cointegration_pairs_input = None
 p_value_slider = 0.05
 funds_input = 100
 
-# Placeholder charts and text
-historic_price_chart = default_figure
-live_price_chart = default_figure
-depth_chart = default_figure
-news_table = "News Table Placeholder"
-arbitrage_main_view = "Arbitrage Chart Placeholder"
-arbitrage_instructions = "Instructions Placeholder"
 arbitrage_value = "simple"  # default value
 
 # data to be fed into charts
 historic_price_chart_data = {}
 live_price_chart_data = {}
 depth_chart_data = {}
-news_table_data = {}
-
-
+# news_table_data = [
+#     {
+#         "Index": 0,
+#         "Source": "N/A",
+#         "Title": "No news data found",
+#         "URL": "",
+#         "Published": "",
+#     }
+# ]
+news_table_data = pd.DataFrame(
+    [{"Source": "N/A", "Title": "No news data found", "URL": "", "Published": ""}]
+)
 pages = {
     "Summary": summary_page,
     "Arbitrage": arbitrage_page,
@@ -88,12 +93,7 @@ pages = {
 }
 
 
-def long_idle():
-    while True:
-        time.sleep(1)  # Keeps the background task alive
-
-
-def update_charts(state, status):
+def update_charts(state):
     # This is where the chart gets refreshed every N ms
     print(f"live data state {state.live_price_chart_data}")
     print(f"historic data state {state.historic_price_chart_data}")
@@ -102,17 +102,44 @@ def update_charts(state, status):
     update_live_price_chart(state)
     update_historic_price_chart(state)
     update_depth_chart(state)
+    update_news_chart(state)
 
     print(f"post live data state {state.live_price_chart_data}")
     print(f"post historic data state {state.historic_price_chart_data}")
     print(f"post depth data state {state.depth_chart_data}")
 
 
+state_id_list = []
+stop_request = False
+
+
 def on_init(state):
     print("running on_init")
-    invoke_long_callback(state, long_idle, [], update_charts, [], 5000)  # Every 5 sec
+    state_id = get_state_id(state)
+    if state_id := get_state_id(state):
+        state_id_list.append(state_id)
+    print(state_id_list)
+
+
+def refresh(gui: tp.Gui):
+    # wait for server to start
+    global stop_request
+    global state_id_list
+    time.sleep(10)
+    while not stop_request:
+        for state_id in state_id_list:
+            invoke_callback(gui, state_id, update_charts)
+        time.sleep(5)
 
 
 if __name__ == "__main__":
     gui = tp.Gui(pages=pages)
-    gui.run(title="Crypto Dashboard", use_reloader=True, debug=False)
+    refresh_th = Thread(target=refresh, args=[gui])
+    refresh_th.start()
+    try:
+        gui.run(title="Crypto Dashboard", use_reloader=True, debug=False)
+    except KeyboardInterrupt as e:
+        pass
+    finally:
+        store_request = True
+        refresh_th.join()

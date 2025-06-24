@@ -12,7 +12,7 @@ setup(
         "ccxt~=4.4.90",
         "pytz~=2024.1",
         "networkx~=3.3",
-        "numpy~=2.3.0",
+        "numpy>=1.23.5,<2.3.0",
         "statsmodels~=0.14.2",
         "PyYAML~=6.0.1",
         "setuptools~=80.9.0",

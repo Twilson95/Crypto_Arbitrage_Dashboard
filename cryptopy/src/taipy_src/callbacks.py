@@ -1,5 +1,6 @@
 import ast
 
+import pandas as pd
 from taipy.gui import State
 from taipy.gui import Gui
 import taipy as tp
@@ -78,6 +79,7 @@ def update_live_price_chart(state):
     state.live_price_chart_data = state.price_chart.get_ohlc_chart_data(
         prices, mark_limit=20, title="Live Price"
     )
+    print("Live price data:", dict(state.live_price_chart_data))
 
 
 def update_depth_chart(state: State):
@@ -96,11 +98,21 @@ def update_depth_chart(state: State):
 
 
 def update_news_chart(state: State):
+    print("news_test")
     currency = extract_selector_value(state.currency_selector)
 
-    no_data_default = [
-        {"Source": "N/A", "Title": "No news data found", "URL": "", "Published": ""}
-    ]
+    # no_data_default = [
+    #     {
+    #         "Index": 0,
+    #         "Source": "N/A",
+    #         "Title": "No news data found",
+    #         "URL": "",
+    #         "Published": "",
+    #     }
+    # ]
+    no_data_default = pd.DataFrame(
+        [{"Source": "N/A", "Title": "No news data found", "URL": "", "Published": ""}]
+    )
 
     if not currency:
         state.news_table_data = no_data_default
@@ -111,7 +123,13 @@ def update_news_chart(state: State):
     if not news:
         state.news_table_data = no_data_default
     else:
-        state.news_table_data, _ = state.news_chart.get_table_data(news)
+        news_data, _ = state.news_chart.get_table_data(news)
+        EXPECTED_NEWS_COLUMNS = ["Source", "Title", "URL", "Published"]
+        filtered_data = [
+            {key: item[key] for key in EXPECTED_NEWS_COLUMNS if key in item}
+            for item in news_data
+        ]
+        state.news_table_data = pd.DataFrame(filtered_data)
 
 
 def update_arbitrage_graphs(state: State):

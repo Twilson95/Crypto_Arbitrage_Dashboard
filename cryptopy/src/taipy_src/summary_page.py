@@ -52,12 +52,7 @@ with tgb.Page() as summary_page:
             tgb.chart(data="{depth_chart_data}", height="300px")
             tgb.table(
                 data="{news_table_data}",
-                columns=[
-                    {"name": "Source", "id": "Source"},
-                    {"name": "Title", "id": "Title"},
-                    {"name": "URL", "id": "URL"},
-                    {"name": "Published", "id": "Published"},
-                ],
+                columns=["Source", "Title", "URL", "Published"],
                 height="400px",
                 width="100%",
                 markdown=True,  # Enable markdown (optional for basic formatting)
