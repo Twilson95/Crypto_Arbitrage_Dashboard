@@ -1,6 +1,7 @@
 import ast
 import plotly.graph_objs as go
 import taipy.gui.builder as tgb
+from taipy.gui.utils._map_dict import _MapDict
 
 
 def dashboard_header():
@@ -12,17 +13,40 @@ def dashboard_header():
         with tgb.part():
             tgb.text("")
             tgb.text("Selected: {arbitrage_selector}")
-    tgb.part(height="20px")
+    tgb.part(height="15px")
     return header
 
 
 def extract_selector_value(selector_option, multi=False):
-    if not isinstance(selector_option, tuple):
+    def get_value(opt):
+        # Convert Taipy _MapDict to real dict
+        if isinstance(opt, _MapDict):
+            opt = dict(opt)
+
+        # Handle stringified dict
+        if isinstance(opt, str):
+            try:
+                opt = ast.literal_eval(opt)
+            except Exception:
+                return opt
+
+        # Handle dict
+        if isinstance(opt, dict) and "value" in opt:
+            return opt["value"]
+
+        # Handle tuple
+        if isinstance(opt, tuple) and len(opt) == 2:
+            return opt[1]
+
+        return opt
+
+    if selector_option is None:
         return None
-    if multi:
-        return [option[1] for option in selector_option]
+
+    if multi and isinstance(selector_option, (list, tuple)):
+        return [get_value(opt) for opt in selector_option]
     else:
-        return selector_option[1]
+        return get_value(selector_option)
 
 
 # arbitrage_options = [
@@ -30,22 +54,54 @@ def extract_selector_value(selector_option, multi=False):
 #     {"label": "Triangular", "value": "triangular"},
 # ]
 
-arbitrage_options = [("simple", "Simple"), ("triangular", "Triangular")]
+arbitrage_options = [
+    ("simple", "Simple"),
+    ("triangular", "Triangular"),
+    ("statistical", "Statistical"),
+]
 
 exchange_options = [
-    {"label": "Binance", "value": "binance"},
-    {"label": "Kraken", "value": "kraken"},
+    ("Bitmex", "Bitmex"),
+    ("Kraken", "Kraken"),
+    ("Coinbase", "Coinbase"),
 ]
 
 currency_options = [
-    {"label": "BTC/USD", "value": "BTC/USD"},
-    {"label": "ETH/USD", "value": "ETH/USD"},
+    ("BTC/USD", "BTC/USD"),
+    ("ETH/USD", "ETH/USD"),
 ]
 
 indicator_options = [
-    {"label": "SMA", "value": "sma"},
-    {"label": "EMA", "value": "ema"},
+    ("SMA", "sma"),
+    ("EMA", "ema"),
 ]
+
+page_options = [
+    {"label": "Summary", "value": "Summary"},
+    {"label": "Arbitrage", "value": "Arbitrage"},
+    {"label": "Simulation", "value": "Simulation"},
+]
+
+# arbitrage_options = [
+#     {"label": "Simple", "value": "simple"},
+#     {"label": "Triangular", "value": "triangular"},
+# ]
+
+# exchange_options = [
+#     {"Label": "Bitmex", "value": "Bitmex"},
+#     {"label": "Kraken", "value": "Kraken"},
+#     {"label": "Coinbase", "value": "Coinbase"},
+# ]
+
+# currency_options = [
+#     {"label": "BTC/USD", "value": "BTC/USD"},
+#     {"label": "ETH/USD", "value": "ETH/USD"},
+# ]
+#
+# indicator_options = [
+#     {"label": "SMA", "value": "sma"},
+#     {"label": "EMA", "value": "ema"},
+# ]
 
 page_options = [
     {"label": "Summary", "value": "Summary"},

@@ -99,9 +99,13 @@ def update_charts(state):
     print(f"historic data state {state.historic_price_chart_data}")
     print(f"depth data state {state.depth_chart_data}")
 
+    print(f"live data state dict {dict(state.live_price_chart_data)}")
+    print(f"historic data state dict {dict(state.historic_price_chart_data)}")
+    print(f"depth data state dict {dict(state.depth_chart_data)}")
+
     update_live_price_chart(state)
     update_historic_price_chart(state)
-    update_depth_chart(state)
+    # update_depth_chart(state)
     update_news_chart(state)
 
     print(f"post live data state {state.live_price_chart_data}")

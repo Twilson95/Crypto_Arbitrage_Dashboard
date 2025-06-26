@@ -2,8 +2,6 @@ import ast
 
 import pandas as pd
 from taipy.gui import State
-from taipy.gui import Gui
-import taipy as tp
 
 from cryptopy.src.arbitrage.ArbitrageHandler import ArbitrageHandler
 from cryptopy.src.arbitrage.CointegrationCalculator import CointegrationCalculator
@@ -58,9 +56,10 @@ def update_historic_price_chart(state):
         state.historic_price_chart_data = {}
         return
 
-    state.historic_price_chart_data = state.price_chart.get_ohlc_chart_data(
-        prices, indicators, title="Historic Price", mark_limit=60
-    )
+    state.historic_price_chart_data = prices.to_dataframe()
+    # state.historic_price_chart_data = state.price_chart.get_ohlc_chart_data(
+    #     prices, indicators, title="Historic Price", mark_limit=60
+    # )
 
 
 def update_live_price_chart(state):
@@ -76,10 +75,11 @@ def update_live_price_chart(state):
         state.live_price_chart_data = {}
         return
 
-    state.live_price_chart_data = state.price_chart.get_ohlc_chart_data(
-        prices, mark_limit=20, title="Live Price"
-    )
-    print("Live price data:", dict(state.live_price_chart_data))
+    state.live_price_chart_data = prices.to_dataframe()
+
+    # state.live_price_chart_data = state.price_chart.get_ohlc_chart_data(
+    #     prices, mark_limit=20, title="Live Price"
+    # )
 
 
 def update_depth_chart(state: State):
@@ -98,9 +98,7 @@ def update_depth_chart(state: State):
 
 
 def update_news_chart(state: State):
-    print("news_test")
     currency = extract_selector_value(state.currency_selector)
-
     # no_data_default = [
     #     {
     #         "Index": 0,
@@ -119,7 +117,6 @@ def update_news_chart(state: State):
         return
 
     news = state.news_fetcher.get_news_data(currency)
-
     if not news:
         state.news_table_data = no_data_default
     else:

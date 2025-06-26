@@ -17,7 +17,7 @@ class OHLCData:
             "high": self.high,
             "low": self.low,
             "close": self.close,
-            "volume": self.volume,
+            # "volume": self.volume,
         }
 
     def update_from_dataframe(self, df):

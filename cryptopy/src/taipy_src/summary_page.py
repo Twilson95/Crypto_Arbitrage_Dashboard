@@ -45,11 +45,29 @@ with tgb.Page() as summary_page:
 
     with tgb.layout(columns="1 1"):
         with tgb.part():
-            tgb.chart(data="{historic_price_chart_data}", height="300px")
-            tgb.chart(data="{live_price_chart_data}", height="300px")
+            tgb.chart(
+                data="{historic_price_chart_data}",
+                height="500px",
+                type="candlestick",
+                x="datetime",
+                open="open",
+                close="close",
+                low="low",
+                high="high",
+            )
+            # tgb.chart(data="{depth_chart_data}", height="300px")
 
         with tgb.part():
-            tgb.chart(data="{depth_chart_data}", height="300px")
+            tgb.chart(
+                data="{live_price_chart_data}",
+                height="300px",
+                type="candlestick",
+                x="datetime",
+                open="open",
+                close="close",
+                low="low",
+                high="high",
+            )
             tgb.table(
                 data="{news_table_data}",
                 columns=["Source", "Title", "URL", "Published"],
