@@ -1,12 +1,73 @@
 import ast
+import time
 
 import pandas as pd
-from taipy.gui import State
+from taipy.gui import State, invoke_long_callback
 
 from cryptopy.src.arbitrage.ArbitrageHandler import ArbitrageHandler
 from cryptopy.src.arbitrage.CointegrationCalculator import CointegrationCalculator
 from cryptopy.src.prices.PriceChart import PriceChart
-from cryptopy.src.taipy_src.helper import extract_selector_value, create_filter_label
+from cryptopy.src.taipy_src.helper import (
+    extract_selector_value,
+    create_filter_label,
+    default_figure,
+)
+
+
+def on_summary_init(state):
+    print("running on summary init")
+    invoke_long_callback(
+        state,
+        idle_fn,  # Keeps the callback alive
+        [],
+        update_summary_charts,  # Called every interval
+        [],
+        5000,  # ms interval
+    )
+
+
+def on_arbitrage_init(state):
+    print("running on arbitrage init")
+    invoke_long_callback(
+        state,
+        idle_fn,  # Keeps the callback alive
+        [],
+        update_arbitrage_charts,  # Called every interval
+        [],
+        5000,  # ms interval
+    )
+
+
+def on_simulation_init(state):
+    print("running on simulation init")
+    invoke_long_callback(
+        state,
+        idle_fn,  # Keeps the callback alive
+        [],
+        update_simulation_charts,  # Called every interval
+        [],
+        5000,  # ms interval
+    )
+
+
+def idle_fn():
+    while True:
+        time.sleep(1)
+
+
+def update_summary_charts(state):
+    update_live_price_chart(state)
+    update_historic_price_chart(state)
+    update_depth_chart(state)
+    update_news_chart(state)
+
+
+def update_arbitrage_charts(state):
+    update_arbitrage_graphs(state)
+
+
+def update_simulation_charts(state):
+    pass
 
 
 def on_exchange_change_summary_page(state):
@@ -48,18 +109,18 @@ def update_historic_price_chart(state):
     indicators = extract_selector_value(state.indicator_selector, multi=True)
 
     if not (currency and exchange):
-        state.historic_price_chart_data = {}
+        state.historic_price_chart_data = default_figure
         return
 
     prices = state.data_manager.get_historical_prices(exchange, currency)
     if not prices:
-        state.historic_price_chart_data = {}
+        state.historic_price_chart_data = default_figure
         return
 
-    state.historic_price_chart_data = prices.to_dataframe()
-    # state.historic_price_chart_data = state.price_chart.get_ohlc_chart_data(
-    #     prices, indicators, title="Historic Price", mark_limit=60
-    # )
+    # state.historic_price_chart_data = prices.to_dataframe()
+    state.historic_price_chart_data = state.price_chart.create_ohlc_chart(
+        prices, indicators, title="Historic Price", mark_limit=60
+    )
 
 
 def update_live_price_chart(state):
@@ -67,19 +128,19 @@ def update_live_price_chart(state):
     exchange = extract_selector_value(state.exchange_selector)
 
     if not (currency and exchange):
-        state.live_price_chart_data = {}
+        state.live_price_chart_data = default_figure
         return
 
     prices = state.data_manager.get_live_prices(exchange, currency)
     if not prices:
-        state.live_price_chart_data = {}
+        state.live_price_chart_data = default_figure
         return
 
-    state.live_price_chart_data = prices.to_dataframe()
+    # state.live_price_chart_data = prices.to_dataframe()
 
-    # state.live_price_chart_data = state.price_chart.get_ohlc_chart_data(
-    #     prices, mark_limit=20, title="Live Price"
-    # )
+    state.live_price_chart_data = state.price_chart.create_ohlc_chart(
+        prices, mark_limit=20, title="Live Price"
+    )
 
 
 def update_depth_chart(state: State):
@@ -87,27 +148,18 @@ def update_depth_chart(state: State):
     currency = extract_selector_value(state.currency_selector)
 
     if not currency or not exchange:
-        state.depth_chart_data = {}
+        state.depth_chart_data = default_figure
         return
 
     order_book = state.data_manager.get_order_book(exchange, currency)
     if not order_book:
-        state.depth_chart_data = {}
+        state.depth_chart_data = default_figure
     else:
-        state.depth_chart_data = state.price_chart.get_depth_chart_data(order_book)
+        state.depth_chart_data = state.price_chart.plot_depth_chart(order_book)
 
 
 def update_news_chart(state: State):
     currency = extract_selector_value(state.currency_selector)
-    # no_data_default = [
-    #     {
-    #         "Index": 0,
-    #         "Source": "N/A",
-    #         "Title": "No news data found",
-    #         "URL": "",
-    #         "Published": "",
-    #     }
-    # ]
     no_data_default = pd.DataFrame(
         [{"Source": "N/A", "Title": "No news data found", "URL": "", "Published": ""}]
     )
@@ -152,11 +204,11 @@ def simple_arbitrage_graphs(state: State):
     funds = state.funds_input or 0.1
 
     if not currency:
-        return "", ""
+        return default_figure, default_figure
 
     prices = state.data_manager.get_live_prices_for_all_exchanges(currency)
     if not prices:
-        return "", ""
+        return default_figure, default_figure
 
     currency_fees = state.data_manager.get_maker_taker_fees_for_all_exchanges(currency)
     exchange_fees = state.data_manager.get_withdrawal_deposit_fees_for_all_exchanges()
@@ -171,7 +223,7 @@ def simple_arbitrage_graphs(state: State):
     price_charts = state.price_chart.create_line_charts(
         prices, mark_limit=20, title="Live Exchange Prices"
     )
-    arbitrage_instructions = {}
+    arbitrage_instructions = default_figure
 
     if prices and currency_fees and exchange_fees and network_fees:
         arbitrage_instructions = ArbitrageHandler.return_simple_arbitrage_instructions(
@@ -186,7 +238,7 @@ def triangular_arbitrage_graphs(state):
     funds = state.funds_input or 0.1
 
     if not exchange:
-        return "", ""
+        return default_figure, default_figure
 
     prices, currency_fees = (
         state.data_manager.get_live_prices_and_fees_for_single_exchange(exchange)
@@ -198,7 +250,7 @@ def triangular_arbitrage_graphs(state):
     }
 
     if not prices or not currency_fees:
-        return "", ""
+        return default_figure, default_figure
 
     exchange_network_graph, arbitrage_instructions = (
         state.arbitrage_handler.return_triangle_arbitrage_instructions(
@@ -215,12 +267,12 @@ def statistical_arbitrage_graphs(state):
     funds = state.funds_input or 0.1
 
     if not exchange or not pair_str:
-        return "", ""
+        return default_figure, default_figure
 
     try:
         cointegration_pair = tuple(ast.literal_eval(pair_str))
     except Exception:
-        return "", ""
+        return default_figure, default_figure
 
     prices = state.data_manager.get_df_of_historical_prices_pairs(
         exchange, cointegration_pair
@@ -238,7 +290,7 @@ def statistical_arbitrage_graphs(state):
         exchange
     )
 
-    arbitrage_instructions = ""
+    arbitrage_instructions = default_figure
     if cointegration_data.spread is not None:
         arbitrage_instructions = (
             ArbitrageHandler.return_statistical_arbitrage_instructions(

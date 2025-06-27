@@ -9,10 +9,9 @@ def dashboard_header():
         with tgb.part():
             tgb.navbar()
         with tgb.part("text-center"):
-            tgb.text("#Crypto Dashboard", mode="md")
+            tgb.text("Crypto Arbitrage Dashboard", class_name="my-title")
         with tgb.part():
             tgb.text("")
-            tgb.text("Selected: {arbitrage_selector}")
     tgb.part(height="15px")
     return header
 
@@ -72,8 +71,8 @@ currency_options = [
 ]
 
 indicator_options = [
-    ("SMA", "sma"),
-    ("EMA", "ema"),
+    ("sma", "SMA"),
+    ("ema", "EMA"),
 ]
 
 page_options = [

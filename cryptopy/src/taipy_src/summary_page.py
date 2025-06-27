@@ -10,10 +10,11 @@ from cryptopy.src.taipy_src.callbacks import (
     on_exchange_change_summary_page,
     on_currency_change_summary_page,
     on_technical_indicator_change_summary_page,
+    on_summary_init,
 )
 
 # --- PAGE 1: Summary ---
-with tgb.Page() as summary_page:
+with tgb.Page(on_init=on_summary_init) as summary_page:
     dashboard_header()
 
     with tgb.layout(columns="1 1 1 1 1 1 1"):
@@ -46,32 +47,38 @@ with tgb.Page() as summary_page:
     with tgb.layout(columns="1 1"):
         with tgb.part():
             tgb.chart(
-                data="{historic_price_chart_data}",
-                height="500px",
+                # data="{historic_price_chart_data}",
+                height="250px",
                 type="candlestick",
-                x="datetime",
-                open="open",
-                close="close",
-                low="low",
-                high="high",
+                figure="{historic_price_chart_data}",
+                # x="datetime",
+                # open="open",
+                # close="close",
+                # low="low",
+                # high="high",
             )
-            # tgb.chart(data="{depth_chart_data}", height="300px")
+            tgb.chart(
+                # data="{depth_chart_data}",
+                height="250px",
+                figure="{depth_chart_data}",
+            )
 
         with tgb.part():
             tgb.chart(
-                data="{live_price_chart_data}",
-                height="300px",
+                # data="{live_price_chart_data}",
+                height="250px",
                 type="candlestick",
-                x="datetime",
-                open="open",
-                close="close",
-                low="low",
-                high="high",
+                figure="{live_price_chart_data}",
+                # x="datetime",
+                # open="open",
+                # close="close",
+                # low="low",
+                # high="high",
             )
             tgb.table(
                 data="{news_table_data}",
                 columns=["Source", "Title", "URL", "Published"],
-                height="400px",
+                height="250px",
                 width="100%",
                 markdown=True,  # Enable markdown (optional for basic formatting)
             )

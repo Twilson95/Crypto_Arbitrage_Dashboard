@@ -1,5 +1,6 @@
 import taipy.gui.builder as tgb
 
+from cryptopy.src.taipy_src.callbacks import on_arbitrage_init
 from cryptopy.src.taipy_src.helper import (
     arbitrage_options,
     exchange_options,
@@ -8,7 +9,7 @@ from cryptopy.src.taipy_src.helper import (
 )
 
 # --- PAGE 2: Arbitrage ---
-with tgb.Page() as arbitrage_page:
+with tgb.Page(on_init=on_arbitrage_init) as arbitrage_page:
     dashboard_header()
 
     with tgb.layout(columns="1 1 1 1 1 1 1"):
@@ -53,5 +54,16 @@ with tgb.Page() as arbitrage_page:
             )
         tgb.number(label="Funds", value="{funds_input}", width="200px")
 
-    with tgb.layout(columns="1 1"):
-        tgb.text("tester")
+    with tgb.layout(columns="4 1"):
+        with tgb.part():
+            tgb.chart(
+                # data="{historic_price_chart_data}",
+                height="500px",
+                figure="{arbitrage_main_view}",
+            )
+        with tgb.part():
+            tgb.chart(
+                # data="{historic_price_chart_data}",
+                height="500px",
+                figure="{arbitrage_instructions}",
+            )
