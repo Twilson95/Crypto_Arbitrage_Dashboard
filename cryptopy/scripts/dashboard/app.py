@@ -5,7 +5,7 @@ import sys
 import plotly.graph_objects as go
 
 
-from dash import Dash, dcc, html
+from dash import Dash, dcc, html, exceptions
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
 from time import time
@@ -120,7 +120,11 @@ def render_tab_content(
     if active_tab == "tab-1":
         grid_style["display"] = "flex"
         arbitrage_style["display"] = "none"
+
+        # simulation_style["visibility"] = "hidden"
+        # simulation_style["height"] = "0"
         simulation_style["display"] = "none"
+
         exchange_filter_style["display"] = "block"
         currency_filter_style["display"] = "block"
         indicator_filter_style["display"] = "block"
@@ -132,7 +136,11 @@ def render_tab_content(
     elif active_tab == "tab-2":
         grid_style["display"] = "none"
         arbitrage_style["display"] = "flex"
+
+        # simulation_style["visibility"] = "hidden"
+        # simulation_style["height"] = "0"
         simulation_style["display"] = "none"
+
         if arbitrage_filter_value == "triangular":
             exchange_filter_style["display"] = "block"
             currency_filter_style["display"] = "none"
@@ -157,7 +165,11 @@ def render_tab_content(
     elif active_tab == "tab-3":
         grid_style["display"] = "none"
         arbitrage_style["display"] = "none"
+
+        # simulation_style["visibility"] = "visible"
+        simulation_style["height"] = "100%"
         simulation_style["display"] = "flex"
+
         exchange_filter_style["display"] = "none"
         currency_filter_style["display"] = "none"
         indicator_filter_style["display"] = "none"
@@ -549,14 +561,14 @@ def create_filter_label(cointegration_data, coins_in_portfolio):
         Output("simulation-chart-3", "figure"),
         Output("simulation-chart-4", "figure"),
     ],
-    [
-        Input("simulation-selector", "value"),
-    ],
+    [Input("simulation-selector", "value"), Input("tabs", "value")],
 )
-def display_selected_file(file_name):
+def display_selected_file(file_name, tabs):
+    if tabs != "tab-3":
+        raise exceptions.PreventUpdate
     if not file_name:
         # Return empty figures
-        return [go.Figure(), go.Figure(), go.Figure(), go.Figure()]
+        return [app_layout.default_figure] * 4
 
     df = SimulationCharts.convert_json_to_df(SIMULATION_FOLDER, file_name)
 
@@ -575,10 +587,15 @@ def get_json_files():
 
 @app.callback(
     Output("simulation-selector", "options"),
+    Output("simulation-selector", "value"),
     Input("interval-component", "n_intervals"),
+    State("simulation-selector", "value"),
 )
-def update_dropdown(n):
-    return [{"label": f, "value": f} for f in get_json_files()]
+def update_dropdown(n, value):
+    options = [{"label": f, "value": f} for f in get_json_files()]
+    if options and value is None:
+        value = options[0]["value"]
+    return options, value
 
 
 def main():
