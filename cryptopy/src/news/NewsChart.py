@@ -24,6 +24,10 @@ class NewsChart:
         table_data, description_exists = self.convert_news_data(news_data)
         return self.create_table_layout(table_data, description_exists)
 
+    def get_table_data(self, news_data):
+        table_data, description_exists = self.convert_news_data(news_data)
+        return table_data, description_exists
+
     @staticmethod
     def convert_news_data(news_data):
         table_data = []
