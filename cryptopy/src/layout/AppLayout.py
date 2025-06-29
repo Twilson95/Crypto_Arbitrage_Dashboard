@@ -179,6 +179,22 @@ class AppLayout:
             style=filter_style,  # Initialize with display set to 'none'
         )
 
+        simulation_selector = html.Div(
+            [
+                html.Label("Simulation"),
+                dcc.Dropdown(
+                    id="simulation-selector",
+                    options=[],
+                    placeholder="Select a simulation scenario",
+                    value=None,
+                    multi=False,
+                ),
+            ],
+            title="Simulation",
+            id="simulation-filter-container",
+            style=filter_style,
+        )
+
         return [
             arbitrage_filter,
             exchange_filter,
@@ -188,6 +204,7 @@ class AppLayout:
             p_value_slider,
             # funds_slider,
             funds_input,
+            simulation_selector,
         ]
 
     @staticmethod
@@ -250,6 +267,67 @@ class AppLayout:
             ),
         ]
 
+    @staticmethod
+    def create_simulation_grid_elements(default_figure):
+        return [
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dcc.Graph(
+                            id="simulation-chart-1",
+                            figure=default_figure,
+                            style={"height": "100%", "width": "100%"},
+                        ),
+                        style=grid_element_style,
+                    ),
+                    dbc.Col(
+                        dcc.Graph(
+                            id="simulation-chart-2",
+                            figure=default_figure,
+                            style={"height": "100%", "width": "100%"},
+                        ),
+                        style=grid_element_style,
+                    ),
+                ],
+                style=grid_row_style,
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dcc.Graph(
+                            id="simulation-chart-3",
+                            figure=default_figure,
+                            style={
+                                "height": "100%",
+                                "width": "100%",
+                                "padding-left": "0",
+                                "padding-right": "0",
+                                "display": "flex",
+                                "flex-direction": "column",
+                            },
+                        ),
+                        style=grid_element_style,
+                    ),
+                    dbc.Col(
+                        dcc.Graph(
+                            id="simulation-chart-4",
+                            figure=default_figure,
+                            style={
+                                "height": "100%",
+                                "width": "100%",
+                                "padding-left": "0",
+                                "padding-right": "0",
+                                "display": "flex",
+                                "flex-direction": "column",
+                            },
+                        ),
+                        style=grid_element_style,
+                    ),
+                ],
+                style=grid_row_style,
+            ),
+        ]
+
     def generate_layout(self):
         return dbc.Col(
             children=[
@@ -267,6 +345,7 @@ class AppLayout:
                 # html.Div(id="tabs-content"),
                 self.tab_1_elements(),
                 self.tab_2_elements(),
+                self.tab_3_elements(),
             ],
             style=container_style,
         )
@@ -282,6 +361,7 @@ class AppLayout:
                         children=[
                             dcc.Tab(label="Summary", value="tab-1"),
                             dcc.Tab(label="Arbitrage", value="tab-2"),
+                            dcc.Tab(label="Simulation", value="tab-3"),
                         ],
                         style={"width": "100%", "padding": "0px", "height": "60px"},
                     ),
@@ -319,6 +399,13 @@ class AppLayout:
             id="arbitrage-container",
             style=grid_container_style,
             children=self.create_arbitrage_elements(),
+        )
+
+    def tab_3_elements(self):
+        return html.Div(
+            id="simulation-container",
+            style=grid_container_style,
+            children=self.create_simulation_grid_elements(self.default_figure),
         )
 
     @staticmethod
