@@ -191,7 +191,7 @@ def update_arbitrage_graphs(state: State):
     elif arbitrage == "statistical":
         main_chart, instructions = statistical_arbitrage_graphs(state)
     else:
-        main_chart, instructions = "No arbitrage strategy selected", ""
+        main_chart, instructions = default_figure, default_figure
 
     state.arbitrage_main_view = main_chart
     state.arbitrage_instructions = instructions

@@ -142,6 +142,6 @@ def on_navigate(state, page_name: str):
 if __name__ == "__main__":
     gui = tp.Gui(pages=pages)
     try:
-        gui.run(title="Crypto Dashboard", use_reloader=True, debug=False)
+        gui.run(title="Crypto Dashboard", use_reloader=False, debug=False)
     except KeyboardInterrupt as e:
         pass
