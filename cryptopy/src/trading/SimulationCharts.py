@@ -45,17 +45,21 @@ class SimulationCharts:
         return fig
 
     @staticmethod
-    def build_profit_histogram(df):
+    def build_profit_histogram(df, split_by="open_direction"):
         fig = go.Figure()
 
-        # For each direction, add a separate histogram
-        directions = df["open_direction"].unique()
-        for direction in directions:
-            subset = df[df["open_direction"] == direction]
+        # Handle cases where the split column has missing values
+        if split_by not in df.columns:
+            raise ValueError(f"Column '{split_by}' does not exist in the DataFrame.")
+
+        unique_groups = df[split_by].fillna("N/A").unique()
+
+        for group in unique_groups:
+            subset = df[df[split_by] == group]
             fig.add_trace(
                 go.Histogram(
                     x=subset["profit"],
-                    name=direction,
+                    name=str(group),
                     opacity=0.6,
                     nbinsx=30,
                 )
@@ -67,19 +71,19 @@ class SimulationCharts:
             barmode="overlay",
             xaxis_title="Profit",
             yaxis_title="Count",
-            title="Histogram of Profits by Open Direction",
+            title=f"Histogram of Profits by {split_by}",
         )
         return fig
 
     @staticmethod
-    def build_cumulative_profit(df):
+    def build_cumulative_profit(df, split_by="open_direction"):
         df_sorted = df.sort_values(by="close_date").copy()
         df_sorted["net_profit"] = df_sorted["profit"].apply(lambda x: max(x, -30))
         df_sorted["cumulative_profit"] = df_sorted["net_profit"].cumsum()
 
         fig = go.Figure()
 
-        # Main line
+        # Main cumulative profit line
         fig.add_trace(
             go.Scatter(
                 x=df_sorted["close_date"],
@@ -90,23 +94,35 @@ class SimulationCharts:
             )
         )
 
-        # Scatter points colored by open_direction
-        colors = {
-            k: v
-            for k, v in zip(
-                df_sorted["open_direction"].unique(),
-                ["#636EFA", "#EF553B", "#00CC96", "#AB63FA"],
-            )
+        # Validate the split column
+        if split_by not in df_sorted.columns:
+            raise ValueError(f"Column '{split_by}' does not exist in the DataFrame.")
+
+        # Fill NaNs with a label
+        df_sorted[split_by] = df_sorted[split_by].fillna("N/A")
+
+        unique_groups = df_sorted[split_by].unique()
+
+        # Use Plotly's default qualitative palette for more colors
+        color_palette = px.colors.qualitative.Plotly
+        color_map = {
+            group: color_palette[i % len(color_palette)]
+            for i, group in enumerate(unique_groups)
         }
-        for direction in df_sorted["open_direction"].unique():
-            subset = df_sorted[df_sorted["open_direction"] == direction]
+
+        # Add scatter points colored by split_by
+        for group in unique_groups:
+            subset = df_sorted[df_sorted[split_by] == group]
             fig.add_trace(
                 go.Scatter(
                     x=subset["close_date"],
                     y=subset["cumulative_profit"],
                     mode="markers",
-                    name=direction,
-                    marker=dict(size=6, color=colors[direction]),
+                    name=str(group),
+                    marker=dict(
+                        size=6,
+                        color=color_map[group],
+                    ),
                 )
             )
 
@@ -115,31 +131,39 @@ class SimulationCharts:
             margin=dict(l=10, r=10, t=40, b=10),
             xaxis_title="Close Date",
             yaxis_title="Cumulative Profit",
-            title="Cumulative Profit Over Time",
+            title=f"Cumulative Profit Over Time (colored by {split_by})",
         )
         return fig
 
     @staticmethod
-    def build_expected_vs_actual_profit(df):
+    def build_expected_vs_actual_profit(df, split_by="open_direction"):
         fig = go.Figure()
 
-        colors = {
-            k: v
-            for k, v in zip(
-                df["open_direction"].unique(),
-                ["#636EFA", "#EF553B", "#00CC96", "#AB63FA"],
-            )
+        if split_by not in df.columns:
+            raise ValueError(f"Column '{split_by}' does not exist in the DataFrame.")
+
+        unique_groups = df[split_by].fillna("N/A").unique()
+
+        # Use a long Plotly color palette that can handle many groups
+        color_palette = (
+            px.colors.qualitative.Plotly
+            + px.colors.qualitative.Dark24
+            + px.colors.qualitative.Light24
+        )
+        color_map = {
+            group: color_palette[i % len(color_palette)]
+            for i, group in enumerate(unique_groups)
         }
 
-        for direction in df["open_direction"].unique():
-            subset = df[df["open_direction"] == direction]
+        for group in unique_groups:
+            subset = df[df[split_by] == group]
             fig.add_trace(
                 go.Scatter(
                     x=subset["open_expected_profit"],
                     y=subset["profit"],
                     mode="markers",
-                    name=direction,
-                    marker=dict(size=6, color=colors[direction]),
+                    name=str(group),
+                    marker=dict(size=6, color=color_map[group]),
                 )
             )
 
@@ -148,7 +172,7 @@ class SimulationCharts:
             margin=dict(l=10, r=10, t=40, b=10),
             xaxis_title="Expected Profit",
             yaxis_title="Actual Profit",
-            title="Expected vs Actual Profit",
+            title=f"Expected vs Actual Profit by {split_by}",
         )
         return fig
 
@@ -185,6 +209,10 @@ class SimulationCharts:
 
         if "pair" in df.columns:
             df[["coin_1", "coin_2"]] = df["pair"].apply(pd.Series)
+
+        df["pair"] = df["pair"].apply(
+            lambda x: ",".join(x) if isinstance(x, list) else str(x)
+        )
 
         for date_col in ["open_date", "close_date"]:
             if date_col in df.columns:

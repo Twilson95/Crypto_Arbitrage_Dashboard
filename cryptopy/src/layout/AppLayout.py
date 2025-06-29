@@ -195,6 +195,22 @@ class AppLayout:
             style=filter_style,
         )
 
+        simulation_split_selector = html.Div(
+            [
+                html.Label("column-selector"),
+                dcc.Dropdown(
+                    id="column-selector",
+                    options=self.filter_component.get_simulation_split_columns(),
+                    placeholder="Select a Column",
+                    value="open_direction",
+                    multi=False,
+                ),
+            ],
+            title="Split Columns",
+            id="simulation-column-filter-container",
+            style=filter_style,
+        )
+
         return [
             arbitrage_filter,
             exchange_filter,
@@ -205,6 +221,7 @@ class AppLayout:
             # funds_slider,
             funds_input,
             simulation_selector,
+            simulation_split_selector,
         ]
 
     @staticmethod

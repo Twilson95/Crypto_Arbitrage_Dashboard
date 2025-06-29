@@ -85,6 +85,7 @@ portfolio_manager.read_open_events()
         Output("p-value-slider-container", "style"),
         Output("funds-input-container", "style"),
         Output("simulation-filter-container", "style"),
+        Output("simulation-column-filter-container", "style"),
     ],
     [Input("tabs", "value")],
     [
@@ -99,6 +100,7 @@ portfolio_manager.read_open_events()
         State("p-value-slider-container", "style"),
         State("funds-input-container", "style"),
         State("simulation-filter-container", "style"),
+        State("simulation-column-filter-container", "style"),
         Input("arbitrage-selector", "value"),
     ],
 )
@@ -115,6 +117,7 @@ def render_tab_content(
     p_value_slider_style,
     funds_input_style,
     simulation_selector_style,
+    simulation_split_selector_style,
     arbitrage_filter_value,
 ):
     if active_tab == "tab-1":
@@ -133,6 +136,7 @@ def render_tab_content(
         p_value_slider_style["display"] = "none"
         funds_input_style["display"] = "none"
         simulation_selector_style["display"] = "none"
+        simulation_split_selector_style["display"] = "none"
     elif active_tab == "tab-2":
         grid_style["display"] = "none"
         arbitrage_style["display"] = "flex"
@@ -161,6 +165,7 @@ def render_tab_content(
         arbitrage_filter_style["display"] = "block"
         funds_input_style["display"] = "block"
         simulation_selector_style["display"] = "none"
+        simulation_split_selector_style["display"] = "none"
 
     elif active_tab == "tab-3":
         grid_style["display"] = "none"
@@ -178,6 +183,7 @@ def render_tab_content(
         p_value_slider_style["display"] = "none"
         funds_input_style["display"] = "none"
         simulation_selector_style["display"] = "block"
+        simulation_split_selector_style["display"] = "block"
 
     return (
         grid_style,
@@ -191,6 +197,7 @@ def render_tab_content(
         p_value_slider_style,
         funds_input_style,
         simulation_selector_style,
+        simulation_split_selector_style,
     )
 
 
@@ -561,9 +568,13 @@ def create_filter_label(cointegration_data, coins_in_portfolio):
         Output("simulation-chart-3", "figure"),
         Output("simulation-chart-4", "figure"),
     ],
-    [Input("simulation-selector", "value"), Input("tabs", "value")],
+    [
+        Input("simulation-selector", "value"),
+        Input("tabs", "value"),
+        Input("column-selector", "value"),
+    ],
 )
-def display_selected_file(file_name, tabs):
+def display_selected_file(file_name, tabs, column_to_split):
     if tabs != "tab-3":
         raise exceptions.PreventUpdate
     if not file_name:
@@ -572,11 +583,14 @@ def display_selected_file(file_name, tabs):
 
     df = SimulationCharts.convert_json_to_df(SIMULATION_FOLDER, file_name)
 
+    if column_to_split is None:
+        column_to_split = "open_direction"
+
     # Build the four figures
     fig1 = SimulationCharts.build_profit_per_open_day(df)
-    fig2 = SimulationCharts.build_profit_histogram(df)
-    fig3 = SimulationCharts.build_cumulative_profit(df)
-    fig4 = SimulationCharts.build_expected_vs_actual_profit(df)
+    fig2 = SimulationCharts.build_profit_histogram(df, column_to_split)
+    fig3 = SimulationCharts.build_cumulative_profit(df, column_to_split)
+    fig4 = SimulationCharts.build_expected_vs_actual_profit(df, column_to_split)
 
     return fig1, fig2, fig3, fig4
 
