@@ -42,3 +42,13 @@ class FilterComponent:
             {"label": "Triangular Arbitrage", "value": "triangular"},
             {"label": "Statistical Arbitrage", "value": "statistical"},
         ]
+
+    @staticmethod
+    def get_simulation_split_columns():
+        return [
+            {"label": "Open Direction", "value": "open_direction"},
+            {"label": "Close Reason", "value": "close_reason"},
+            {"label": "Coin 1", "value": "coin_1"},
+            {"label": "Coin 2", "value": "coin_2"},
+            {"label": "Pair", "value": "pair"},
+        ]

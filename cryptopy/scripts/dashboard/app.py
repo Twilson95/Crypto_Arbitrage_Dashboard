@@ -1,8 +1,11 @@
 import asyncio
 import logging
+import os
 import sys
+import plotly.graph_objects as go
 
-from dash import Dash, dcc, html
+
+from dash import Dash, dcc, html, exceptions
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
 from time import time
@@ -21,6 +24,7 @@ from cryptopy import (
     CointegrationCalculator,
     PortfolioManager,
 )
+from cryptopy.src.trading.SimulationCharts import SimulationCharts
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +52,8 @@ with open("cryptopy/config/news_config.yaml", "r") as f:
 with open("cryptopy/config/network_fees.yaml", "r") as f:
     network_fees_config = yaml.safe_load(f)
 
+SIMULATION_FOLDER = "data/simulations/portfolio_sim"
+
 filter_component = FilterComponent()
 technical_indicators = TechnicalIndicators()
 arbitrage_handler = ArbitrageHandler()
@@ -70,6 +76,7 @@ portfolio_manager.read_open_events()
     [
         Output("grid-container", "style"),
         Output("arbitrage-container", "style"),
+        Output("simulation-container", "style"),
         Output("exchange-filter-container", "style"),
         Output("currency-filter-container", "style"),
         Output("indicator-selector-container", "style"),
@@ -77,11 +84,14 @@ portfolio_manager.read_open_events()
         Output("cointegration-selector-container", "style"),
         Output("p-value-slider-container", "style"),
         Output("funds-input-container", "style"),
+        Output("simulation-filter-container", "style"),
+        Output("simulation-column-filter-container", "style"),
     ],
     [Input("tabs", "value")],
     [
         State("grid-container", "style"),
         State("arbitrage-container", "style"),
+        State("simulation-container", "style"),
         State("exchange-filter-container", "style"),
         State("currency-filter-container", "style"),
         State("indicator-selector-container", "style"),
@@ -89,6 +99,8 @@ portfolio_manager.read_open_events()
         State("cointegration-selector-container", "style"),
         State("p-value-slider-container", "style"),
         State("funds-input-container", "style"),
+        State("simulation-filter-container", "style"),
+        State("simulation-column-filter-container", "style"),
         Input("arbitrage-selector", "value"),
     ],
 )
@@ -96,6 +108,7 @@ def render_tab_content(
     active_tab,
     grid_style,
     arbitrage_style,
+    simulation_style,
     exchange_filter_style,
     currency_filter_style,
     indicator_filter_style,
@@ -103,11 +116,18 @@ def render_tab_content(
     cointegration_filter_style,
     p_value_slider_style,
     funds_input_style,
+    simulation_selector_style,
+    simulation_split_selector_style,
     arbitrage_filter_value,
 ):
     if active_tab == "tab-1":
         grid_style["display"] = "flex"
         arbitrage_style["display"] = "none"
+
+        # simulation_style["visibility"] = "hidden"
+        # simulation_style["height"] = "0"
+        simulation_style["display"] = "none"
+
         exchange_filter_style["display"] = "block"
         currency_filter_style["display"] = "block"
         indicator_filter_style["display"] = "block"
@@ -115,9 +135,16 @@ def render_tab_content(
         cointegration_filter_style["display"] = "none"
         p_value_slider_style["display"] = "none"
         funds_input_style["display"] = "none"
+        simulation_selector_style["display"] = "none"
+        simulation_split_selector_style["display"] = "none"
     elif active_tab == "tab-2":
         grid_style["display"] = "none"
         arbitrage_style["display"] = "flex"
+
+        # simulation_style["visibility"] = "hidden"
+        # simulation_style["height"] = "0"
+        simulation_style["display"] = "none"
+
         if arbitrage_filter_value == "triangular":
             exchange_filter_style["display"] = "block"
             currency_filter_style["display"] = "none"
@@ -137,10 +164,31 @@ def render_tab_content(
         indicator_filter_style["display"] = "none"
         arbitrage_filter_style["display"] = "block"
         funds_input_style["display"] = "block"
+        simulation_selector_style["display"] = "none"
+        simulation_split_selector_style["display"] = "none"
+
+    elif active_tab == "tab-3":
+        grid_style["display"] = "none"
+        arbitrage_style["display"] = "none"
+
+        # simulation_style["visibility"] = "visible"
+        simulation_style["height"] = "100%"
+        simulation_style["display"] = "flex"
+
+        exchange_filter_style["display"] = "none"
+        currency_filter_style["display"] = "none"
+        indicator_filter_style["display"] = "none"
+        arbitrage_filter_style["display"] = "none"
+        cointegration_filter_style["display"] = "none"
+        p_value_slider_style["display"] = "none"
+        funds_input_style["display"] = "none"
+        simulation_selector_style["display"] = "block"
+        simulation_split_selector_style["display"] = "block"
 
     return (
         grid_style,
         arbitrage_style,
+        simulation_style,
         exchange_filter_style,
         currency_filter_style,
         indicator_filter_style,
@@ -148,6 +196,8 @@ def render_tab_content(
         cointegration_filter_style,
         p_value_slider_style,
         funds_input_style,
+        simulation_selector_style,
+        simulation_split_selector_style,
     )
 
 
@@ -509,6 +559,57 @@ def create_filter_label(cointegration_data, coins_in_portfolio):
         ),
         color,
     )
+
+
+@app.callback(
+    [
+        Output("simulation-chart-1", "figure"),
+        Output("simulation-chart-2", "figure"),
+        Output("simulation-chart-3", "figure"),
+        Output("simulation-chart-4", "figure"),
+    ],
+    [
+        Input("simulation-selector", "value"),
+        Input("tabs", "value"),
+        Input("column-selector", "value"),
+    ],
+)
+def display_selected_file(file_name, tabs, column_to_split):
+    if tabs != "tab-3":
+        raise exceptions.PreventUpdate
+    if not file_name:
+        # Return empty figures
+        return [app_layout.default_figure] * 4
+
+    df = SimulationCharts.convert_json_to_df(SIMULATION_FOLDER, file_name)
+
+    if column_to_split is None:
+        column_to_split = "open_direction"
+
+    # Build the four figures
+    fig1 = SimulationCharts.build_profit_per_open_day(df)
+    fig2 = SimulationCharts.build_profit_histogram(df, column_to_split)
+    fig3 = SimulationCharts.build_cumulative_profit(df, column_to_split)
+    fig4 = SimulationCharts.build_expected_vs_actual_profit(df, column_to_split)
+
+    return fig1, fig2, fig3, fig4
+
+
+def get_json_files():
+    return [f for f in os.listdir(SIMULATION_FOLDER) if f.endswith(".json")]
+
+
+@app.callback(
+    Output("simulation-selector", "options"),
+    Output("simulation-selector", "value"),
+    Input("interval-component", "n_intervals"),
+    State("simulation-selector", "value"),
+)
+def update_dropdown(n, value):
+    options = [{"label": f, "value": f} for f in get_json_files()]
+    if options and value is None:
+        value = options[0]["value"]
+    return options, value
 
 
 def main():
