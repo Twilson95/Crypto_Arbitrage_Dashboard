@@ -48,7 +48,6 @@ class DataFetcher:
             trading_fee = self.extract_currency_fee_simple(options)
 
             if trading_fee is None:
-                print(self.exchange_name, "extract_complex_fees")
                 trading_fee = await self.extract_currency_fee_complex(options)
 
             self.update_currency_fee(currency, trading_fee)
@@ -742,7 +741,6 @@ class DataFetcher:
     async def set_balance(self):
         try:
             balance = await self.client.fetch_balance()
-            print("Balance:", balance)
             self.balance = balance
         except ccxt_async.BaseError as e:
             print("Error fetching balance:", e)

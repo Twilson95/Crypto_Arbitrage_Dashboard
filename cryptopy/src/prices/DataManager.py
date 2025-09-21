@@ -4,13 +4,19 @@ import logging
 import ccxt.async_support as ccxt
 from cryptopy import DataFetcher
 from threading import Thread
+import time
 
 
 class DataManager:
     def __init__(
-        self, config, network_fees_config=None, live_trades=True, use_cache=True
+        self,
+        config,
+        network_fees_config=None,
+        live_trades=True,
+        use_cache=True,
+        price_refresh_delay=5,
     ):
-        self.sleep_time = 2
+        self.sleep_time = price_refresh_delay
         self.config = config
         self.exchanges = {}
         self.exchange_fees = {}
@@ -49,10 +55,15 @@ class DataManager:
     def schedule_periodic_fetching(self):
         async def periodic_fetch():
             while True:
+                start_time = time.time()
                 await self.fetch_all_live_prices()
                 self.update_all_cointegration_spreads()
                 await self.fetch_all_order_books()
                 await asyncio.sleep(self.sleep_time)
+                end_time = time.time()
+                time_length = end_time - start_time
+                if time_length > 1:
+                    print(f"time to fetch all live prices {time_length:.2f}")
 
         asyncio.run_coroutine_threadsafe(periodic_fetch(), self.loop)
 

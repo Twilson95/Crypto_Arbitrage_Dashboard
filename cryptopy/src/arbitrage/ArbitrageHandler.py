@@ -16,12 +16,7 @@ class ArbitrageHandler:
         self.statistical_arbitrage_opportunities = []
 
     @staticmethod
-    def return_simple_arbitrage_instructions(
-        currency, exchange_prices, currency_fees, exchange_fees, network_fees, funds
-    ):
-        arbitrages = SimpleArbitrage.identify_arbitrage(
-            currency, exchange_prices, currency_fees, exchange_fees, network_fees, funds
-        )
+    def return_simple_arbitrage_instructions(arbitrages):
         if not arbitrages:
             return html.Div()
 
@@ -33,11 +28,7 @@ class ArbitrageHandler:
         return instruction_diagrams
 
     @staticmethod
-    def return_triangle_arbitrage_instructions(prices, currency_fees, exchange, funds):
-        arbitrages = TriangularArbitrage.identify_triangle_arbitrage(
-            prices, currency_fees, exchange, funds
-        )
-
+    def return_triangle_arbitrage_instructions(prices, arbitrages):
         exchange_network_graph = create_network_graph(prices, arbitrages)
 
         if not arbitrages:
@@ -52,18 +43,7 @@ class ArbitrageHandler:
         return exchange_network_graph, instruction_diagrams
 
     @staticmethod
-    def return_statistical_arbitrage_instructions(
-        prices, cointegration_data, currency_fees, exchange, funds, window=30
-    ):
-        arbitrages = StatisticalArbitrage.identify_all_statistical_arbitrage(
-            prices,
-            cointegration_data,
-            currency_fees,
-            exchange,
-            funds,
-            window=30,
-        )
-
+    def return_statistical_arbitrage_instructions(arbitrages):
         if not arbitrages:
             return html.Div(), html.Div()
 
