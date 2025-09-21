@@ -1,9 +1,8 @@
 import asyncio
+import json
 import logging
 import os
 import sys
-import plotly.graph_objects as go
-
 
 from dash import Dash, dcc, html, exceptions
 import dash_bootstrap_components as dbc
@@ -24,6 +23,10 @@ from cryptopy import (
     CointegrationCalculator,
     PortfolioManager,
 )
+from cryptopy.src.arbitrage.SimpleArbitrage import SimpleArbitrage
+from cryptopy.src.arbitrage.StatisticalArbitrage import StatisticalArbitrage
+from cryptopy.src.arbitrage.TriangularArbitrage import TriangularArbitrage
+from cryptopy.src.arbitrage.ArbitrageTracker import ArbitrageTracker
 from cryptopy.src.trading.SimulationCharts import SimulationCharts
 
 logging.basicConfig(
@@ -58,10 +61,18 @@ filter_component = FilterComponent()
 technical_indicators = TechnicalIndicators()
 arbitrage_handler = ArbitrageHandler()
 
-app_layout = AppLayout(filter_component, technical_indicators, 2)
+chart_refresh_rate = 2
+price_refresh_delay = 0
+app_layout = AppLayout(filter_component, technical_indicators, chart_refresh_rate)
 app.layout = app_layout.generate_layout()
 start_time = time()
-data_manager = DataManager(exchange_config, network_fees_config, live_trades=True)
+data_manager = DataManager(
+    exchange_config,
+    network_fees_config,
+    live_trades=True,
+    # use_cache=True,
+    price_refresh_delay=price_refresh_delay,
+)
 end_time = time()
 
 news_fetcher = NewsFetcher(news_config)
@@ -70,6 +81,15 @@ price_chart = PriceChart()
 trades_path = r"data/portfolio_data/Kraken/trades.json"
 portfolio_manager = PortfolioManager(trades_path=trades_path)
 portfolio_manager.read_open_events()
+
+arbitrage_tracker = ArbitrageTracker(r"data/arbitrage/arbitrage_lifetimes.jsonl")
+
+order_book_path = r"C:\Users\thoma\PycharmProjects\CryptoDashboard\data\order_book\order_book_btc_2.json"
+
+
+def save_order_book(order_book, filename):
+    with open(filename, "w") as f:
+        json.dump(order_book, f)
 
 
 @app.callback(
@@ -270,6 +290,8 @@ def update_depth_chart(exchange, currency, n_intervals):
         return app_layout.default_figure
 
     order_book = data_manager.get_order_book(exchange, currency)
+    save_order_book(order_book, order_book_path)
+
     if not order_book:
         return app_layout.default_figure
 
@@ -339,8 +361,12 @@ def simple_arbitrage_graphs(currency, funds):
     )
     arbitrage_instructions = {}
     if prices and currency_fees and exchange_fees and network_fees:
-        arbitrage_instructions = arbitrage_handler.return_simple_arbitrage_instructions(
+        arbitrages = SimpleArbitrage.identify_arbitrage(
             currency, prices, currency_fees, exchange_fees, network_fees, funds
+        )
+        # arbitrage_tracker.update(arbitrages)
+        arbitrage_instructions = arbitrage_handler.return_simple_arbitrage_instructions(
+            arbitrages
         )
 
     return (
@@ -365,10 +391,12 @@ def triangular_arbitrage_graphs(exchange, funds):
     if not prices or not currency_fees:
         return html.Div(), html.Div()
 
+    arbitrages = TriangularArbitrage.identify_triangle_arbitrage(
+        prices, currency_fees, exchange, funds
+    )
+    # arbitrage_tracker.update(arbitrages)
     exchange_network_graph, arbitrage_instructions = (
-        arbitrage_handler.return_triangle_arbitrage_instructions(
-            prices, currency_fees, exchange, funds
-        )
+        arbitrage_handler.return_triangle_arbitrage_instructions(prices, arbitrages)
     )
     return (
         dcc.Graph(figure=exchange_network_graph, style={"height": "100%"}),
@@ -399,15 +427,16 @@ def statistical_arbitrage_graphs(exchange, funds, cointegration_pair_str):
     )
     arbitrage_instructions = html.Div()
     if cointegration_data.spread is not None:
+        arbitrages = StatisticalArbitrage.identify_all_statistical_arbitrage(
+            prices,
+            cointegration_data,
+            currency_fees,
+            exchange,
+            funds,
+            window=30,
+        )
         arbitrage_instructions = (
-            ArbitrageHandler.return_statistical_arbitrage_instructions(
-                prices,
-                cointegration_data,
-                currency_fees,
-                exchange,
-                funds,
-                window=30,
-            )
+            ArbitrageHandler.return_statistical_arbitrage_instructions(arbitrages)
         )
 
     spread_chart, entry_dates, exit_dates = price_chart.plot_spread(

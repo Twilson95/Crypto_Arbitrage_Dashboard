@@ -405,6 +405,7 @@ class StatisticalArbitrage:
                 cointegration_data.spread, window
             )
         )
+        print(cointegration_data.trade_details)
         arbitrage_instructions = StatisticalArbitrage.identify_statistical_arbitrage(
             cointegration_data, currency_fees, exchange, funds, prices
         )
