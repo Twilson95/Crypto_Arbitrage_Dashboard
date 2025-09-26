@@ -16,6 +16,7 @@ from cryptopy.scripts.simulations.simulation_helpers import (
     calculate_expected_profit,
     get_bought_and_sold_amounts,
     is_volume_or_volatility_spike,
+    compute_spread_metrics,
 )
 
 parameters = {
@@ -70,6 +71,8 @@ historical_volume = data_manager.get_historical_data_for_all_currencies(
 historical_volume.index = pd.to_datetime(historical_volume.index)
 historical_volume.index = historical_volume.index.date
 
+spread_metrics_cache = {}
+
 for symbol, balance in current_balance.items():
     if symbol == "ZUSD/USD":
         usd_balance += balance
@@ -114,7 +117,23 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
     spread, hedge_ratio = CointegrationCalculator.calculate_spread(
         historical_prices, pair, hedge_ratio
     )
-    todays_spread_data = get_todays_spread_data(parameters, spread, current_date)
+    pair_key = tuple(pair)
+    cache_key = (pair_key, current_date)
+    spread_metrics = spread_metrics_cache.get(cache_key)
+    if spread_metrics is None:
+        spread_metrics = compute_spread_metrics(parameters, spread)
+        stale_keys = [
+            key
+            for key in list(spread_metrics_cache.keys())
+            if key[0] == pair_key and key[1] != current_date
+        ]
+        for key in stale_keys:
+            del spread_metrics_cache[key]
+        spread_metrics_cache[cache_key] = spread_metrics
+
+    todays_spread_data = get_todays_spread_data(
+        parameters, spread, current_date, spread_metrics
+    )
 
     close_event = None
     if open_trade:
