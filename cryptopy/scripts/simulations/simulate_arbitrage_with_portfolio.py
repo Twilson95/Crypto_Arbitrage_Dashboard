@@ -15,6 +15,7 @@ from cryptopy.scripts.simulations.simulation_helpers import (
     get_todays_spread_data,
     get_bought_and_sold_amounts,
     is_volume_or_volatility_spike,
+    compute_spread_metrics,
 )
 
 simulation_name = "long_history_15_concurrent_trades"
@@ -62,6 +63,8 @@ portfolio_manager = PortfolioManager(
     max_each_coin=parameters["max_each_coin"],
 )
 
+spread_metrics_cache = {}
+
 days_back = parameters["days_back"]
 for current_date in price_df.index[days_back:]:
     print(f"{current_date}, {portfolio_manager.traded_pairs}, {cumulative_profit:.2f}")
@@ -90,7 +93,23 @@ for current_date in price_df.index[days_back:]:
             price_df_filtered, pair, hedge_ratio
         )
 
-        todays_spread_data = get_todays_spread_data(parameters, spread, current_date)
+        pair_key = tuple(pair)
+        cache_key = (pair_key, current_date)
+        spread_metrics = spread_metrics_cache.get(cache_key)
+        if spread_metrics is None:
+            spread_metrics = compute_spread_metrics(parameters, spread)
+            stale_keys = [
+                key
+                for key in list(spread_metrics_cache.keys())
+                if key[0] == pair_key and key[1] != current_date
+            ]
+            for key in stale_keys:
+                del spread_metrics_cache[key]
+            spread_metrics_cache[cache_key] = spread_metrics
+
+        todays_spread_data = get_todays_spread_data(
+            parameters, spread, current_date, spread_metrics
+        )
 
         close_event = None
         if open_event:
