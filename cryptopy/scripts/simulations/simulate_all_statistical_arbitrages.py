@@ -10,6 +10,7 @@ from cryptopy.scripts.simulations.simulation_helpers import (
     get_combined_df_of_data,
     get_bought_and_sold_amounts,
     is_volume_or_volatility_spike,
+    compute_spread_metrics,
 )
 
 simulation_name = "long_history_volume_&_volatility_100_periods"
@@ -50,6 +51,8 @@ volume_df = get_combined_df_of_data(historic_data_folder, "volume")
 pair_combinations_df = pd.read_csv(cointegration_pairs_path)
 pair_combinations = list(pair_combinations_df.itertuples(index=False, name=None))
 
+spread_metrics_cache = {}
+
 for pair in sorted(pair_combinations, key=lambda x: x[0]):
     print(pair)
     open_position = False
@@ -77,7 +80,23 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
             price_df_filtered, pair, hedge_ratio
         )
 
-        todays_spread_data = get_todays_spread_data(parameters, spread, current_date)
+        pair_key = tuple(pair)
+        cache_key = (pair_key, current_date)
+        spread_metrics = spread_metrics_cache.get(cache_key)
+        if spread_metrics is None:
+            spread_metrics = compute_spread_metrics(parameters, spread)
+            stale_keys = [
+                key
+                for key in list(spread_metrics_cache.keys())
+                if key[0] == pair_key and key[1] != current_date
+            ]
+            for key in stale_keys:
+                del spread_metrics_cache[key]
+            spread_metrics_cache[cache_key] = spread_metrics
+
+        todays_spread_data = get_todays_spread_data(
+            parameters, spread, current_date, spread_metrics
+        )
 
         close_event = None
         if open_position:

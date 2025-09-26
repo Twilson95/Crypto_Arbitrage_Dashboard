@@ -25,7 +25,7 @@ def filter_list(list_data, date):
     return todays_data
 
 
-def get_todays_spread_data(parameters, spread, current_date):
+def compute_spread_metrics(parameters, spread):
     rolling_window = parameters["rolling_window"]
     spread_mean = spread.rolling(window=rolling_window).mean()
     spread_std = spread.rolling(window=rolling_window).std()
@@ -38,18 +38,32 @@ def get_todays_spread_data(parameters, spread, current_date):
     upper_spread_limit = spread_mean + upper_spread_threshold * spread_std
     lower_spread_limit = spread_mean - upper_spread_threshold * spread_std
 
+    return {
+        "spread_mean": spread_mean,
+        "spread_std": spread_std,
+        "upper_threshold": upper_threshold,
+        "lower_threshold": lower_threshold,
+        "upper_limit": upper_spread_limit,
+        "lower_limit": lower_spread_limit,
+    }
+
+
+def get_todays_spread_data(parameters, spread, current_date, spread_metrics=None):
+    if spread_metrics is None:
+        spread_metrics = compute_spread_metrics(parameters, spread)
+
     todays_spread = filter_list(spread, current_date)
-    todays_spread_mean = filter_list(spread_mean, current_date)
-    todays_spread_std = filter_list(spread_std, current_date)
+    todays_spread_mean = filter_list(spread_metrics["spread_mean"], current_date)
+    todays_spread_std = filter_list(spread_metrics["spread_std"], current_date)
     return {
         "date": current_date,
         "spread": todays_spread,
         "spread_mean": todays_spread_mean,
         "spread_std": todays_spread_std,
-        "upper_threshold": filter_list(upper_threshold, current_date),
-        "upper_limit": filter_list(upper_spread_limit, current_date),
-        "lower_threshold": filter_list(lower_threshold, current_date),
-        "lower_limit": filter_list(lower_spread_limit, current_date),
+        "upper_threshold": filter_list(spread_metrics["upper_threshold"], current_date),
+        "upper_limit": filter_list(spread_metrics["upper_limit"], current_date),
+        "lower_threshold": filter_list(spread_metrics["lower_threshold"], current_date),
+        "lower_limit": filter_list(spread_metrics["lower_limit"], current_date),
         "spread_deviation": abs(todays_spread - todays_spread_mean) / todays_spread_std,
     }
 

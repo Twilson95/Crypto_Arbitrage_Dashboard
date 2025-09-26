@@ -7,6 +7,7 @@ from cryptopy.scripts.simulations.simulation_helpers import (
     calculate_expected_profit,
     get_bought_and_sold_amounts,
     filter_list,
+    compute_spread_metrics,
 )
 from typing import Optional
 
@@ -33,6 +34,7 @@ class ArbitrageSimulator:
         self.daily_trade_results = []
         self.open_opportunities = {}
         self.current_market_trend = None
+        self._spread_metrics_cache = {}
         self._trend_parameters = self.parameters.get("trend_parameters", {})
 
         short_window = self._trend_parameters.get("short_window")
@@ -215,9 +217,32 @@ class ArbitrageSimulator:
         spread, hedge_ratio = CointegrationCalculator.calculate_spread(
             price_df_filtered, pair, hedge_ratio
         )
-        todays_spread_data = self.get_todays_spread_data(spread, current_date)
+        spread_metrics = self._get_cached_spread_metrics(pair, current_date, spread)
+        todays_spread_data = self.get_todays_spread_data(
+            spread, current_date, spread_metrics
+        )
 
         return p_value, hedge_ratio, todays_spread_data, currency_fees
+
+    def _get_cached_spread_metrics(self, pair, current_date, spread):
+        pair_key = tuple(pair)
+        cache_key = (pair_key, current_date)
+        cached_metrics = self._spread_metrics_cache.get(cache_key)
+        if cached_metrics is not None:
+            return cached_metrics
+
+        metrics = compute_spread_metrics(self.parameters, spread)
+
+        keys_to_remove = [
+            key
+            for key in list(self._spread_metrics_cache.keys())
+            if key[0] == pair_key and key[1] != current_date
+        ]
+        for key in keys_to_remove:
+            del self._spread_metrics_cache[key]
+
+        self._spread_metrics_cache[cache_key] = metrics
+        return metrics
 
     def attempt_closing_trade(
         self,
@@ -403,31 +428,26 @@ class ArbitrageSimulator:
                 current_volatility / avg_volatility,
             )
 
-    def get_todays_spread_data(self, spread, current_date):
-        rolling_window = self.parameters["rolling_window"]
-        spread_mean = spread.rolling(window=rolling_window).mean()
-        spread_std = spread.rolling(window=rolling_window).std()
-        spread_threshold = self.parameters["spread_threshold"]
-
-        upper_threshold = spread_mean + spread_threshold * spread_std
-        lower_threshold = spread_mean - spread_threshold * spread_std
-
-        upper_spread_threshold = self.parameters["spread_limit"]
-        upper_spread_limit = spread_mean + upper_spread_threshold * spread_std
-        lower_spread_limit = spread_mean - upper_spread_threshold * spread_std
+    def get_todays_spread_data(self, spread, current_date, spread_metrics=None):
+        if spread_metrics is None:
+            spread_metrics = compute_spread_metrics(self.parameters, spread)
 
         todays_spread = filter_list(spread, current_date)
-        todays_spread_mean = filter_list(spread_mean, current_date)
-        todays_spread_std = filter_list(spread_std, current_date)
+        todays_spread_mean = filter_list(spread_metrics["spread_mean"], current_date)
+        todays_spread_std = filter_list(spread_metrics["spread_std"], current_date)
         return {
             "date": current_date,
             "spread": todays_spread,
             "spread_mean": todays_spread_mean,
             "spread_std": todays_spread_std,
-            "upper_threshold": filter_list(upper_threshold, current_date),
-            "upper_limit": filter_list(upper_spread_limit, current_date),
-            "lower_threshold": filter_list(lower_threshold, current_date),
-            "lower_limit": filter_list(lower_spread_limit, current_date),
+            "upper_threshold": filter_list(
+                spread_metrics["upper_threshold"], current_date
+            ),
+            "upper_limit": filter_list(spread_metrics["upper_limit"], current_date),
+            "lower_threshold": filter_list(
+                spread_metrics["lower_threshold"], current_date
+            ),
+            "lower_limit": filter_list(spread_metrics["lower_limit"], current_date),
             "spread_deviation": abs(todays_spread - todays_spread_mean)
             / todays_spread_std,
         }
