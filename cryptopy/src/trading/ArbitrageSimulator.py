@@ -27,7 +27,7 @@ class ArbitrageSimulator:
         self.price_df = price_df
         self.volume_df = volume_df
         self.portfolio_manager = portfolio_manager
-        self.pair_combinations = pair_combinations
+        self.pair_combinations = sorted(pair_combinations, key=lambda x: x[0])
         self.ml_model = ml_model
         self.trades_before_prediction = trades_before_prediction
         self.trade_results = []
@@ -114,7 +114,7 @@ class ArbitrageSimulator:
         price_field = "BTC/USD"
         market_trend = self.get_current_trend(price_field, current_date)
 
-        for pair in sorted(self.pair_combinations, key=lambda x: x[0]):
+        for pair in self.pair_combinations:
             if "XRP/USD" in pair:
                 continue
 
