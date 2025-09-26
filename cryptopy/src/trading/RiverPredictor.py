@@ -12,7 +12,7 @@ import copy
 
 
 class RiverPredictor:
-    def __init__(self, prediction_threshold):
+    def __init__(self, prediction_threshold, model_setup):
         # self.cat_features = ["coin_1", "coin_2"]
         self.num_features = [
             "p_value",
@@ -26,20 +26,7 @@ class RiverPredictor:
         ]
         self.prediction_threshold = prediction_threshold
 
-        self.model = (
-            # feature_extraction.HashingEncoder(on=["coin_1", "coin_2"], n_features=64)
-            preprocessing.StandardScaler()
-            |
-            # models
-            # linear_model.LogisticRegression()
-            # linear_model.Perceptron()
-            # linear_model.PAClassifier()
-            # naive_bayes.GaussianNB()
-            # tree.HoeffdingTreeClassifier()
-            # tree.HoeffdingAdaptiveTreeClassifier()
-            # forest.ARFClassifier()
-            forest.AMFClassifier()
-        )
+        self.model = model_setup
 
     def learn_from_data(self, trade_data):
         """

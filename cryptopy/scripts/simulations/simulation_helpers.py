@@ -79,8 +79,10 @@ def get_trade_profit(
     if arbitrage:
         profit = arbitrage.get("summary_header", {}).get("total_profit", 0)
         print(
-            f"{pair}, date: {open_event['date']} to {close_event['date']}, "
-            f"close_reason: {close_event['reason']}: profit {profit:.2f}"
+            f"Pair: {pair}\n"
+            f"Live Dates: {open_event['date']} to {close_event['date']}\n"
+            f"Close Reason: {close_event['reason']}\n"
+            f"Profit {profit:.2f}"
         )
         return profit
 

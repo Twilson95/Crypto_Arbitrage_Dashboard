@@ -10,7 +10,7 @@ from cryptopy import JsonHelper
 
 matplotlib.use("TkAgg")  # Or another backend like 'Qt5Agg' depending on your system
 
-simulation_name = "long_history_all_trades_sensible_parameters"
+simulation_name = "long_history_perceptron"
 simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
 # simulation_path = f"../../../data/simulations/all_trades/{simulation_name}.json"
 
