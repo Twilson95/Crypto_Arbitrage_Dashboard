@@ -42,7 +42,10 @@ class ArbitrageSimulator:
             cumulative_profit = self.portfolio_manager.get_cumulative_profit()
 
             print(
-                f"{current_date}, {self.portfolio_manager.traded_pairs}, {cumulative_profit:.2f}"
+                f"\n-----------------------------------------------------\n"
+                f"Date: {current_date} \n"
+                f"Open Trades: {self.portfolio_manager.traded_pairs} \n"
+                f"Total Profit {cumulative_profit:.2f} \n"
             )
 
         all_trades = self.portfolio_manager.get_all_trade_events()
