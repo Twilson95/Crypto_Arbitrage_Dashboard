@@ -19,7 +19,7 @@ class StatisticalArbitrage:
         coin1 = pair1.split("/")[0]
         coin2 = pair2.split("/")[0]
         coin1_fee = currency_fees[pair1]["taker"]
-        coin2_fee = currency_fees[pair1]["taker"]
+        coin2_fee = currency_fees[pair2]["taker"]
 
         entry_time, entry_spread, entry_type = entry
         exit_time, exit_spread = exit
