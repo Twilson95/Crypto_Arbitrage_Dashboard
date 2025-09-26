@@ -1,3 +1,5 @@
+import time
+
 from cryptopy import CointegrationCalculator, TradingOpportunities, RiverPredictor
 
 from cryptopy.scripts.simulations.simulation_helpers import (
@@ -51,20 +53,22 @@ class ArbitrageSimulator:
         days_back = self.parameters["days_back"]
 
         for current_date in self.price_df.index[days_back:]:
+            start_time = time.time()
             self.simulate_day(current_date, days_back)
             cumulative_profit = self.portfolio_manager.get_cumulative_profit()
+            end_time = time.time()
 
             print(
                 f"\n-----------------------------------------------------\n"
                 f"Date: {current_date} \n"
                 f"Open Trades: {self.portfolio_manager.traded_pairs} \n"
                 f"Total Profit {cumulative_profit:.2f} \n"
+                f"Time: {end_time - start_time:.2f}secs"
             )
 
         all_trades = self.portfolio_manager.get_all_trade_events()
         cumulative_profit = self.portfolio_manager.get_cumulative_profit()
         return all_trades, cumulative_profit
-        # return self.all_trades, self.cumulative_profit
 
     def simulate_day(self, current_date, days_back):
         daily_opportunities, closed_trades = self.find_daily_opportunities(
