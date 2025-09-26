@@ -24,6 +24,9 @@ class StatisticalArbitrage:
         entry_time, entry_spread, entry_type = entry
         exit_time, exit_spread = exit
 
+        if hedge_ratio is None:
+            raise ValueError("hedge_ratio must be provided for statistical arbitrage")
+
         # Look up the actual prices for the entry and exit times
         entry_price_coin1 = price_df.loc[entry_time, pair1]
         entry_price_coin2 = price_df.loc[entry_time, pair2]
@@ -35,21 +38,64 @@ class StatisticalArbitrage:
             exit_price_coin1 = None
             exit_price_coin2 = None
 
-        if hedge_ratio < 0:
-            # hedge_ratio = 1 / hedge_ratio
-            print("hedge ratio is negative", hedge_ratio)
-            pass
+        (
+            normalized_hedge_ratio,
+            legs_flipped,
+        ) = StatisticalArbitrage.normalize_hedge_ratio(hedge_ratio)
+
+        if legs_flipped:
+            (
+                pair1,
+                pair2,
+                coin1,
+                coin2,
+                coin1_fee,
+                coin2_fee,
+                entry_price_coin1,
+                entry_price_coin2,
+                exit_price_coin1,
+                exit_price_coin2,
+            ) = StatisticalArbitrage._swap_leg_details(
+                pair1,
+                pair2,
+                coin1,
+                coin2,
+                coin1_fee,
+                coin2_fee,
+                entry_price_coin1,
+                entry_price_coin2,
+                exit_price_coin1,
+                exit_price_coin2,
+            )
+
+        if normalized_hedge_ratio is not None:
+            hedge_ratio = normalized_hedge_ratio
 
         if entry_type == "short":
             hedge_ratio = 1 / hedge_ratio
-            coin1, coin2 = coin2, coin1
-            pair1, pair2 = pair2, pair1
-            coin1_fee, coin2_fee = coin2_fee, coin1_fee
-            entry_price_coin1, entry_price_coin2 = (
-                entry_price_coin2,
+            (
+                pair1,
+                pair2,
+                coin1,
+                coin2,
+                coin1_fee,
+                coin2_fee,
                 entry_price_coin1,
+                entry_price_coin2,
+                exit_price_coin1,
+                exit_price_coin2,
+            ) = StatisticalArbitrage._swap_leg_details(
+                pair1,
+                pair2,
+                coin1,
+                coin2,
+                coin1_fee,
+                coin2_fee,
+                entry_price_coin1,
+                entry_price_coin2,
+                exit_price_coin1,
+                exit_price_coin2,
             )
-            exit_price_coin1, exit_price_coin2 = exit_price_coin2, exit_price_coin1
 
         hedge_ratio = abs(hedge_ratio)
 
@@ -298,6 +344,42 @@ class StatisticalArbitrage:
             to_usd,
             total_fees_usd,
             profit,
+        )
+
+    @staticmethod
+    def normalize_hedge_ratio(hedge_ratio):
+        if hedge_ratio is None:
+            return hedge_ratio, False
+
+        if hedge_ratio < 0:
+            return abs(hedge_ratio), True
+
+        return hedge_ratio, False
+
+    @staticmethod
+    def _swap_leg_details(
+        pair1,
+        pair2,
+        coin1,
+        coin2,
+        coin1_fee,
+        coin2_fee,
+        entry_price_coin1,
+        entry_price_coin2,
+        exit_price_coin1,
+        exit_price_coin2,
+    ):
+        return (
+            pair2,
+            pair1,
+            coin2,
+            coin1,
+            coin2_fee,
+            coin1_fee,
+            entry_price_coin2,
+            entry_price_coin1,
+            exit_price_coin2,
+            exit_price_coin1,
         )
 
     @staticmethod

@@ -151,15 +151,24 @@ class CointegrationCalculator:
         prices1 = df[pair[0]]
         prices2 = df[pair[1]]
 
-        if hedge_ratio is None:
+        calculated_hedge_ratio = hedge_ratio
+
+        if calculated_hedge_ratio is None:
             model = sm.OLS(prices1, sm.add_constant(prices2))
             result = model.fit()
-            hedge_ratio = result.params.iloc[1]
+            calculated_hedge_ratio = result.params.iloc[1]
 
-        spread = prices1 - hedge_ratio * prices2
+        normalized_ratio, flipped = StatisticalArbitrage.normalize_hedge_ratio(
+            calculated_hedge_ratio
+        )
+
+        if flipped:
+            prices1, prices2 = prices2, prices1
+
+        spread = prices1 - normalized_ratio * prices2
         spread = spread.dropna()
 
-        return spread, hedge_ratio
+        return spread, calculated_hedge_ratio
 
     @staticmethod
     def identify_arbitrage_opportunities(spread, threshold=2):
