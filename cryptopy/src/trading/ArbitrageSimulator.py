@@ -35,6 +35,17 @@ class ArbitrageSimulator:
         self.open_opportunities = {}
         self.current_market_trend = None
         self._spread_metrics_cache = {}
+        self._trend_parameters = self.parameters.get("trend_parameters", {})
+
+        short_window = self._trend_parameters.get("short_window")
+        long_window = self._trend_parameters.get("long_window")
+
+        if short_window and long_window:
+            self._short_ma = self.price_df.rolling(window=short_window).mean()
+            self._long_ma = self.price_df.rolling(window=long_window).mean()
+        else:
+            self._short_ma = None
+            self._long_ma = None
 
     def run_simulation(self):
         days_back = self.parameters["days_back"]
@@ -100,12 +111,8 @@ class ArbitrageSimulator:
         price_df_filtered = filter_df(self.price_df, current_date, days_back)
         volume_df_filtered = filter_df(self.volume_df, current_date, days_back)
 
-        trend_parameters = self.parameters["trend_parameters"]
         price_field = "BTC/USD"
-        market_prices = price_df_filtered[[price_field]]
-        market_trend = ArbitrageSimulator.get_current_trend(
-            market_prices, price_field, trend_parameters
-        )
+        market_trend = self.get_current_trend(price_field, current_date)
 
         for pair in sorted(self.pair_combinations, key=lambda x: x[0]):
             if "XRP/USD" in pair:
@@ -121,18 +128,8 @@ class ArbitrageSimulator:
                 daily_opportunities.append(opportunity)
                 self.open_opportunities[pair] = opportunity["open_event"]
 
-                price_df_for_trend = filter_df(
-                    self.price_df[[pair[0], pair[1]]],
-                    current_date,
-                    trend_parameters["long_window"],
-                )
-
-                coin_1_trend = ArbitrageSimulator.get_current_trend(
-                    price_df_for_trend, pair[0], trend_parameters
-                )
-                coin_2_trend = ArbitrageSimulator.get_current_trend(
-                    price_df_for_trend, pair[1], trend_parameters
-                )
+                coin_1_trend = self.get_current_trend(pair[0], current_date)
+                coin_2_trend = self.get_current_trend(pair[1], current_date)
 
                 opportunity["open_event"].update(
                     {
@@ -176,24 +173,30 @@ class ArbitrageSimulator:
 
         return opportunity, closed_trade
 
-    @staticmethod
-    def get_current_trend(price_df, price_field, trend_parameters):
-        price_df = price_df.copy()
-        short_window = trend_parameters["short_window"]
-        long_window = trend_parameters["long_window"]
-        change_threshold = trend_parameters["change_threshold"]
+    def get_current_trend(self, price_field, current_date):
+        if (
+            self._short_ma is None
+            or self._long_ma is None
+            or price_field not in self.price_df.columns
+        ):
+            return None
 
-        price_df["short_MA"] = price_df[price_field].rolling(window=short_window).mean()
-        price_df["long_MA"] = price_df[price_field].rolling(window=long_window).mean()
+        try:
+            short_ma_value = self._short_ma.at[current_date, price_field]
+            long_ma_value = self._long_ma.at[current_date, price_field]
+        except KeyError:
+            return None
 
-        sma_difference = abs(
-            price_df["short_MA"].iloc[-1] - price_df["long_MA"].iloc[-1]
-        )
-        sma_percentage_difference = sma_difference / price_df["long_MA"].iloc[-1]
+        change_threshold = self._trend_parameters.get("change_threshold")
+        if change_threshold is None:
+            return None
+
+        sma_difference = abs(short_ma_value - long_ma_value)
+        sma_percentage_difference = sma_difference / long_ma_value
 
         if sma_percentage_difference < change_threshold:
             trend = "Flat"
-        elif price_df["short_MA"].iloc[-1] > price_df["long_MA"].iloc[-1]:
+        elif short_ma_value > long_ma_value:
             trend = "Uptrend"
         else:
             trend = "Downtrend"
