@@ -41,7 +41,9 @@ def compute_spread_metrics(parameters, spread):
 
     holding_period = max(int(round(parameters.get("expected_holding_days", 10))), 0)
     convergence_window = parameters.get("convergence_lookback", rolling_window * 3)
-    forecaster = ConvergenceForecaster(rolling_window, holding_period, convergence_window)
+    forecaster = ConvergenceForecaster(
+        rolling_window, holding_period, convergence_window
+    )
     forecast = forecaster.forecast(spread)
 
     expected_exit_mean = forecast.expected_exit_mean
@@ -72,6 +74,7 @@ def compute_spread_metrics(parameters, spread):
         "forecasted_mean_path": mean_paths,
     }
 
+
 def get_todays_spread_data(parameters, spread, current_date, spread_metrics=None):
     if spread_metrics is None:
         spread_metrics = compute_spread_metrics(parameters, spread)
@@ -91,11 +94,17 @@ def get_todays_spread_data(parameters, spread, current_date, spread_metrics=None
     forecast_mean_path = spread_metrics.get("forecasted_mean_path")
     todays_spread_forecast = None
     todays_mean_forecast = None
-    if isinstance(forecast_spread_path, pd.DataFrame) and current_date in forecast_spread_path.index:
+    if (
+        isinstance(forecast_spread_path, pd.DataFrame)
+        and current_date in forecast_spread_path.index
+    ):
         todays_spread_forecast = (
             forecast_spread_path.loc[current_date].dropna().to_dict()
         )
-    if isinstance(forecast_mean_path, pd.DataFrame) and current_date in forecast_mean_path.index:
+    if (
+        isinstance(forecast_mean_path, pd.DataFrame)
+        and current_date in forecast_mean_path.index
+    ):
         todays_mean_forecast = forecast_mean_path.loc[current_date].dropna().to_dict()
     forecast_diff = None
     if todays_spread_forecast and todays_mean_forecast:
@@ -217,7 +226,9 @@ def calculate_expected_profit(
         borrow_rate_per_day = open_event.get("borrow_rate_per_day")
 
     borrow_rate = borrow_rate_per_day or 0.0
-    holding_days = expected_holding_days or open_event.get("expected_holding_days") or 0.0
+    holding_days = (
+        expected_holding_days or open_event.get("expected_holding_days") or 0.0
+    )
 
     if short_notional is None:
         short_entry_price = open_event.get("short_entry_price")
