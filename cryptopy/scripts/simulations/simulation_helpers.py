@@ -25,6 +25,7 @@ def filter_df(df, current_date, days_back):
 def filter_list(list_data, date):
     todays_data = list_data.loc[date] if date in list_data.index else None
     return todays_data
+
 def compute_spread_metrics(parameters, spread):
     rolling_window = parameters["rolling_window"]
     spread_mean = spread.rolling(window=rolling_window).mean()
@@ -38,7 +39,7 @@ def compute_spread_metrics(parameters, spread):
     upper_spread_limit = spread_mean + upper_spread_threshold * spread_std
     lower_spread_limit = spread_mean - upper_spread_threshold * spread_std
 
-    holding_period = max(int(round(parameters.get("expected_holding_period", 5))), 0)
+    holding_period = max(int(round(parameters.get("expected_holding_days", 10))), 0)
     convergence_window = parameters.get("convergence_lookback", rolling_window * 3)
     forecaster = ConvergenceForecaster(rolling_window, holding_period, convergence_window)
     forecast = forecaster.forecast(spread)
@@ -70,7 +71,6 @@ def compute_spread_metrics(parameters, spread):
         "forecasted_spread_path": spread_paths,
         "forecasted_mean_path": mean_paths,
     }
-
 
 def get_todays_spread_data(parameters, spread, current_date, spread_metrics=None):
     if spread_metrics is None:

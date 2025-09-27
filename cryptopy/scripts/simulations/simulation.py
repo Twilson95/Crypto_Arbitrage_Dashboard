@@ -26,7 +26,6 @@ parameters = {
     "max_expected_profit": 0.025,  # no more at risk as 5% percent of the portfolio amount
     "trade_size": 0.05,  # proportion of portfolio bought in each trade - default 0.06
     "trade_size_same_risk": True,
-    "expected_holding_period": 5,
     "volume_period": 30,  # default 30
     "volume_threshold": 999,  # default 2
     "volatility_period": 30,  # default 30
