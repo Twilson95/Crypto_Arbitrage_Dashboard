@@ -26,6 +26,7 @@ def filter_list(list_data, date):
     todays_data = list_data.loc[date] if date in list_data.index else None
     return todays_data
 
+
 def compute_spread_metrics(parameters, spread):
     rolling_window = parameters["rolling_window"]
     spread_mean = spread.rolling(window=rolling_window).mean()
