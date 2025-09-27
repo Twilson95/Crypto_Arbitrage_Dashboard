@@ -267,9 +267,11 @@ class PairAnalyticsCache:
         if total_days == 0:
             return
 
-        progress_interval = max(1, math.ceil(total_days / 20))
+        # progress_interval = max(1, math.ceil(total_days / 20))
+        progress_interval = 1
 
         for idx, current_date in enumerate(index_slice, start=1):
+            start_time = time.time()
             filtered_prices = filter_df(price_df, current_date, days_back)
             if not cache._has_complete_window(filtered_prices, current_date, days_back):
                 continue
@@ -277,9 +279,11 @@ class PairAnalyticsCache:
                 cache.ensure(pair, current_date, filtered_prices)
 
             if idx == 1 or idx % progress_interval == 0 or idx == total_days:
+                end_time = time.time()
+                time_taken = end_time - start_time
                 print(
                     "[PairAnalyticsCache] "
-                    f"Processed {idx}/{total_days} dates (latest: {current_date})"
+                    f"Processed {idx}/{total_days} dates (latest: {current_date}) time: {time_taken:.2f}"
                 )
 
     @staticmethod

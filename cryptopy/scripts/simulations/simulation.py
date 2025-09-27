@@ -6,7 +6,7 @@ from cryptopy.scripts.simulations.simulation_helpers import get_combined_df_of_d
 
 simulation_name = "long_history_perceptron"
 exchange_name = "Kraken"
-historic_data_folder = f"../../../data/historical_data/{exchange_name}/"
+historic_folder_path = "../../../data/historical_data/Kraken_long_history"
 cointegration_pairs_path = f"../../../data/historical_data/cointegration_pairs.csv"
 simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
 
@@ -59,9 +59,8 @@ model_setup = (
     # forest.AMFClassifier()
 )
 
-folder_path = "../../../data/historical_data/Kraken_long_history"
-price_df = get_combined_df_of_data(folder_path, "close")
-volume_df = get_combined_df_of_data(folder_path, "volume")
+price_df = get_combined_df_of_data(historic_folder_path, "close")
+volume_df = get_combined_df_of_data(historic_folder_path, "volume")
 
 pair_combinations_df = pd.read_csv(cointegration_pairs_path)
 pair_combinations = list(pair_combinations_df.itertuples(index=False, name=None))
