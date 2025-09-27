@@ -264,6 +264,12 @@ class ArbitrageSimulator:
     def get_cointegration_and_spread_info(self, pair, price_df_filtered, current_date):
         currency_fees = {pair[0]: {"taker": 0.002}, pair[1]: {"taker": 0.002}}
 
+        days_back = self.parameters.get("days_back", 0)
+        if not PairAnalyticsCache._has_complete_window(
+            price_df_filtered, current_date, days_back
+        ):
+            return None
+
         cached_analytics = None
         if self._pair_analytics_cache is not None:
             cached_analytics = self._pair_analytics_cache.ensure(

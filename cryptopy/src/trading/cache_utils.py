@@ -220,6 +220,9 @@ class PairAnalyticsCache:
         current_date,
         price_df_filtered: pd.DataFrame,
     ) -> Optional[Dict[str, Any]]:
+        if not self._has_complete_window(price_df_filtered, current_date):
+            return None
+
         cached = self.load(pair, current_date)
         if cached is not None:
             return cached
@@ -268,6 +271,8 @@ class PairAnalyticsCache:
 
         for idx, current_date in enumerate(index_slice, start=1):
             filtered_prices = filter_df(price_df, current_date, days_back)
+            if not cache._has_complete_window(filtered_prices, current_date, days_back):
+                continue
             for pair in pair_combinations:
                 cache.ensure(pair, current_date, filtered_prices)
 
@@ -276,3 +281,26 @@ class PairAnalyticsCache:
                     "[PairAnalyticsCache] "
                     f"Processed {idx}/{total_days} dates (latest: {current_date})"
                 )
+
+    @staticmethod
+    def _has_complete_window(
+        price_df_filtered: pd.DataFrame,
+        current_date,
+        days_back: Optional[int] = None,
+    ) -> bool:
+        if days_back is None:
+            days_back = 0
+
+        if days_back <= 0:
+            return not price_df_filtered.empty
+
+        if price_df_filtered.empty:
+            return False
+
+        current_timestamp = PairAnalyticsCache._normalise_timestamp(current_date)
+        earliest_timestamp = PairAnalyticsCache._normalise_timestamp(
+            price_df_filtered.index.min()
+        )
+
+        expected_start = current_timestamp - pd.Timedelta(days=days_back)
+        return earliest_timestamp <= expected_start
