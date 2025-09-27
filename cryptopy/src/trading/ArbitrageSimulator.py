@@ -7,7 +7,6 @@ import pandas as pd
 from cryptopy import CointegrationCalculator, TradingOpportunities, RiverPredictor
 from cryptopy.src.trading.cache_utils import (
     PairAnalyticsCache,
-    precalculate_pair_analytics,
 )
 
 from cryptopy.scripts.simulations.simulation_helpers import (
@@ -101,7 +100,7 @@ class ArbitrageSimulator:
             return
 
         days_back = self.parameters.get("days_back", 0)
-        precalculate_pair_analytics(
+        PairAnalyticsCache.precalculate_pair_analytics(
             self.price_df, self.pair_combinations, days_back, self._pair_analytics_cache
         )
 
@@ -342,7 +341,10 @@ class ArbitrageSimulator:
         )
 
         if close_event:
-            if close_event.get("reason") in {"forecast_degraded", "forecast_confidence_drop"}:
+            if close_event.get("reason") in {
+                "forecast_degraded",
+                "forecast_confidence_drop",
+            }:
                 forecasted_profit = close_event.get("forecasted_profit")
                 forecast_exit = close_event.get("forecasted_exit_spread")
                 forecast_confidence = close_event.get("forecasted_confidence")
@@ -626,16 +628,25 @@ class ArbitrageSimulator:
         forecast_mean_path = spread_metrics.get("forecasted_mean_path")
         todays_spread_forecast = None
         todays_mean_forecast = None
-        if isinstance(forecast_spread_path, pd.DataFrame) and current_date in forecast_spread_path.index:
+        if (
+            isinstance(forecast_spread_path, pd.DataFrame)
+            and current_date in forecast_spread_path.index
+        ):
             todays_spread_forecast = (
                 forecast_spread_path.loc[current_date].dropna().to_dict()
             )
-        if isinstance(forecast_mean_path, pd.DataFrame) and current_date in forecast_mean_path.index:
-            todays_mean_forecast = forecast_mean_path.loc[current_date].dropna().to_dict()
+        if (
+            isinstance(forecast_mean_path, pd.DataFrame)
+            and current_date in forecast_mean_path.index
+        ):
+            todays_mean_forecast = (
+                forecast_mean_path.loc[current_date].dropna().to_dict()
+            )
         forecast_diff = None
         if todays_spread_forecast and todays_mean_forecast:
             forecast_diff = {
-                key: todays_spread_forecast.get(key) - todays_mean_forecast.get(key, math.nan)
+                key: todays_spread_forecast.get(key)
+                - todays_mean_forecast.get(key, math.nan)
                 for key in todays_spread_forecast
             }
         return {

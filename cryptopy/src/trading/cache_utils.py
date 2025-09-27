@@ -11,8 +11,7 @@ from cryptopy.scripts.simulations.simulation_helpers import filter_df
 
 
 class PairAnalyticsCache:
-
-    """Cache cointegration and spread analytics for pair/day combinations.
+    """Cache cointegration and spread analytics for pair/day combinations."""
 
     _SUMMARY_COLUMNS = [
         "pair_key",
@@ -66,7 +65,9 @@ class PairAnalyticsCache:
         else:
             df = pd.DataFrame(columns=self._SUMMARY_COLUMNS)
         if df.empty:
-            index = pd.MultiIndex(levels=[[], []], codes=[[], []], names=["pair_key", "date_key"])
+            index = pd.MultiIndex(
+                levels=[[], []], codes=[[], []], names=["pair_key", "date_key"]
+            )
             return pd.DataFrame(columns=self._SUMMARY_COLUMNS[2:], index=index)
         df = df[self._SUMMARY_COLUMNS]
         df = df.set_index(["pair_key", "date_key"])
@@ -95,13 +96,6 @@ class PairAnalyticsCache:
             return pd.to_datetime(date_key, format="%Y%m%d%H%M%S")
         except (ValueError, TypeError):
             return pd.Timestamp(date_key)
-
-def _persist_spreads(self) -> None:
-        self._spread_df.to_csv(self.spread_path, index=False)
-
-    def _persist(self) -> None:
-        self._persist_summary()
-        self._persist_spreads()
 
     def _get_spread_series(self, pair_key: str, date_key: str) -> Optional[pd.Series]:
         mask = (self._spread_df["pair_key"] == pair_key) & (
@@ -136,7 +130,9 @@ def _persist_spreads(self) -> None:
         if spread_series is None:
             return None
 
-        crit_values = summary_row[["crit_value_1", "crit_value_2", "crit_value_3"]].tolist()
+        crit_values = summary_row[
+            ["crit_value_1", "crit_value_2", "crit_value_3"]
+        ].tolist()
         crit_values = [value for value in crit_values if pd.notna(value)]
         crit_values_tuple = tuple(crit_values) if crit_values else None
 
@@ -187,7 +183,9 @@ def _persist_spreads(self) -> None:
             summary_data["spread_timestamp"] = timestamp.isoformat()
             summary_data["spread_value"] = float(valid_spread.iloc[-1])
 
-        new_summary_row = pd.DataFrame([summary_data]).set_index(["pair_key", "date_key"])
+        new_summary_row = pd.DataFrame([summary_data]).set_index(
+            ["pair_key", "date_key"]
+        )
         if (pair_key, date_key) in self._summary_df.index:
             self._summary_df = self._summary_df.drop(index=(pair_key, date_key))
         self._summary_df = pd.concat([self._summary_df, new_summary_row])
@@ -197,8 +195,13 @@ def _persist_spreads(self) -> None:
             {
                 "pair_key": pair_key,
                 "date_key": date_key,
-                "timestamp": [self._normalise_timestamp(idx).isoformat() for idx in spread.index],
-                "value": [float(value) if pd.notna(value) else float("nan") for value in spread.values],
+                "timestamp": [
+                    self._normalise_timestamp(idx).isoformat() for idx in spread.index
+                ],
+                "value": [
+                    float(value) if pd.notna(value) else float("nan")
+                    for value in spread.values
+                ],
             }
         )
 
@@ -247,29 +250,29 @@ def _persist_spreads(self) -> None:
             "spread": spread,
         }
 
+    @staticmethod
+    def precalculate_pair_analytics(
+        price_df: pd.DataFrame,
+        pair_combinations: list[Tuple[str, str]],
+        days_back: int,
+        cache: PairAnalyticsCache,
+    ) -> None:
+        """Pre-compute analytics for every pair/day combination."""
 
-def precalculate_pair_analytics(
-    price_df: pd.DataFrame,
-    pair_combinations: list[Tuple[str, str]],
-    days_back: int,
-    cache: PairAnalyticsCache,
-) -> None:
-    """Pre-compute analytics for every pair/day combination."""
+        index_slice = price_df.index[days_back:]
+        total_days = len(index_slice)
+        if total_days == 0:
+            return
 
-    index_slice = price_df.index[days_back:]
-    total_days = len(index_slice)
-    if total_days == 0:
-        return
+        progress_interval = max(1, math.ceil(total_days / 20))
 
-    progress_interval = max(1, math.ceil(total_days / 20))
+        for idx, current_date in enumerate(index_slice, start=1):
+            filtered_prices = filter_df(price_df, current_date, days_back)
+            for pair in pair_combinations:
+                cache.ensure(pair, current_date, filtered_prices)
 
-    for idx, current_date in enumerate(index_slice, start=1):
-        filtered_prices = filter_df(price_df, current_date, days_back)
-        for pair in pair_combinations:
-            cache.ensure(pair, current_date, filtered_prices)
-
-        if idx == 1 or idx % progress_interval == 0 or idx == total_days:
-            print(
-                "[PairAnalyticsCache] "
-                f"Processed {idx}/{total_days} dates (latest: {current_date})"
-            )
+            if idx == 1 or idx % progress_interval == 0 or idx == total_days:
+                print(
+                    "[PairAnalyticsCache] "
+                    f"Processed {idx}/{total_days} dates (latest: {current_date})"
+                )
