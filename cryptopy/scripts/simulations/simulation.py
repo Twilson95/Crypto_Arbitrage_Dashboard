@@ -31,7 +31,7 @@ parameters = {
     "volatility_period": 30,  # default 30
     "volatility_threshold": 999,  # default 1.5
     "max_each_coin": 999,  # default 3
-    "use_ml_predictor": True,
+    "use_ml_predictor": False,
     "trades_before_predictions": 100,  # default 100
     "trend_parameters": {
         "short_window": 30,
@@ -40,7 +40,8 @@ parameters = {
     },
     "expected_holding_days": 15,
     "borrow_rate_per_day": 0.002,
-    "precompute_pair_analytics": False,
+    "precompute_pair_analytics": True,
+    "analytics_cache_dir": f"../../../data/simulations/cached_cointegration_data/",
 }
 
 model_setup = (
