@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 
 import math
+import time
 import pandas as pd
 
 from cryptopy.src.arbitrage.CointegrationCalculator import CointegrationCalculator
@@ -22,7 +23,6 @@ class PairAnalyticsCache:
         "crit_value_1",
         "crit_value_2",
         "crit_value_3",
-        "spread_timestamp",
         "spread_value",
     ]
 
@@ -37,9 +37,30 @@ class PairAnalyticsCache:
         self.summary_path = self.cache_dir / "pair_analytics.csv"
         self._summary_df = self._load_summary_table()
         self.spread_path = self.cache_dir / "pair_spreads.csv"
-
-        self._summary_df = self._load_summary_table()
         self._spread_df = self._load_spread_table()
+
+    def _append_summary_rows(self, rows: pd.DataFrame) -> None:
+        if rows is None or rows.empty:
+            return
+        rows = rows[self._SUMMARY_COLUMNS]
+        header = not self.summary_path.exists() or self.summary_path.stat().st_size == 0
+        rows.to_csv(self.summary_path, mode="a", header=header, index=False)
+
+    def _rewrite_summary_csv(self) -> None:
+        summary_to_write = self._summary_df.reset_index()
+        summary_to_write = summary_to_write[self._SUMMARY_COLUMNS]
+        summary_to_write.to_csv(self.summary_path, index=False)
+
+    def _append_spread_rows(self, rows: pd.DataFrame) -> None:
+        if rows is None or rows.empty:
+            return
+        rows = rows[self._SPREAD_COLUMNS]
+        header = not self.spread_path.exists() or self.spread_path.stat().st_size == 0
+        rows.to_csv(self.spread_path, mode="a", header=header, index=False)
+
+    def _rewrite_spread_csv(self) -> None:
+        spread_to_write = self._spread_df[self._SPREAD_COLUMNS]
+        spread_to_write.to_csv(self.spread_path, index=False)
 
     @staticmethod
     def _pair_key(pair: Tuple[str, str]) -> str:
@@ -47,10 +68,7 @@ class PairAnalyticsCache:
 
     @staticmethod
     def _date_key(current_date) -> str:
-        timestamp = pd.Timestamp(current_date)
-        if timestamp.tzinfo is not None:
-            timestamp = timestamp.tz_convert(None)
-        return timestamp.strftime("%Y%m%d%H%M%S")
+        return PairAnalyticsCache._format_timestamp_for_storage(current_date)
 
     @staticmethod
     def _normalise_timestamp(value) -> pd.Timestamp:
@@ -58,6 +76,15 @@ class PairAnalyticsCache:
         if timestamp.tzinfo is not None:
             timestamp = timestamp.tz_convert(None)
         return timestamp
+
+    @staticmethod
+    def _format_timestamp_for_storage(value) -> str:
+        timestamp = pd.Timestamp(value)
+        if pd.isna(timestamp):
+            return ""
+        if timestamp.tzinfo is not None:
+            return timestamp.isoformat(sep=" ")
+        return timestamp.strftime("%Y-%m-%d %H:%M:%S")
 
     def _load_summary_table(self) -> pd.DataFrame:
         if self.summary_path.exists():
@@ -69,8 +96,23 @@ class PairAnalyticsCache:
                 levels=[[], []], codes=[[], []], names=["pair_key", "date_key"]
             )
             return pd.DataFrame(columns=self._SUMMARY_COLUMNS[2:], index=index)
+        df = df[[col for col in self._SUMMARY_COLUMNS if col in df.columns]].copy()
+        for column in self._SUMMARY_COLUMNS:
+            if column not in df.columns:
+                df[column] = pd.NA
         df = df[self._SUMMARY_COLUMNS]
         df = df.set_index(["pair_key", "date_key"])
+        pair_values = df.index.get_level_values("pair_key")
+        date_values = df.index.get_level_values("date_key")
+        formatted_dates = [
+            PairAnalyticsCache._format_timestamp_for_storage(
+                PairAnalyticsCache._timestamp_from_date_key(value)
+            )
+            for value in date_values
+        ]
+        df.index = pd.MultiIndex.from_arrays(
+            [pair_values, formatted_dates], names=["pair_key", "date_key"]
+        )
         return df
 
     def _load_spread_table(self) -> pd.DataFrame:
@@ -80,22 +122,45 @@ class PairAnalyticsCache:
             df = pd.DataFrame(columns=self._SPREAD_COLUMNS)
         if df.empty:
             return pd.DataFrame(columns=self._SPREAD_COLUMNS)
-        df = df[self._SPREAD_COLUMNS]
+        df = df[self._SPREAD_COLUMNS].copy()
+        df["date_key"] = df["date_key"].apply(
+            lambda value: PairAnalyticsCache._format_timestamp_for_storage(
+                PairAnalyticsCache._timestamp_from_date_key(value)
+            )
+        )
+        df["timestamp"] = df["timestamp"].apply(
+            lambda value: PairAnalyticsCache._format_timestamp_for_storage(
+                PairAnalyticsCache._timestamp_from_date_key(value)
+            )
+        )
         return df
 
-    def _persist_summary(self) -> None:
-        summary_to_write = self._summary_df.reset_index()
-        summary_to_write.to_csv(self.summary_path, index=False)
+    def _persist(
+        self,
+        *,
+        new_summary_rows: Optional[pd.DataFrame] = None,
+        new_spread_rows: Optional[pd.DataFrame] = None,
+        rewrite_summary: bool = False,
+        rewrite_spread: bool = False,
+    ) -> None:
+        if rewrite_summary:
+            self._rewrite_summary_csv()
+        elif new_summary_rows is not None:
+            self._append_summary_rows(new_summary_rows)
 
-    def _persist(self) -> None:
-        self._persist_summary()
+        if rewrite_spread:
+            self._rewrite_spread_csv()
+        elif new_spread_rows is not None:
+            self._append_spread_rows(new_spread_rows)
 
     @staticmethod
-    def _timestamp_from_date_key(date_key: str) -> pd.Timestamp:
-        try:
-            return pd.to_datetime(date_key, format="%Y%m%d%H%M%S")
-        except (ValueError, TypeError):
+    def _timestamp_from_date_key(date_key) -> pd.Timestamp:
+        timestamp = pd.to_datetime(date_key, errors="coerce")
+        if pd.isna(timestamp):
+            timestamp = pd.to_datetime(date_key, format="%Y%m%d%H%M%S", errors="coerce")
+        if pd.isna(timestamp):
             return pd.Timestamp(date_key)
+        return timestamp
 
     def _get_spread_series(self, pair_key: str, date_key: str) -> Optional[pd.Series]:
         mask = (self._spread_df["pair_key"] == pair_key) & (
@@ -119,12 +184,6 @@ class PairAnalyticsCache:
         spread_value = summary_row.get("spread_value")
         if pd.isna(spread_value):
             return None
-
-        timestamp_value = summary_row.get("spread_timestamp")
-        if pd.isna(timestamp_value):
-            timestamp = self._timestamp_from_date_key(date_key)
-        else:
-            timestamp = pd.Timestamp(timestamp_value)
 
         spread_series = self._get_spread_series(pair_key, date_key)
         if spread_series is None:
@@ -167,7 +226,6 @@ class PairAnalyticsCache:
             "crit_value_1": None,
             "crit_value_2": None,
             "crit_value_3": None,
-            "spread_timestamp": None,
             "spread_value": None,
         }
 
@@ -179,14 +237,13 @@ class PairAnalyticsCache:
         spread = spread.sort_index()
         valid_spread = spread.dropna()
         if not valid_spread.empty:
-            timestamp = self._normalise_timestamp(valid_spread.index[-1])
-            summary_data["spread_timestamp"] = timestamp.isoformat()
             summary_data["spread_value"] = float(valid_spread.iloc[-1])
 
         new_summary_row = pd.DataFrame([summary_data]).set_index(
             ["pair_key", "date_key"]
         )
-        if (pair_key, date_key) in self._summary_df.index:
+        summary_exists = (pair_key, date_key) in self._summary_df.index
+        if summary_exists:
             self._summary_df = self._summary_df.drop(index=(pair_key, date_key))
         self._summary_df = pd.concat([self._summary_df, new_summary_row])
 
@@ -196,7 +253,8 @@ class PairAnalyticsCache:
                 "pair_key": pair_key,
                 "date_key": date_key,
                 "timestamp": [
-                    self._normalise_timestamp(idx).isoformat() for idx in spread.index
+                    PairAnalyticsCache._format_timestamp_for_storage(idx)
+                    for idx in spread.index
                 ],
                 "value": [
                     float(value) if pd.notna(value) else float("nan")
@@ -208,11 +266,49 @@ class PairAnalyticsCache:
         mask = (self._spread_df["pair_key"] == pair_key) & (
             self._spread_df["date_key"] == date_key
         )
-        if mask.any():
+        spread_exists = mask.any()
+        if spread_exists:
             self._spread_df = self._spread_df.loc[~mask].copy()
         self._spread_df = pd.concat([self._spread_df, spread_df], ignore_index=True)
 
-        self._persist()
+        new_summary_rows = new_summary_row.reset_index()
+        new_spread_rows = spread_df[self._SPREAD_COLUMNS]
+        self._persist(
+            new_summary_rows=None if summary_exists else new_summary_rows,
+            new_spread_rows=None if spread_exists else new_spread_rows,
+            rewrite_summary=summary_exists,
+            rewrite_spread=spread_exists,
+        )
+
+    def _resume_checkpoint(
+        self, required_pairs: int
+    ) -> Optional[Tuple[pd.Timestamp, bool]]:
+        if required_pairs <= 0 or self._summary_df.empty:
+            return None
+
+        summary_index = self._summary_df.reset_index()[["pair_key", "date_key"]]
+        if summary_index.empty:
+            return None
+
+        summary_index["timestamp"] = summary_index["date_key"].apply(
+            self._timestamp_from_date_key
+        )
+        summary_index = summary_index.sort_values("timestamp")
+        pair_counts = summary_index.groupby("timestamp")["pair_key"].nunique()
+        if pair_counts.empty:
+            return None
+
+        incomplete_dates = pair_counts[pair_counts < required_pairs]
+        if not incomplete_dates.empty:
+            resume_timestamp = PairAnalyticsCache._normalise_timestamp(
+                incomplete_dates.index.min()
+            )
+            return resume_timestamp, True
+
+        resume_timestamp = PairAnalyticsCache._normalise_timestamp(
+            pair_counts.index.max()
+        )
+        return resume_timestamp, False
 
     def ensure(
         self,
@@ -263,12 +359,25 @@ class PairAnalyticsCache:
         """Pre-compute analytics for every pair/day combination."""
 
         index_slice = price_df.index[days_back:]
-        total_days = len(index_slice)
-        if total_days == 0:
+        if len(index_slice) == 0:
             return
 
-        # progress_interval = max(1, math.ceil(total_days / 20))
-        progress_interval = 1
+        resume_checkpoint = cache._resume_checkpoint(len(pair_combinations))
+        if resume_checkpoint is not None:
+            resume_timestamp, inclusive = resume_checkpoint
+            normalised_index = pd.Index(
+                [PairAnalyticsCache._normalise_timestamp(value) for value in index_slice]
+            )
+            if inclusive:
+                mask = normalised_index >= resume_timestamp
+            else:
+                mask = normalised_index > resume_timestamp
+            index_slice = index_slice[mask]
+            if len(index_slice) == 0:
+                return
+
+        total_days = len(index_slice)
+        progress_interval = max(1, math.ceil(total_days / 20))
 
         for idx, current_date in enumerate(index_slice, start=1):
             start_time = time.time()
