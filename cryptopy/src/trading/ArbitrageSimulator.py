@@ -5,6 +5,10 @@ import math
 import pandas as pd
 
 from cryptopy import CointegrationCalculator, TradingOpportunities, RiverPredictor
+from cryptopy.src.trading.cache_utils import (
+    PairAnalyticsCache,
+    precalculate_pair_analytics,
+)
 
 from cryptopy.scripts.simulations.simulation_helpers import (
     get_trade_profit,
@@ -28,6 +32,7 @@ class ArbitrageSimulator:
         pair_combinations,
         ml_model: Optional[RiverPredictor] = None,
         trades_before_prediction=100,
+        pair_analytics_cache: Optional[PairAnalyticsCache] = None,
     ):
         self.parameters = parameters
         self.price_df = price_df
@@ -41,6 +46,13 @@ class ArbitrageSimulator:
         self.open_opportunities = {}
         self.current_market_trend = None
         self._spread_metrics_cache = {}
+        if pair_analytics_cache is not None:
+            self._pair_analytics_cache = pair_analytics_cache
+        elif self.parameters.get("use_pair_analytics_cache", True):
+            cache_dir = self.parameters.get("analytics_cache_dir")
+            self._pair_analytics_cache = PairAnalyticsCache(cache_dir)
+        else:
+            self._pair_analytics_cache = None
         self._trend_parameters = self.parameters.get("trend_parameters", {})
 
         short_window = self._trend_parameters.get("short_window")
@@ -83,6 +95,15 @@ class ArbitrageSimulator:
         short_amount = position_size["short_position"].get("amount", 0.0)
         short_notional = short_amount * short_price
         return short_notional, short_price
+
+    def precalculate_pair_analytics(self):
+        if self._pair_analytics_cache is None:
+            return
+
+        days_back = self.parameters.get("days_back", 0)
+        precalculate_pair_analytics(
+            self.price_df, self.pair_combinations, days_back, self._pair_analytics_cache
+        )
 
     def run_simulation(self):
         days_back = self.parameters["days_back"]
@@ -244,18 +265,36 @@ class ArbitrageSimulator:
     def get_cointegration_and_spread_info(self, pair, price_df_filtered, current_date):
         currency_fees = {pair[0]: {"taker": 0.002}, pair[1]: {"taker": 0.002}}
 
-        coint_stat, p_value, crit_values = CointegrationCalculator.test_cointegration(
-            price_df_filtered, pair
-        )
-        if p_value is None:
-            return None
+        cached_analytics = None
+        if self._pair_analytics_cache is not None:
+            cached_analytics = self._pair_analytics_cache.ensure(
+                pair, current_date, price_df_filtered
+            )
+            if cached_analytics is None:
+                return None
+            p_value = cached_analytics["p_value"]
+            base_spread = cached_analytics["spread"]
+            base_hedge_ratio = cached_analytics["hedge_ratio"]
+        else:
+            coint_stat, p_value, _ = CointegrationCalculator.test_cointegration(
+                price_df_filtered, pair
+            )
+            if p_value is None:
+                return None
+            base_spread, base_hedge_ratio = CointegrationCalculator.calculate_spread(
+                price_df_filtered, pair
+            )
 
         open_event = self.portfolio_manager.get_open_trades(pair)
-        hedge_ratio = open_event["hedge_ratio"] if open_event else None
+        if open_event:
+            event_hedge_ratio = open_event.get("hedge_ratio")
+            spread, hedge_ratio = CointegrationCalculator.calculate_spread(
+                price_df_filtered, pair, event_hedge_ratio
+            )
+        else:
+            spread = base_spread
+            hedge_ratio = base_hedge_ratio
 
-        spread, hedge_ratio = CointegrationCalculator.calculate_spread(
-            price_df_filtered, pair, hedge_ratio
-        )
         spread_metrics = self._get_cached_spread_metrics(pair, current_date, spread)
         todays_spread_data = self.get_todays_spread_data(
             spread, current_date, spread_metrics
