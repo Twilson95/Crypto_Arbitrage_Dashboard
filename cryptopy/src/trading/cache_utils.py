@@ -218,14 +218,6 @@ class PairAnalyticsCache:
             }
         )
 
-        mask = (self._spread_df["pair_key"] == pair_key) & (
-            self._spread_df["date_key"] == date_key
-        )
-        spread_exists = mask.any()
-        if spread_exists:
-            self._spread_df = self._spread_df.loc[~mask].copy()
-        self._spread_df = pd.concat([self._spread_df, spread_df], ignore_index=True)
-
         new_summary_rows = new_summary_row.reset_index()
         self._persist(
             new_summary_rows=None if summary_exists else new_summary_rows,
@@ -332,7 +324,7 @@ class PairAnalyticsCache:
                 return
 
         total_days = len(index_slice)
-        progress_interval = max(1, math.ceil(total_days / 20))
+        progress_interval = 1
 
         for idx, current_date in enumerate(index_slice, start=1):
             start_time = time.time()
