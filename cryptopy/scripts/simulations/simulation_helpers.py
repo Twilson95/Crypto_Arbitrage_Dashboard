@@ -89,6 +89,8 @@ def get_trade_profit(
         usd_start=trade_amount,
         hedge_ratio=open_event["hedge_ratio"],
         exchange="test",
+        borrow_rate_per_day=open_event.get("borrow_rate_per_day", 0.0),
+        expected_holding_days=open_event.get("expected_holding_days", 0.0),
     )
     if arbitrage:
         profit = arbitrage.get("summary_header", {}).get("total_profit", 0)
@@ -123,7 +125,15 @@ def get_avg_price_difference(df, pair, hedge_ratio):
     return mean_prices1 / (mean_prices2 * hedge_ratio)
 
 
-def calculate_expected_profit(pair, open_event, position_size, currency_fees):
+def calculate_expected_profit(
+    pair,
+    open_event,
+    position_size,
+    currency_fees,
+    borrow_rate_per_day=None,
+    expected_holding_days=0.0,
+    short_notional=None,
+):
     spread_data = open_event["spread_data"]
     spread = spread_data["spread"]
     spread_mean = spread_data["spread_mean"]
@@ -132,7 +142,31 @@ def calculate_expected_profit(pair, open_event, position_size, currency_fees):
     bought_amount = position_size["long_position"]["amount"]
     if open_event["direction"] == "short":
         bought_amount /= open_event["hedge_ratio"]
-    return bought_amount * abs(spread - spread_mean) * (1 - fees)
+
+    expected_profit = bought_amount * abs(spread - spread_mean) * (1 - fees)
+
+    if short_notional is None:
+        short_notional = open_event.get("short_notional")
+
+    if borrow_rate_per_day is None:
+        borrow_rate_per_day = open_event.get("borrow_rate_per_day")
+
+    borrow_rate = borrow_rate_per_day or 0.0
+    holding_days = expected_holding_days or open_event.get("expected_holding_days") or 0.0
+
+    if short_notional is None:
+        short_entry_price = open_event.get("short_entry_price")
+        if short_entry_price is not None:
+            short_notional = (
+                position_size["short_position"]["amount"] * short_entry_price
+            )
+
+    if short_notional is None:
+        short_notional = 0.0
+
+    expected_profit -= borrow_rate * holding_days * short_notional
+
+    return expected_profit
 
 
 def get_bought_and_sold_amounts(df, pair, open_event, current_date, trade_size=100):

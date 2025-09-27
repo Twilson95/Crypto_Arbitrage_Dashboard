@@ -48,6 +48,8 @@ parameters = {
     "volatility_period": 30,
     "volatility_threshold": 1.5,  # default 1.5
     "max_each_coin": 3,
+    "expected_holding_days": 2,
+    "borrow_rate_per_day": 0.0,
 }
 
 folder_path = "../../../data/historical_data/Kraken_long_history"
@@ -168,8 +170,29 @@ for current_date in price_df.index[days_back:]:
             position_size = get_bought_and_sold_amounts(
                 price_df, pair, open_event, current_date, trade_size=trade_amount
             )
+            short_coin = position_size["short_position"]["coin"]
+
+            try:
+                short_price = float(price_df.at[current_date, short_coin])
+            except (KeyError, TypeError, ValueError):
+                short_price = None
+
+            if short_price is None or pd.isna(short_price):
+                short_notional = 0.0
+            else:
+                short_notional = position_size["short_position"]["amount"] * short_price
+
+            borrow_rate_per_day = parameters.get("borrow_rate_per_day", 0.0)
+            expected_holding_days = parameters.get("expected_holding_days", 0.0)
+
             expected_profit = calculate_expected_profit(
-                pair, open_event, position_size, currency_fees
+                pair,
+                open_event,
+                position_size,
+                currency_fees,
+                borrow_rate_per_day=borrow_rate_per_day,
+                expected_holding_days=expected_holding_days,
+                short_notional=short_notional,
             )
 
             print(f"{pair} expected profit: {expected_profit:.2f}")
@@ -193,6 +216,10 @@ for current_date in price_df.index[days_back:]:
             open_event["position_size"] = position_size
             open_event["trade_amount"] = trade_amount
             open_event["expected_profit"] = expected_profit
+            open_event["expected_holding_days"] = expected_holding_days
+            open_event["borrow_rate_per_day"] = borrow_rate_per_day
+            open_event["short_notional"] = short_notional
+            open_event["short_entry_price"] = short_price
             open_event["hedge_ratio"] = hedge_ratio
             open_event["spread_data"] = todays_spread_data
 

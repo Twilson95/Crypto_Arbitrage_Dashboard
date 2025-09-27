@@ -1,5 +1,7 @@
 /data/
 /cryptopy/config/
+/cryptopy/**/__pycache__/
+__pycache__/
 /Crypto_Dashboard.egg-info/dependency_links.txt
 /Crypto_Dashboard.egg-info/PKG-INFO
 /Crypto_Dashboard.egg-info/SOURCES.txt

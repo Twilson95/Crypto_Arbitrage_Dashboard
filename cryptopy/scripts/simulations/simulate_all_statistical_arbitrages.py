@@ -43,6 +43,8 @@ parameters = {
     "volatility_period": 100,
     "volatility_threshold": 1.5,  # default 1.5
     "max_each_coin": 2,
+    "expected_holding_days": 2,
+    "borrow_rate_per_day": 0.0,
 }
 
 price_df = get_combined_df_of_data(historic_data_folder, "close")
@@ -142,9 +144,29 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
             position_sizes = get_bought_and_sold_amounts(
                 price_df, pair, open_event, current_date, trade_size=100
             )
+            short_coin = position_sizes["short_position"]["coin"]
+
+            try:
+                short_price = float(price_df.at[current_date, short_coin])
+            except (KeyError, TypeError, ValueError):
+                short_price = None
+
+            if short_price is None or pd.isna(short_price):
+                short_notional = 0.0
+            else:
+                short_notional = position_sizes["short_position"]["amount"] * short_price
+
+            borrow_rate_per_day = parameters.get("borrow_rate_per_day", 0.0)
+            expected_holding_days = parameters.get("expected_holding_days", 0.0)
 
             expected_profit = calculate_expected_profit(
-                pair, open_event, position_sizes, currency_fees
+                pair,
+                open_event,
+                position_sizes,
+                currency_fees,
+                borrow_rate_per_day=borrow_rate_per_day,
+                expected_holding_days=expected_holding_days,
+                short_notional=short_notional,
             )
             print(f"{pair} expected profit: {expected_profit:.2f}")
             if (
@@ -163,6 +185,10 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
 
             open_event["p_value"] = p_value
             open_event["expected_profit"] = expected_profit
+            open_event["expected_holding_days"] = expected_holding_days
+            open_event["borrow_rate_per_day"] = borrow_rate_per_day
+            open_event["short_notional"] = short_notional
+            open_event["short_entry_price"] = short_price
             open_event["spread_data"] = todays_spread_data
             open_event["volume_ratio"] = volume_ratio
             open_event["volatility_ratio"] = volatility_ratio
