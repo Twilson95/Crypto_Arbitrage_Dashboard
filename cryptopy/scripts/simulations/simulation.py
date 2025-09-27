@@ -26,13 +26,12 @@ parameters = {
     "max_expected_profit": 0.025,  # no more at risk as 5% percent of the portfolio amount
     "trade_size": 0.05,  # proportion of portfolio bought in each trade - default 0.06
     "trade_size_same_risk": True,
-    "expected_holding_period": 5,
     "volume_period": 30,  # default 30
     "volume_threshold": 999,  # default 2
     "volatility_period": 30,  # default 30
     "volatility_threshold": 999,  # default 1.5
     "max_each_coin": 999,  # default 3
-    "use_ml_predictor": True,
+    "use_ml_predictor": False,
     "trades_before_predictions": 100,  # default 100
     "trend_parameters": {
         "short_window": 30,
@@ -41,7 +40,8 @@ parameters = {
     },
     "expected_holding_days": 15,
     "borrow_rate_per_day": 0.002,
-    "precompute_pair_analytics": False,
+    "precompute_pair_analytics": True,
+    "analytics_cache_dir": f"../../../data/simulations/cached_cointegration_data/",
 }
 
 model_setup = (

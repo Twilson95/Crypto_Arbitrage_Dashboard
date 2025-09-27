@@ -189,7 +189,7 @@ class StatisticalArbitrage:
             borrow_rate_per_day=borrow_rate_per_day,
             expected_holding_days=expected_holding_days,
             short_notional=short_notional,
-            expected_exit_spread,
+            expected_exit_spread=expected_exit_spread,
         )
 
         # Create waterfall and summary data

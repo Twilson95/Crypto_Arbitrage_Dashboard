@@ -39,8 +39,7 @@ parameters = {
     "volatility_period": 30,
     "volatility_threshold": 1.5,
     "max_each_coin": 2,
-    "expected_holding_days": 2,
-    "expected_holding_period": 5,
+    "expected_holding_days": 15,
     "borrow_rate_per_day": 0.0,
 }
 

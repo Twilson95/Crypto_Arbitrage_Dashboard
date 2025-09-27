@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 
 import math
-
 import pandas as pd
 
 from cryptopy.src.arbitrage.CointegrationCalculator import CointegrationCalculator
@@ -12,7 +11,8 @@ from cryptopy.scripts.simulations.simulation_helpers import filter_df
 
 
 class PairAnalyticsCache:
-    """Cache cointegration and spread analytics for pair/day combinations."""
+
+    """Cache cointegration and spread analytics for pair/day combinations.
 
     _SUMMARY_COLUMNS = [
         "pair_key",
@@ -27,6 +27,8 @@ class PairAnalyticsCache:
         "spread_value",
     ]
 
+    _SPREAD_COLUMNS = ["pair_key", "date_key", "timestamp", "value"]
+
     def __init__(self, cache_dir: Optional[Path | str] = None):
         if cache_dir is None:
             cache_dir = Path(".cache") / "pair_analytics"
@@ -34,8 +36,11 @@ class PairAnalyticsCache:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.summary_path = self.cache_dir / "pair_analytics.csv"
+        self._summary_df = self._load_summary_table()
+        self.spread_path = self.cache_dir / "pair_spreads.csv"
 
         self._summary_df = self._load_summary_table()
+        self._spread_df = self._load_spread_table()
 
     @staticmethod
     def _pair_key(pair: Tuple[str, str]) -> str:
@@ -67,6 +72,16 @@ class PairAnalyticsCache:
         df = df.set_index(["pair_key", "date_key"])
         return df
 
+    def _load_spread_table(self) -> pd.DataFrame:
+        if self.spread_path.exists():
+            df = pd.read_csv(self.spread_path)
+        else:
+            df = pd.DataFrame(columns=self._SPREAD_COLUMNS)
+        if df.empty:
+            return pd.DataFrame(columns=self._SPREAD_COLUMNS)
+        df = df[self._SPREAD_COLUMNS]
+        return df
+
     def _persist_summary(self) -> None:
         summary_to_write = self._summary_df.reset_index()
         summary_to_write.to_csv(self.summary_path, index=False)
@@ -80,6 +95,25 @@ class PairAnalyticsCache:
             return pd.to_datetime(date_key, format="%Y%m%d%H%M%S")
         except (ValueError, TypeError):
             return pd.Timestamp(date_key)
+
+def _persist_spreads(self) -> None:
+        self._spread_df.to_csv(self.spread_path, index=False)
+
+    def _persist(self) -> None:
+        self._persist_summary()
+        self._persist_spreads()
+
+    def _get_spread_series(self, pair_key: str, date_key: str) -> Optional[pd.Series]:
+        mask = (self._spread_df["pair_key"] == pair_key) & (
+            self._spread_df["date_key"] == date_key
+        )
+        spread_rows = self._spread_df.loc[mask]
+        if spread_rows.empty:
+            return None
+        spread_rows = spread_rows.sort_values("timestamp")
+        index = pd.to_datetime(spread_rows["timestamp"].tolist())
+        values = spread_rows["value"].astype(float).tolist()
+        return pd.Series(values, index=index)
 
     def load(self, pair: Tuple[str, str], current_date) -> Optional[Dict[str, Any]]:
         pair_key = self._pair_key(pair)
@@ -97,7 +131,10 @@ class PairAnalyticsCache:
             timestamp = self._timestamp_from_date_key(date_key)
         else:
             timestamp = pd.Timestamp(timestamp_value)
-        spread_series = pd.Series([float(spread_value)], index=[timestamp])
+
+        spread_series = self._get_spread_series(pair_key, date_key)
+        if spread_series is None:
+            return None
 
         crit_values = summary_row[["crit_value_1", "crit_value_2", "crit_value_3"]].tolist()
         crit_values = [value for value in crit_values if pd.notna(value)]
@@ -154,6 +191,23 @@ class PairAnalyticsCache:
         if (pair_key, date_key) in self._summary_df.index:
             self._summary_df = self._summary_df.drop(index=(pair_key, date_key))
         self._summary_df = pd.concat([self._summary_df, new_summary_row])
+
+        spread = spread.sort_index()
+        spread_df = pd.DataFrame(
+            {
+                "pair_key": pair_key,
+                "date_key": date_key,
+                "timestamp": [self._normalise_timestamp(idx).isoformat() for idx in spread.index],
+                "value": [float(value) if pd.notna(value) else float("nan") for value in spread.values],
+            }
+        )
+
+        mask = (self._spread_df["pair_key"] == pair_key) & (
+            self._spread_df["date_key"] == date_key
+        )
+        if mask.any():
+            self._spread_df = self._spread_df.loc[~mask].copy()
+        self._spread_df = pd.concat([self._spread_df, spread_df], ignore_index=True)
 
         self._persist()
 
