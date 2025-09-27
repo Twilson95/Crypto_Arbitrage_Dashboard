@@ -41,6 +41,7 @@ parameters = {
     },
     "expected_holding_days": 15,
     "borrow_rate_per_day": 0.002,
+    "precompute_pair_analytics": False,
 }
 
 model_setup = (
@@ -85,6 +86,10 @@ arbitrage_simulator = ArbitrageSimulator(
     ml_model=river_predictor,
     trades_before_prediction=parameters["trades_before_predictions"],
 )
+
+if parameters.get("precompute_pair_analytics"):
+    print("Pre-computing pair analytics cache...")
+    arbitrage_simulator.precalculate_pair_analytics()
 
 # trade_results, cumulative_profit = arbitrage_simulator.run_simulation()
 
