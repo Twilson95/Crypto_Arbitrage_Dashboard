@@ -1,3 +1,7 @@
+import math
+
+import pandas as pd
+
 from cryptopy import CointegrationCalculator, TradingOpportunities, RiverPredictor
 
 from cryptopy.scripts.simulations.simulation_helpers import (
@@ -264,6 +268,15 @@ class ArbitrageSimulator:
         )
 
         if close_event:
+            if close_event.get("reason") in {"forecast_degraded", "forecast_confidence_drop"}:
+                forecasted_profit = close_event.get("forecasted_profit")
+                forecast_exit = close_event.get("forecasted_exit_spread")
+                forecast_confidence = close_event.get("forecasted_confidence")
+                print(
+                    f"{pair} closing early due to {close_event['reason']}: "
+                    f"forecasted profit {forecasted_profit}, "
+                    f"forecasted exit {forecast_exit}, confidence {forecast_confidence}"
+                )
             profit = get_trade_profit(
                 open_event,
                 close_event,
@@ -334,6 +347,77 @@ class ArbitrageSimulator:
             pair, new_open_event, position_size, currency_fees
         )
 
+        expected_exit_spread = new_open_event.get("expected_exit_spread_value")
+        if expected_exit_spread is None:
+            expected_exit_spread = new_open_event.get("expected_exit_spread")
+        half_life = new_open_event.get("convergence_half_life")
+        confidence = new_open_event.get("convergence_confidence")
+        decay_factor = new_open_event.get("convergence_decay_factor")
+        phi = new_open_event.get("convergence_phi")
+        intercept = new_open_event.get("convergence_intercept")
+        forecast_diff = new_open_event.get("forecast_spread_minus_mean")
+
+        exit_str = "N/A"
+        if expected_exit_spread is not None:
+            try:
+                exit_value = float(expected_exit_spread)
+                if not math.isnan(exit_value):
+                    exit_str = f"{exit_value:.6f}"
+            except (TypeError, ValueError):
+                pass
+
+        half_life_str = "N/A"
+        if half_life is not None:
+            try:
+                half_life_value = float(half_life)
+                if not math.isnan(half_life_value):
+                    half_life_str = f"{half_life_value:.2f}"
+            except (TypeError, ValueError):
+                pass
+
+        confidence_str = "N/A"
+        if confidence is not None:
+            try:
+                confidence_value = float(confidence)
+                if not math.isnan(confidence_value):
+                    confidence_str = f"{confidence_value:.2f}"
+            except (TypeError, ValueError):
+                pass
+
+        decay_str = "N/A"
+        if decay_factor is not None:
+            try:
+                decay_value = float(decay_factor)
+                if not math.isnan(decay_value):
+                    decay_str = f"{decay_value:.4f}"
+            except (TypeError, ValueError):
+                pass
+
+        phi_str = "N/A"
+        if phi is not None:
+            try:
+                phi_value = float(phi)
+                if not math.isnan(phi_value):
+                    phi_str = f"{phi_value:.4f}"
+            except (TypeError, ValueError):
+                pass
+
+        intercept_str = "N/A"
+        if intercept is not None:
+            try:
+                intercept_value = float(intercept)
+                if not math.isnan(intercept_value):
+                    intercept_str = f"{intercept_value:.6f}"
+            except (TypeError, ValueError):
+                pass
+
+        print(
+            f"{pair} convergence forecast -> expected exit spread: {exit_str}, "
+            f"half-life: {half_life_str}, confidence: {confidence_str}, "
+            f"decay factor: {decay_str}, phi: {phi_str}, intercept: {intercept_str}"
+        )
+        if forecast_diff:
+            print(f"{pair} forecast spread minus mean: {forecast_diff}")
         print(f"{pair} expected profit: {expected_profit:.2f}")
         if not self.is_profit_in_range(expected_profit, current_funds):
             print("Not within expected profit range")
@@ -360,6 +444,10 @@ class ArbitrageSimulator:
                 "spread_data": todays_spread_data,
                 "volume_ratio": volume_ratio,
                 "volatility_ratio": volatility_ratio,
+                "fee_rate": (
+                    currency_fees[pair[0]]["taker"] * 2
+                    + currency_fees[pair[1]]["taker"] * 2
+                ),
             }
         )
 
@@ -435,6 +523,30 @@ class ArbitrageSimulator:
         todays_spread = filter_list(spread, current_date)
         todays_spread_mean = filter_list(spread_metrics["spread_mean"], current_date)
         todays_spread_std = filter_list(spread_metrics["spread_std"], current_date)
+        expected_exit_mean = filter_list(
+            spread_metrics["expected_mean_at_exit"], current_date
+        )
+        expected_exit_spread = filter_list(
+            spread_metrics["expected_spread_at_exit"], current_date
+        )
+        if expected_exit_mean is None:
+            expected_exit_mean = todays_spread_mean
+        forecast_spread_path = spread_metrics.get("forecasted_spread_path")
+        forecast_mean_path = spread_metrics.get("forecasted_mean_path")
+        todays_spread_forecast = None
+        todays_mean_forecast = None
+        if isinstance(forecast_spread_path, pd.DataFrame) and current_date in forecast_spread_path.index:
+            todays_spread_forecast = (
+                forecast_spread_path.loc[current_date].dropna().to_dict()
+            )
+        if isinstance(forecast_mean_path, pd.DataFrame) and current_date in forecast_mean_path.index:
+            todays_mean_forecast = forecast_mean_path.loc[current_date].dropna().to_dict()
+        forecast_diff = None
+        if todays_spread_forecast and todays_mean_forecast:
+            forecast_diff = {
+                key: todays_spread_forecast.get(key) - todays_mean_forecast.get(key, math.nan)
+                for key in todays_spread_forecast
+            }
         return {
             "date": current_date,
             "spread": todays_spread,
@@ -448,6 +560,16 @@ class ArbitrageSimulator:
                 spread_metrics["lower_threshold"], current_date
             ),
             "lower_limit": filter_list(spread_metrics["lower_limit"], current_date),
+            "expected_spread_mean_at_exit": expected_exit_mean,
+            "expected_exit_spread": expected_exit_spread,
+            "convergence_half_life": spread_metrics.get("convergence_half_life"),
+            "convergence_confidence": spread_metrics.get("convergence_confidence"),
+            "convergence_decay_factor": spread_metrics.get("convergence_decay_factor"),
+            "convergence_phi": spread_metrics.get("convergence_phi"),
+            "convergence_intercept": spread_metrics.get("convergence_intercept"),
+            "forecasted_spread_path": todays_spread_forecast,
+            "forecasted_mean_path": todays_mean_forecast,
+            "forecast_spread_minus_mean": forecast_diff,
             "spread_deviation": abs(todays_spread - todays_spread_mean)
             / todays_spread_std,
         }

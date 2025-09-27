@@ -21,8 +21,18 @@ class StatisticalArbitrage:
         coin1_fee = currency_fees[pair1]["taker"]
         coin2_fee = currency_fees[pair2]["taker"]
 
-        entry_time, entry_spread, entry_type = entry
-        exit_time, exit_spread = exit
+        if len(entry) >= 4:
+            entry_time, entry_spread, entry_type, expected_exit_spread = entry
+        else:
+            entry_time, entry_spread, entry_type = entry
+            expected_exit_spread = None
+
+        if len(exit) >= 3:
+            exit_time, exit_spread, exit_expected_spread = exit
+            if expected_exit_spread is None:
+                expected_exit_spread = exit_expected_spread
+        else:
+            exit_time, exit_spread = exit
 
         if hedge_ratio is None:
             raise ValueError("hedge_ratio must be provided for statistical arbitrage")
@@ -163,6 +173,7 @@ class StatisticalArbitrage:
             hedge_ratio,
             entry_spread,
             exit_spread,
+            expected_exit_spread,
         )
 
         # Create waterfall and summary data
@@ -462,6 +473,7 @@ class StatisticalArbitrage:
         hedge_ratio,
         entry_spread,
         exit_spread,
+        expected_exit_spread=None,
     ):
         # if exit_price_coin1 is None:
         #     return 0
@@ -476,7 +488,13 @@ class StatisticalArbitrage:
         if direction == "short":
             bought_amount *= hedge_ratio
 
-        return bought_amount * abs(entry_spread - exit_spread)
+        target_spread = expected_exit_spread
+        if target_spread is None:
+            target_spread = exit_spread
+        if target_spread is None:
+            target_spread = entry_spread
+
+        return bought_amount * abs(entry_spread - target_spread)
 
     @staticmethod
     def identify_all_statistical_arbitrage(

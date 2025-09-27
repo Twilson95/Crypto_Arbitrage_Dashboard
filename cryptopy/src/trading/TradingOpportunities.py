@@ -38,6 +38,34 @@ class TradingOpportunities:
                     "direction": "short",
                     "avg_price_ratio": avg_price_ratio,
                     "stop_loss": short_stop_loss,
+                    "expected_exit_spread": todays_spread_data.get(
+                        "expected_spread_mean_at_exit"
+                    ),
+                    "expected_exit_spread_value": todays_spread_data.get(
+                        "expected_exit_spread"
+                    ),
+                    "convergence_half_life": todays_spread_data.get(
+                        "convergence_half_life"
+                    ),
+                    "convergence_confidence": todays_spread_data.get(
+                        "convergence_confidence"
+                    ),
+                    "convergence_decay_factor": todays_spread_data.get(
+                        "convergence_decay_factor"
+                    ),
+                    "convergence_phi": todays_spread_data.get("convergence_phi"),
+                    "convergence_intercept": todays_spread_data.get(
+                        "convergence_intercept"
+                    ),
+                    "forecasted_spread_path": todays_spread_data.get(
+                        "forecasted_spread_path"
+                    ),
+                    "forecasted_mean_path": todays_spread_data.get(
+                        "forecasted_mean_path"
+                    ),
+                    "forecast_spread_minus_mean": todays_spread_data.get(
+                        "forecast_spread_minus_mean"
+                    ),
                 }
             elif lower_limit < spread < lower_threshold:
                 long_stop_loss = (
@@ -50,6 +78,34 @@ class TradingOpportunities:
                     "direction": "long",
                     "avg_price_ratio": avg_price_ratio,
                     "stop_loss": long_stop_loss,
+                    "expected_exit_spread": todays_spread_data.get(
+                        "expected_spread_mean_at_exit"
+                    ),
+                    "expected_exit_spread_value": todays_spread_data.get(
+                        "expected_exit_spread"
+                    ),
+                    "convergence_half_life": todays_spread_data.get(
+                        "convergence_half_life"
+                    ),
+                    "convergence_confidence": todays_spread_data.get(
+                        "convergence_confidence"
+                    ),
+                    "convergence_decay_factor": todays_spread_data.get(
+                        "convergence_decay_factor"
+                    ),
+                    "convergence_phi": todays_spread_data.get("convergence_phi"),
+                    "convergence_intercept": todays_spread_data.get(
+                        "convergence_intercept"
+                    ),
+                    "forecasted_spread_path": todays_spread_data.get(
+                        "forecasted_spread_path"
+                    ),
+                    "forecasted_mean_path": todays_spread_data.get(
+                        "forecasted_mean_path"
+                    ),
+                    "forecast_spread_minus_mean": todays_spread_data.get(
+                        "forecast_spread_minus_mean"
+                    ),
                 }
         return None
 
@@ -87,6 +143,12 @@ class TradingOpportunities:
                 "spread_data": todays_data,
                 "reason": "expired",
             }
+
+        forecast_close = TradingOpportunities._evaluate_forecast_exit(
+            todays_data, parameters, open_event
+        )
+        if forecast_close:
+            return forecast_close
 
         if open_event["direction"] == "short" and spread < spread_mean:
             return {
@@ -131,6 +193,67 @@ class TradingOpportunities:
                 "date": current_date,
                 "spread_data": todays_data,
                 "reason": "non-profitable",
+            }
+
+        return None
+
+    @staticmethod
+    def _evaluate_forecast_exit(todays_data, parameters, open_event):
+        current_date = todays_data["date"]
+        spread = todays_data.get("spread")
+        expected_exit = todays_data.get("expected_exit_spread")
+        if expected_exit is None:
+            expected_exit = todays_data.get("expected_spread_mean_at_exit")
+        if expected_exit is None:
+            expected_exit = todays_data.get("spread_mean")
+
+        if spread is None or expected_exit is None:
+            return None
+
+        position_size = open_event.get("position_size")
+        if not position_size:
+            return None
+
+        long_position = position_size.get("long_position", {})
+        bought_amount = long_position.get("amount")
+        if bought_amount is None:
+            return None
+
+        hedge_ratio = open_event.get("hedge_ratio", 1)
+        if open_event.get("direction") == "short" and hedge_ratio:
+            bought_amount /= hedge_ratio
+
+        fee_rate = open_event.get("fee_rate", 0.0) or 0.0
+        forecasted_profit = bought_amount * abs(spread - expected_exit) * (1 - fee_rate)
+
+        min_expected_ratio = parameters.get(
+            "min_expected_profit_to_hold", parameters.get("min_expected_profit", 0.0)
+        )
+        trade_amount = open_event.get("trade_amount", 0.0)
+        threshold = trade_amount * min_expected_ratio
+
+        confidence_floor = parameters.get("min_convergence_confidence", None)
+        confidence = todays_data.get("convergence_confidence")
+
+        if confidence_floor is not None and confidence is not None:
+            if confidence < confidence_floor:
+                return {
+                    "date": current_date,
+                    "spread_data": todays_data,
+                    "reason": "forecast_confidence_drop",
+                    "forecasted_profit": forecasted_profit,
+                    "forecasted_exit_spread": expected_exit,
+                    "forecasted_confidence": confidence,
+                }
+
+        if forecasted_profit < threshold:
+            return {
+                "date": current_date,
+                "spread_data": todays_data,
+                "reason": "forecast_degraded",
+                "forecasted_profit": forecasted_profit,
+                "forecasted_exit_spread": expected_exit,
+                "forecasted_confidence": confidence,
             }
 
         return None

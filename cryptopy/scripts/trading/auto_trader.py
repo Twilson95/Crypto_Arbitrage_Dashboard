@@ -34,6 +34,7 @@ parameters = {
     "trade_size": 0.06,  # amount of portfolio to buy during each trade
     "min_expected_profit": 0.006,  # must expect at least half a percent of the portfolio amount
     "max_expected_profit": 0.030,  # no more at risk as 5% percent of the portfolio amount
+    "expected_holding_period": 5,
     "volume_period": 30,
     "volume_threshold": 2,
     "volatility_period": 30,
@@ -233,6 +234,18 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
         if portfolio_manager.already_hold_coin_position(position_size):
             print("Already hold position in one of the coins")
             continue
+
+        open_event.update(
+            {
+                "position_size": position_size,
+                "trade_amount": trade_amount,
+                "fee_rate": (
+                    currency_fees[pair[0]]["taker"] * 2
+                    + currency_fees[pair[1]]["taker"] * 2
+                ),
+                "expected_profit": expected_profit,
+            }
+        )
 
         open_trade = {
             "pair": pair,
