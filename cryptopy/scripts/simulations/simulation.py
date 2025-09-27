@@ -6,7 +6,7 @@ from cryptopy.scripts.simulations.simulation_helpers import get_combined_df_of_d
 
 simulation_name = "long_history_perceptron"
 exchange_name = "Kraken"
-historic_data_folder = f"../../../data/historical_data/{exchange_name}_long_history/"
+historic_data_folder = f"../../../data/historical_data/{exchange_name}/"
 cointegration_pairs_path = f"../../../data/historical_data/cointegration_pairs.csv"
 simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
 
@@ -39,6 +39,8 @@ parameters = {
         "long_window": 100,
         "change_threshold": 0.01,
     },
+    "expected_holding_days": 15,
+    "borrow_rate_per_day": 0.002,
 }
 
 model_setup = (
@@ -83,7 +85,42 @@ arbitrage_simulator = ArbitrageSimulator(
     ml_model=river_predictor,
     trades_before_prediction=parameters["trades_before_predictions"],
 )
+
+# trade_results, cumulative_profit = arbitrage_simulator.run_simulation()
+
+import cProfile
+import pstats
+import io
+
+print("=== Starting simulation ===")
+
+# start profiler
+pr = cProfile.Profile()
+pr.enable()
+
+# your code will keep printing / logging as usual
 trade_results, cumulative_profit = arbitrage_simulator.run_simulation()
+
+# stop profiler
+pr.disable()
+
+print("=== Simulation finished ===")
+print(f"Trades: {len(trade_results)} | Cumulative profit: {cumulative_profit}")
+
+# ---- print *all* profiling data to the console ----
+print("=== FULL PROFILING REPORT (all functions) ===")
+s = io.StringIO()
+ps = pstats.Stats(pr, stream=s)  # no strip_dirs(), no filters
+ps.sort_stats("cumulative")  # you can change to "time", "calls", etc.
+ps.print_stats()  # <-- prints all rows
+print(s.getvalue())
+
+# ---- optionally save the report to a file as well ----
+with open("full_profile_report.txt", "w") as f:
+    f.write(s.getvalue())
+
+print("Full profiler output saved to full_profile_report.txt")
+
 
 total_profit = sum(result["profit"] for result in trade_results)
 number_of_trades = len(trade_results)

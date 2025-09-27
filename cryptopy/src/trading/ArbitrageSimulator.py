@@ -1,3 +1,5 @@
+import time
+
 import math
 
 import pandas as pd
@@ -51,24 +53,57 @@ class ArbitrageSimulator:
             self._short_ma = None
             self._long_ma = None
 
+    def _get_expected_holding_days(self):
+        return self.parameters.get("expected_holding_days", 0.0)
+
+    def _get_borrow_rate_per_day(self):
+        return self.parameters.get("borrow_rate_per_day", 0.0)
+
+    def _get_price_at(self, symbol, current_date):
+        if symbol is None:
+            return None
+
+        try:
+            price = self.price_df.at[current_date, symbol]
+        except KeyError:
+            return None
+
+        try:
+            return float(price)
+        except (TypeError, ValueError):
+            return None
+
+    def _compute_short_position_metrics(self, position_size, current_date):
+        short_symbol = position_size["short_position"].get("coin")
+        short_price = self._get_price_at(short_symbol, current_date)
+
+        if short_price is None:
+            return 0.0, None
+
+        short_amount = position_size["short_position"].get("amount", 0.0)
+        short_notional = short_amount * short_price
+        return short_notional, short_price
+
     def run_simulation(self):
         days_back = self.parameters["days_back"]
 
         for current_date in self.price_df.index[days_back:]:
+            start_time = time.time()
             self.simulate_day(current_date, days_back)
             cumulative_profit = self.portfolio_manager.get_cumulative_profit()
+            end_time = time.time()
 
             print(
                 f"\n-----------------------------------------------------\n"
                 f"Date: {current_date} \n"
                 f"Open Trades: {self.portfolio_manager.traded_pairs} \n"
                 f"Total Profit {cumulative_profit:.2f} \n"
+                f"Time: {end_time - start_time:.2f}secs"
             )
 
         all_trades = self.portfolio_manager.get_all_trade_events()
         cumulative_profit = self.portfolio_manager.get_cumulative_profit()
         return all_trades, cumulative_profit
-        # return self.all_trades, self.cumulative_profit
 
     def simulate_day(self, current_date, days_back):
         daily_opportunities, closed_trades = self.find_daily_opportunities(
@@ -343,8 +378,21 @@ class ArbitrageSimulator:
         position_size = get_bought_and_sold_amounts(
             self.price_df, pair, new_open_event, current_date, trade_size=trade_amount
         )
+        short_notional, short_entry_price = self._compute_short_position_metrics(
+            position_size, current_date
+        )
+
+        borrow_rate_per_day = self._get_borrow_rate_per_day()
+        expected_holding_days = self._get_expected_holding_days()
+
         expected_profit = calculate_expected_profit(
-            pair, new_open_event, position_size, currency_fees
+            pair,
+            new_open_event,
+            position_size,
+            currency_fees,
+            borrow_rate_per_day=borrow_rate_per_day,
+            expected_holding_days=expected_holding_days,
+            short_notional=short_notional,
         )
 
         expected_exit_spread = new_open_event.get("expected_exit_spread_value")
@@ -444,6 +492,10 @@ class ArbitrageSimulator:
                 "spread_data": todays_spread_data,
                 "volume_ratio": volume_ratio,
                 "volatility_ratio": volatility_ratio,
+                "expected_holding_days": expected_holding_days,
+                "borrow_rate_per_day": borrow_rate_per_day,
+                "short_notional": short_notional,
+                "short_entry_price": short_entry_price,
                 "fee_rate": (
                     currency_fees[pair[0]]["taker"] * 2
                     + currency_fees[pair[1]]["taker"] * 2
