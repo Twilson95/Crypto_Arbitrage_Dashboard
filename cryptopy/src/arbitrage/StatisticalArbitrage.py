@@ -23,8 +23,18 @@ class StatisticalArbitrage:
         coin1_fee = currency_fees[pair1]["taker"]
         coin2_fee = currency_fees[pair2]["taker"]
 
-        entry_time, entry_spread, entry_type = entry
-        exit_time, exit_spread = exit
+        if len(entry) >= 4:
+            entry_time, entry_spread, entry_type, expected_exit_spread = entry
+        else:
+            entry_time, entry_spread, entry_type = entry
+            expected_exit_spread = None
+
+        if len(exit) >= 3:
+            exit_time, exit_spread, exit_expected_spread = exit
+            if expected_exit_spread is None:
+                expected_exit_spread = exit_expected_spread
+        else:
+            exit_time, exit_spread = exit
 
         if hedge_ratio is None:
             raise ValueError("hedge_ratio must be provided for statistical arbitrage")
@@ -179,6 +189,7 @@ class StatisticalArbitrage:
             borrow_rate_per_day=borrow_rate_per_day,
             expected_holding_days=expected_holding_days,
             short_notional=short_notional,
+            expected_exit_spread,
         )
 
         # Create waterfall and summary data
@@ -493,6 +504,7 @@ class StatisticalArbitrage:
         borrow_rate_per_day=None,
         expected_holding_days=0.0,
         short_notional=None,
+        expected_exit_spread=None,
     ):
         # if exit_price_coin1 is None:
         #     return 0
@@ -510,6 +522,13 @@ class StatisticalArbitrage:
         if direction == "short":
             bought_amount *= hedge_ratio
 
+        target_spread = expected_exit_spread
+        if target_spread is None:
+            target_spread = exit_spread
+        if target_spread is None:
+            target_spread = entry_spread
+
+        return bought_amount * abs(entry_spread - target_spread)
         spread_diff = 0.0
         if entry_spread is not None and exit_spread is not None:
             spread_diff = abs(entry_spread - exit_spread)

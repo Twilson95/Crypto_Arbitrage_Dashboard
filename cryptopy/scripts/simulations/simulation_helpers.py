@@ -1,9 +1,11 @@
 from cryptopy import StatisticalArbitrage
+from cryptopy.src.helpers.convergence import ConvergenceForecaster
 import os
 import pandas as pd
 import json
 import datetime
 import glob
+import numpy as np
 
 
 def read_historic_data_long_term(pair, historic_data_folder):
@@ -23,8 +25,6 @@ def filter_df(df, current_date, days_back):
 def filter_list(list_data, date):
     todays_data = list_data.loc[date] if date in list_data.index else None
     return todays_data
-
-
 def compute_spread_metrics(parameters, spread):
     rolling_window = parameters["rolling_window"]
     spread_mean = spread.rolling(window=rolling_window).mean()
@@ -38,6 +38,21 @@ def compute_spread_metrics(parameters, spread):
     upper_spread_limit = spread_mean + upper_spread_threshold * spread_std
     lower_spread_limit = spread_mean - upper_spread_threshold * spread_std
 
+    holding_period = max(int(round(parameters.get("expected_holding_period", 5))), 0)
+    convergence_window = parameters.get("convergence_lookback", rolling_window * 3)
+    forecaster = ConvergenceForecaster(rolling_window, holding_period, convergence_window)
+    forecast = forecaster.forecast(spread)
+
+    expected_exit_mean = forecast.expected_exit_mean
+    expected_exit_spread = forecast.expected_exit_spread
+    decay_factor = forecast.decay_factor
+    convergence_half_life = forecast.half_life
+    convergence_confidence = forecast.confidence
+    convergence_phi = forecast.phi
+    convergence_intercept = forecast.intercept
+    spread_paths = forecast.spread_paths
+    mean_paths = forecast.mean_paths
+
     return {
         "spread_mean": spread_mean,
         "spread_std": spread_std,
@@ -45,6 +60,15 @@ def compute_spread_metrics(parameters, spread):
         "lower_threshold": lower_threshold,
         "upper_limit": upper_spread_limit,
         "lower_limit": lower_spread_limit,
+        "expected_mean_at_exit": expected_exit_mean,
+        "expected_spread_at_exit": expected_exit_spread,
+        "convergence_half_life": convergence_half_life,
+        "convergence_confidence": convergence_confidence,
+        "convergence_decay_factor": decay_factor,
+        "convergence_phi": convergence_phi,
+        "convergence_intercept": convergence_intercept,
+        "forecasted_spread_path": spread_paths,
+        "forecasted_mean_path": mean_paths,
     }
 
 
@@ -55,6 +79,30 @@ def get_todays_spread_data(parameters, spread, current_date, spread_metrics=None
     todays_spread = filter_list(spread, current_date)
     todays_spread_mean = filter_list(spread_metrics["spread_mean"], current_date)
     todays_spread_std = filter_list(spread_metrics["spread_std"], current_date)
+    expected_exit_mean = filter_list(
+        spread_metrics["expected_mean_at_exit"], current_date
+    )
+    expected_exit_spread = filter_list(
+        spread_metrics["expected_spread_at_exit"], current_date
+    )
+    if expected_exit_mean is None:
+        expected_exit_mean = todays_spread_mean
+    forecast_spread_path = spread_metrics.get("forecasted_spread_path")
+    forecast_mean_path = spread_metrics.get("forecasted_mean_path")
+    todays_spread_forecast = None
+    todays_mean_forecast = None
+    if isinstance(forecast_spread_path, pd.DataFrame) and current_date in forecast_spread_path.index:
+        todays_spread_forecast = (
+            forecast_spread_path.loc[current_date].dropna().to_dict()
+        )
+    if isinstance(forecast_mean_path, pd.DataFrame) and current_date in forecast_mean_path.index:
+        todays_mean_forecast = forecast_mean_path.loc[current_date].dropna().to_dict()
+    forecast_diff = None
+    if todays_spread_forecast and todays_mean_forecast:
+        forecast_diff = {
+            key: todays_spread_forecast.get(key) - todays_mean_forecast.get(key, np.nan)
+            for key in todays_spread_forecast
+        }
     return {
         "date": current_date,
         "spread": todays_spread,
@@ -64,6 +112,16 @@ def get_todays_spread_data(parameters, spread, current_date, spread_metrics=None
         "upper_limit": filter_list(spread_metrics["upper_limit"], current_date),
         "lower_threshold": filter_list(spread_metrics["lower_threshold"], current_date),
         "lower_limit": filter_list(spread_metrics["lower_limit"], current_date),
+        "expected_spread_mean_at_exit": expected_exit_mean,
+        "expected_exit_spread": expected_exit_spread,
+        "convergence_half_life": spread_metrics.get("convergence_half_life"),
+        "convergence_confidence": spread_metrics.get("convergence_confidence"),
+        "convergence_decay_factor": spread_metrics.get("convergence_decay_factor"),
+        "convergence_phi": spread_metrics.get("convergence_phi"),
+        "convergence_intercept": spread_metrics.get("convergence_intercept"),
+        "forecasted_spread_path": todays_spread_forecast,
+        "forecasted_mean_path": todays_mean_forecast,
+        "forecast_spread_minus_mean": forecast_diff,
         "spread_deviation": abs(todays_spread - todays_spread_mean) / todays_spread_std,
     }
 
@@ -81,6 +139,7 @@ def get_trade_profit(
             open_event["date"],
             open_event["spread_data"]["spread"],
             open_event["direction"],
+            open_event.get("expected_exit_spread"),
         ),
         exit=(close_event["date"], close_event["spread_data"]["spread"]),
         pairs=pair,
@@ -136,14 +195,20 @@ def calculate_expected_profit(
 ):
     spread_data = open_event["spread_data"]
     spread = spread_data["spread"]
-    spread_mean = spread_data["spread_mean"]
+    expected_exit = spread_data.get("expected_exit_spread")
+    if expected_exit is None or pd.isna(expected_exit):
+        expected_exit = spread_data.get("expected_spread_mean_at_exit")
+    if expected_exit is None or pd.isna(expected_exit):
+        expected_exit = spread_data.get("spread_mean")
+    if spread is None or expected_exit is None or pd.isna(spread):
+        return 0.0
 
     fees = currency_fees[pair[0]]["taker"] * 2 + currency_fees[pair[1]]["taker"] * 2
     bought_amount = position_size["long_position"]["amount"]
     if open_event["direction"] == "short":
         bought_amount /= open_event["hedge_ratio"]
 
-    expected_profit = bought_amount * abs(spread - spread_mean) * (1 - fees)
+    expected_profit = bought_amount * abs(spread - expected_exit) * (1 - fees)
 
     if short_notional is None:
         short_notional = open_event.get("short_notional")

@@ -40,6 +40,7 @@ parameters = {
     "volatility_threshold": 1.5,
     "max_each_coin": 2,
     "expected_holding_days": 2,
+    "expected_holding_period": 5,
     "borrow_rate_per_day": 0.0,
 }
 
@@ -261,6 +262,18 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
         open_event["borrow_rate_per_day"] = borrow_rate_per_day
         open_event["short_notional"] = short_notional
         open_event["short_entry_price"] = short_price
+
+        open_event.update(
+            {
+                "position_size": position_size,
+                "trade_amount": trade_amount,
+                "fee_rate": (
+                    currency_fees[pair[0]]["taker"] * 2
+                    + currency_fees[pair[1]]["taker"] * 2
+                ),
+                "expected_profit": expected_profit,
+            }
+        )
 
         open_trade = {
             "pair": pair,
