@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 
@@ -27,8 +26,6 @@ class PairAnalyticsCache:
         "spread_value",
     ]
 
-    _LEGACY_SPREAD_COLUMNS = ["pair_key", "date_key", "timestamp", "value"]
-
     def __init__(self, cache_dir: Optional[Path | str] = None):
         if cache_dir is None:
             cache_dir = Path(".cache") / "pair_analytics"
@@ -37,13 +34,6 @@ class PairAnalyticsCache:
 
         self.summary_path = self.cache_dir / "pair_analytics.csv"
         self._summary_df = self._load_summary_table()
-        self._pending_summary_rows: list[pd.DataFrame] = []
-        self._summary_needs_rewrite = bool(
-            getattr(self, "_summary_missing_columns_on_load", [])
-        )
-        legacy_spread_df = self._load_legacy_spread_table()
-        if legacy_spread_df is not None:
-            self._merge_legacy_spread_table(legacy_spread_df)
 
     def _append_summary_rows(self, rows: pd.DataFrame) -> None:
         if rows is None or rows.empty:
@@ -56,6 +46,17 @@ class PairAnalyticsCache:
         summary_to_write = self._summary_df.reset_index()
         summary_to_write = summary_to_write[self._SUMMARY_COLUMNS]
         summary_to_write.to_csv(self.summary_path, index=False)
+
+    def _append_spread_rows(self, rows: pd.DataFrame) -> None:
+        if rows is None or rows.empty:
+            return
+        rows = rows[self._SPREAD_COLUMNS]
+        header = not self.spread_path.exists() or self.spread_path.stat().st_size == 0
+        rows.to_csv(self.spread_path, mode="a", header=header, index=False)
+
+    def _rewrite_spread_csv(self) -> None:
+        spread_to_write = self._spread_df[self._SPREAD_COLUMNS]
+        spread_to_write.to_csv(self.spread_path, index=False)
 
     @staticmethod
     def _pair_key(pair: Tuple[str, str]) -> str:
@@ -87,28 +88,15 @@ class PairAnalyticsCache:
         else:
             df = pd.DataFrame(columns=self._SUMMARY_COLUMNS)
         if df.empty:
-            missing_columns = [
-                column for column in self._SUMMARY_COLUMNS if column not in df.columns
-            ]
-            self._summary_missing_columns_on_load = missing_columns
             index = pd.MultiIndex(
                 levels=[[], []], codes=[[], []], names=["pair_key", "date_key"]
             )
             return pd.DataFrame(columns=self._SUMMARY_COLUMNS[2:], index=index)
-        # migrate legacy spread_json column into a simple scalar value
-        if "spread_json" in df.columns and "spread_value" not in df.columns:
-            df["spread_value"] = df["spread_json"].apply(
-                PairAnalyticsCache._extract_spread_value_from_json
-            )
-
         df = df[[col for col in self._SUMMARY_COLUMNS if col in df.columns]].copy()
-        missing_columns = [
-            column for column in self._SUMMARY_COLUMNS if column not in df.columns
-        ]
-        for column in missing_columns:
-            df[column] = pd.NA
+        for column in self._SUMMARY_COLUMNS:
+            if column not in df.columns:
+                df[column] = pd.NA
         df = df[self._SUMMARY_COLUMNS]
-        self._summary_missing_columns_on_load = missing_columns
         df = df.set_index(["pair_key", "date_key"])
         pair_values = df.index.get_level_values("pair_key")
         date_values = df.index.get_level_values("date_key")
@@ -123,109 +111,18 @@ class PairAnalyticsCache:
         )
         return df
 
-    def _load_legacy_spread_table(self) -> Optional[pd.DataFrame]:
-        legacy_path = self.cache_dir / "pair_spreads.csv"
-        if not legacy_path.exists():
-            return None
-
-        df = pd.read_csv(legacy_path)
-        if df.empty:
-            return pd.DataFrame(columns=self._LEGACY_SPREAD_COLUMNS)
-
-        df = df[
-            [col for col in self._LEGACY_SPREAD_COLUMNS if col in df.columns]
-        ].copy()
-        for column in self._LEGACY_SPREAD_COLUMNS:
-            if column not in df.columns:
-                df[column] = pd.NA
-
-        df = df[self._LEGACY_SPREAD_COLUMNS]
-        df["date_key"] = df["date_key"].apply(
-            lambda value: PairAnalyticsCache._format_timestamp_for_storage(
-                PairAnalyticsCache._timestamp_from_date_key(value)
-            )
-        )
-        df["timestamp"] = df["timestamp"].apply(
-            lambda value: PairAnalyticsCache._format_timestamp_for_storage(
-                PairAnalyticsCache._timestamp_from_date_key(value)
-            )
-        )
-        return df
-
-    def _merge_legacy_spread_table(self, spread_df: pd.DataFrame) -> None:
-        if spread_df.empty:
-            return
-
-        updates_performed = False
-        grouped = spread_df.groupby(["pair_key", "date_key"], dropna=False)
-        for (pair_key, date_key), group in grouped:
-            if pd.isna(pair_key) or pd.isna(date_key):
-                continue
-
-            group = group.sort_values("timestamp")
-            spread_value_series = group["value"].dropna()
-            spread_value = (
-                float(spread_value_series.iloc[-1])
-                if not spread_value_series.empty
-                else None
-            )
-
-            summary_index = (pair_key, date_key)
-
-            if summary_index not in self._summary_df.index:
-                summary_data = {column: pd.NA for column in self._SUMMARY_COLUMNS[2:]}
-                if spread_value is not None:
-                    summary_data["spread_value"] = spread_value
-                new_row = pd.DataFrame(
-                    [summary_data],
-                    index=pd.MultiIndex.from_tuples(
-                        [summary_index], names=["pair_key", "date_key"]
-                    ),
-                )
-                self._summary_df = pd.concat([self._summary_df, new_row])
-                updates_performed = True
-                continue
-
-            existing_row = self._summary_df.loc[summary_index]
-            if spread_value is not None and (
-                pd.isna(existing_row.get("spread_value"))
-                or existing_row.get("spread_value") != spread_value
-            ):
-                self._summary_df.loc[summary_index, "spread_value"] = spread_value
-                updates_performed = True
-
-        if updates_performed:
-            self._summary_df = self._summary_df.sort_index()
-            self._summary_needs_rewrite = True
-
     def _persist(
         self,
         *,
         new_summary_rows: Optional[pd.DataFrame] = None,
+        new_spread_rows: Optional[pd.DataFrame] = None,
         rewrite_summary: bool = False,
+        rewrite_spread: bool = False,
     ) -> None:
         if rewrite_summary:
             self._rewrite_summary_csv()
         elif new_summary_rows is not None:
             self._append_summary_rows(new_summary_rows)
-
-    def flush(self) -> None:
-        """Persist any buffered updates to disk."""
-
-        if self._pending_summary_rows:
-            new_summary_rows = pd.concat(
-                self._pending_summary_rows, ignore_index=True
-            )
-        else:
-            new_summary_rows = None
-
-        self._persist(
-            new_summary_rows=new_summary_rows,
-            rewrite_summary=self._summary_needs_rewrite,
-        )
-
-        self._pending_summary_rows.clear()
-        self._summary_needs_rewrite = False
 
     @staticmethod
     def _timestamp_from_date_key(date_key) -> pd.Timestamp:
@@ -235,35 +132,6 @@ class PairAnalyticsCache:
         if pd.isna(timestamp):
             return pd.Timestamp(date_key)
         return timestamp
-
-    @staticmethod
-    def _extract_spread_value_from_json(value: Any) -> Optional[float]:
-        if value is None or (isinstance(value, float) and pd.isna(value)):
-            return None
-        if isinstance(value, str):
-            try:
-                records = json.loads(value)
-            except Exception:  # pragma: no cover - defensive for corrupted rows
-                return None
-        else:
-            records = value
-
-        if not isinstance(records, list):
-            return None
-
-        last_value = None
-        for record in records:
-            if not isinstance(record, dict):
-                continue
-            value_obj = record.get("value")
-            if value_obj is None or pd.isna(value_obj):
-                continue
-            try:
-                last_value = float(value_obj)
-            except (TypeError, ValueError):
-                continue
-
-        return last_value
 
     def load(self, pair: Tuple[str, str], current_date) -> Optional[Dict[str, Any]]:
         pair_key = self._pair_key(pair)
@@ -287,7 +155,7 @@ class PairAnalyticsCache:
             "hedge_ratio": summary_row.get("hedge_ratio"),
             "coint_stat": summary_row.get("coint_stat"),
             "crit_values": crit_values_tuple,
-            "spread_value": spread_value,
+            "spread": spread_value,
         }
 
     def store(
@@ -334,10 +202,35 @@ class PairAnalyticsCache:
             self._summary_df = self._summary_df.drop(index=(pair_key, date_key))
         self._summary_df = pd.concat([self._summary_df, new_summary_row])
 
+        spread = spread.sort_index()
+        spread_df = pd.DataFrame(
+            {
+                "pair_key": pair_key,
+                "date_key": date_key,
+                "timestamp": [
+                    PairAnalyticsCache._format_timestamp_for_storage(idx)
+                    for idx in spread.index
+                ],
+                "value": [
+                    float(value) if pd.notna(value) else float("nan")
+                    for value in spread.values
+                ],
+            }
+        )
+
+        mask = (self._spread_df["pair_key"] == pair_key) & (
+            self._spread_df["date_key"] == date_key
+        )
+        spread_exists = mask.any()
+        if spread_exists:
+            self._spread_df = self._spread_df.loc[~mask].copy()
+        self._spread_df = pd.concat([self._spread_df, spread_df], ignore_index=True)
+
         new_summary_rows = new_summary_row.reset_index()
-        self._pending_summary_rows.append(new_summary_rows)
-        if summary_exists:
-            self._summary_needs_rewrite = True
+        self._persist(
+            new_summary_rows=None if summary_exists else new_summary_rows,
+            rewrite_summary=summary_exists,
+        )
 
     def _resume_checkpoint(
         self, required_pairs: int
@@ -374,25 +267,13 @@ class PairAnalyticsCache:
         pair: Tuple[str, str],
         current_date,
         price_df_filtered: pd.DataFrame,
-        *,
-        auto_flush: bool = True,
     ) -> Optional[Dict[str, Any]]:
         if not self._has_complete_window(price_df_filtered, current_date):
             return None
 
         cached = self.load(pair, current_date)
         if cached is not None:
-            hedge_ratio = cached.get("hedge_ratio")
-            if hedge_ratio is None or pd.isna(hedge_ratio):
-                cached = None
-            else:
-                spread, _ = CointegrationCalculator.calculate_spread(
-                    price_df_filtered, pair, hedge_ratio
-                )
-                cached["spread"] = spread
-                if auto_flush:
-                    self.flush()
-                return cached
+            return cached
 
         coint_stat, p_value, crit_values = CointegrationCalculator.test_cointegration(
             price_df_filtered, pair
@@ -412,15 +293,12 @@ class PairAnalyticsCache:
             coint_stat=coint_stat,
             crit_values=crit_values,
         )
-        if auto_flush:
-            self.flush()
         return {
             "p_value": p_value,
             "hedge_ratio": hedge_ratio,
             "coint_stat": coint_stat,
             "crit_values": crit_values,
             "spread": spread,
-            "spread_value": float(spread.dropna().iloc[-1]) if not spread.dropna().empty else None,
         }
 
     @staticmethod
@@ -440,7 +318,10 @@ class PairAnalyticsCache:
         if resume_checkpoint is not None:
             resume_timestamp, inclusive = resume_checkpoint
             normalised_index = pd.Index(
-                [PairAnalyticsCache._normalise_timestamp(value) for value in index_slice]
+                [
+                    PairAnalyticsCache._normalise_timestamp(value)
+                    for value in index_slice
+                ]
             )
             if inclusive:
                 mask = normalised_index >= resume_timestamp
@@ -453,28 +334,21 @@ class PairAnalyticsCache:
         total_days = len(index_slice)
         progress_interval = max(1, math.ceil(total_days / 20))
 
-        try:
-            for idx, current_date in enumerate(index_slice, start=1):
-                start_time = time.time()
-                filtered_prices = filter_df(price_df, current_date, days_back)
-                if not cache._has_complete_window(
-                    filtered_prices, current_date, days_back
-                ):
-                    continue
-                for pair in pair_combinations:
-                    cache.ensure(pair, current_date, filtered_prices, auto_flush=False)
+        for idx, current_date in enumerate(index_slice, start=1):
+            start_time = time.time()
+            filtered_prices = filter_df(price_df, current_date, days_back)
+            if not cache._has_complete_window(filtered_prices, current_date, days_back):
+                continue
+            for pair in pair_combinations:
+                cache.ensure(pair, current_date, filtered_prices)
 
-                cache.flush()
-
-                if idx == 1 or idx % progress_interval == 0 or idx == total_days:
-                    end_time = time.time()
-                    time_taken = end_time - start_time
-                    print(
-                        "[PairAnalyticsCache] "
-                        f"Processed {idx}/{total_days} dates (latest: {current_date}) time: {time_taken:.2f}"
-                    )
-        finally:
-            cache.flush()
+            if idx == 1 or idx % progress_interval == 0 or idx == total_days:
+                end_time = time.time()
+                time_taken = end_time - start_time
+                print(
+                    "[PairAnalyticsCache] "
+                    f"Processed {idx}/{total_days} dates (latest: {current_date}) time: {time_taken:.2f}"
+                )
 
     @staticmethod
     def _has_complete_window(
