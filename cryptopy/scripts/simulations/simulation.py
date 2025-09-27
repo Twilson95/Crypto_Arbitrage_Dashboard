@@ -38,6 +38,7 @@ parameters = {
         "long_window": 100,
         "change_threshold": 0.01,
     },
+    "expected_holding_days": 2,
 }
 
 model_setup = (

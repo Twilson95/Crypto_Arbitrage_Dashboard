@@ -49,6 +49,37 @@ class ArbitrageSimulator:
             self._short_ma = None
             self._long_ma = None
 
+    def _get_expected_holding_days(self):
+        return self.parameters.get("expected_holding_days", 0.0)
+
+    def _get_borrow_rate_per_day(self):
+        return self.parameters.get("borrow_rate_per_day", 0.0)
+
+    def _get_price_at(self, symbol, current_date):
+        if symbol is None:
+            return None
+
+        try:
+            price = self.price_df.at[current_date, symbol]
+        except KeyError:
+            return None
+
+        try:
+            return float(price)
+        except (TypeError, ValueError):
+            return None
+
+    def _compute_short_position_metrics(self, position_size, current_date):
+        short_symbol = position_size["short_position"].get("coin")
+        short_price = self._get_price_at(short_symbol, current_date)
+
+        if short_price is None:
+            return 0.0, None
+
+        short_amount = position_size["short_position"].get("amount", 0.0)
+        short_notional = short_amount * short_price
+        return short_notional, short_price
+
     def run_simulation(self):
         days_back = self.parameters["days_back"]
 
@@ -334,8 +365,21 @@ class ArbitrageSimulator:
         position_size = get_bought_and_sold_amounts(
             self.price_df, pair, new_open_event, current_date, trade_size=trade_amount
         )
+        short_notional, short_entry_price = self._compute_short_position_metrics(
+            position_size, current_date
+        )
+
+        borrow_rate_per_day = self._get_borrow_rate_per_day()
+        expected_holding_days = self._get_expected_holding_days()
+
         expected_profit = calculate_expected_profit(
-            pair, new_open_event, position_size, currency_fees
+            pair,
+            new_open_event,
+            position_size,
+            currency_fees,
+            borrow_rate_per_day=borrow_rate_per_day,
+            expected_holding_days=expected_holding_days,
+            short_notional=short_notional,
         )
 
         print(f"{pair} expected profit: {expected_profit:.2f}")
@@ -364,6 +408,10 @@ class ArbitrageSimulator:
                 "spread_data": todays_spread_data,
                 "volume_ratio": volume_ratio,
                 "volatility_ratio": volatility_ratio,
+                "expected_holding_days": expected_holding_days,
+                "borrow_rate_per_day": borrow_rate_per_day,
+                "short_notional": short_notional,
+                "short_entry_price": short_entry_price,
             }
         )
 

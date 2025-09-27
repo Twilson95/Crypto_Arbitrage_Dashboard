@@ -39,6 +39,8 @@ parameters = {
     "volatility_period": 30,
     "volatility_threshold": 1.5,
     "max_each_coin": 2,
+    "expected_holding_days": 2,
+    "borrow_rate_per_day": 0.0,
 }
 
 with open("cryptopy/config/trading_config.yaml", "r") as f:
@@ -214,8 +216,29 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
             current_date,
             trade_size=trade_amount,
         )
+        short_coin = position_size["short_position"]["coin"]
+
+        try:
+            short_price = float(historical_prices.at[current_date, short_coin])
+        except (KeyError, TypeError, ValueError):
+            short_price = None
+
+        if short_price is None or pd.isna(short_price):
+            short_notional = 0.0
+        else:
+            short_notional = position_size["short_position"]["amount"] * short_price
+
+        borrow_rate_per_day = parameters.get("borrow_rate_per_day", 0.0)
+        expected_holding_days = parameters.get("expected_holding_days", 0.0)
+
         expected_profit = calculate_expected_profit(
-            pair, open_event, position_size, currency_fees
+            pair,
+            open_event,
+            position_size,
+            currency_fees,
+            borrow_rate_per_day=borrow_rate_per_day,
+            expected_holding_days=expected_holding_days,
+            short_notional=short_notional,
         )
         print(f"{pair} expected profit: {expected_profit:.2f}")
         if (
@@ -233,6 +256,11 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
         if portfolio_manager.already_hold_coin_position(position_size):
             print("Already hold position in one of the coins")
             continue
+
+        open_event["expected_holding_days"] = expected_holding_days
+        open_event["borrow_rate_per_day"] = borrow_rate_per_day
+        open_event["short_notional"] = short_notional
+        open_event["short_entry_price"] = short_price
 
         open_trade = {
             "pair": pair,

@@ -13,6 +13,8 @@ class StatisticalArbitrage:
         usd_start,
         hedge_ratio,
         exchange,
+        borrow_rate_per_day=0.0,
+        expected_holding_days=0.0,
     ):
         # print(pairs, hedge_ratio)
         pair1, pair2 = pairs
@@ -127,6 +129,7 @@ class StatisticalArbitrage:
             usd_after_buy_cover,
             coin2_fees_usd,
             coin2_profit,
+            short_notional,
         ) = StatisticalArbitrage.handle_short_and_cover_coin(
             entry_price_coin2,
             exit_price_coin2,
@@ -137,10 +140,20 @@ class StatisticalArbitrage:
             amount_buy_coin1,
         )
 
-        if coin1_profit is not None:
-            total_profit = coin1_profit + coin2_profit
-        else:
-            total_profit = 0
+        borrow_rate = borrow_rate_per_day or 0.0
+        short_notional = short_notional or 0.0
+
+        actual_holding_days = 0.0
+        if exit_time is not None and entry_time is not None:
+            holding_delta = exit_time - entry_time
+            try:
+                actual_holding_days = abs(holding_delta.total_seconds()) / 86400
+            except AttributeError:
+                actual_holding_days = abs(holding_delta) / 86400
+
+        realized_carry = borrow_rate * actual_holding_days * short_notional
+
+        total_profit = (coin1_profit or 0.0) + (coin2_profit or 0.0) - realized_carry
 
         # Combine instructions from both trades
         combined_instructions = [
@@ -163,6 +176,9 @@ class StatisticalArbitrage:
             hedge_ratio,
             entry_spread,
             exit_spread,
+            borrow_rate_per_day=borrow_rate_per_day,
+            expected_holding_days=expected_holding_days,
+            short_notional=short_notional,
         )
 
         # Create waterfall and summary data
@@ -175,6 +191,7 @@ class StatisticalArbitrage:
             pair2,
             exchange,
             exit_time,
+            realized_carry,
         )
 
         # Combine all data into a single dictionary for this opportunity
@@ -184,6 +201,8 @@ class StatisticalArbitrage:
             "waterfall_data": waterfall_data,
             "instructions": combined_instructions,
             "path": [("USD", pair1), (pair1, pair2), (pair2, "USD")],
+            "borrow_costs": realized_carry,
+            "actual_holding_days": actual_holding_days,
         }
 
     @staticmethod
@@ -278,6 +297,8 @@ class StatisticalArbitrage:
         )  # Amount you receive from selling short
         change_in_usd_sell_short = -fees_sell_coin * entry_price  # Deduct fees from USD
 
+        short_notional = amount_sell_coin * entry_price
+
         sell_short_instruction = {
             "instruction": "sell short",
             "from_exchange": exchange,
@@ -298,6 +319,7 @@ class StatisticalArbitrage:
                 None,
                 fees_sell_coin * entry_price,
                 None,
+                short_notional,
             )
 
         # Exit: Buy to cover Coin (buy back the coin to cover the short)
@@ -344,6 +366,7 @@ class StatisticalArbitrage:
             to_usd,
             total_fees_usd,
             profit,
+            short_notional,
         )
 
     @staticmethod
@@ -429,8 +452,9 @@ class StatisticalArbitrage:
         pair2,
         exchange,
         exit_time,
+        borrow_costs=0.0,
     ):
-        total_fees = coin1_fees_usd + coin2_fees_usd
+        total_fees = coin1_fees_usd + coin2_fees_usd + borrow_costs
 
         if exit_time is not None:
             potential_profit = total_profit + total_fees
@@ -443,10 +467,14 @@ class StatisticalArbitrage:
             "Coin-2 Fees": -coin2_fees_usd,
         }
 
+        if borrow_costs:
+            waterfall_data["Borrow/Funding Costs"] = -borrow_costs
+
         summary_header = {
             "total_profit": total_profit,
             "coins_used": [pair1.split("/")[0], pair2.split("/")[0]],
             "exchanges_used": exchange,
+            "borrow_costs": borrow_costs,
         }
 
         return waterfall_data, summary_header
@@ -462,6 +490,9 @@ class StatisticalArbitrage:
         hedge_ratio,
         entry_spread,
         exit_spread,
+        borrow_rate_per_day=None,
+        expected_holding_days=0.0,
+        short_notional=None,
     ):
         # if exit_price_coin1 is None:
         #     return 0
@@ -471,12 +502,37 @@ class StatisticalArbitrage:
         # ) + ((usd_start / entry_price_coin1) * hedge_ratio) * (
         #     entry_price_coin2 - exit_price_coin2
         # )
+        if entry_price_coin1 is None:
+            return 0
+
         bought_amount = usd_start / entry_price_coin1
 
         if direction == "short":
             bought_amount *= hedge_ratio
 
-        return bought_amount * abs(entry_spread - exit_spread)
+        spread_diff = 0.0
+        if entry_spread is not None and exit_spread is not None:
+            spread_diff = abs(entry_spread - exit_spread)
+
+        potential_profit = bought_amount * spread_diff
+
+        if short_notional is None:
+            if (
+                entry_price_coin2 is not None
+                and hedge_ratio is not None
+                and entry_price_coin2 != 0
+            ):
+                long_amount = usd_start / entry_price_coin1
+                short_amount = long_amount * hedge_ratio
+                short_notional = short_amount * entry_price_coin2
+            else:
+                short_notional = 0.0
+
+        borrow_rate = borrow_rate_per_day or 0.0
+        expected_days = expected_holding_days or 0.0
+        potential_profit -= borrow_rate * expected_days * (short_notional or 0.0)
+
+        return potential_profit
 
     @staticmethod
     def identify_all_statistical_arbitrage(
