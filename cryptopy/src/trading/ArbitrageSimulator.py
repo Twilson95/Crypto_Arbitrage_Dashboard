@@ -681,6 +681,14 @@ class ArbitrageSimulator:
                 - todays_mean_forecast.get(key, math.nan)
                 for key in todays_spread_forecast
             }
+        spread_deviation = None
+        if (
+            todays_spread is not None
+            and todays_spread_mean is not None
+            and todays_spread_std not in (None, 0)
+        ):
+            spread_deviation = abs(todays_spread - todays_spread_mean) / todays_spread_std
+
         return {
             "date": current_date,
             "spread": todays_spread,
@@ -704,8 +712,7 @@ class ArbitrageSimulator:
             "forecasted_spread_path": todays_spread_forecast,
             "forecasted_mean_path": todays_mean_forecast,
             "forecast_spread_minus_mean": forecast_diff,
-            "spread_deviation": abs(todays_spread - todays_spread_mean)
-            / todays_spread_std,
+            "spread_deviation": spread_deviation,
         }
 
     @staticmethod
