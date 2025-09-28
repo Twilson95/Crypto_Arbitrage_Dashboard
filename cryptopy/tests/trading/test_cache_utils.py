@@ -65,3 +65,54 @@ def test_get_cached_spread_metrics_uses_cached_series(tmp_path):
     spread_mean = metrics["spread_mean"].dropna()
     assert not spread_mean.empty
     assert spread_mean.iloc[-1] == pytest.approx(1.5)
+
+
+def test_load_summary_table_vectorises_date_normalisation(tmp_path):
+    cache_dir = tmp_path / "analytics"
+    cache_dir.mkdir()
+    summary_path = cache_dir / "pair_analytics.csv"
+
+    rows = [
+        {
+            "pair_key": "PAIR_A",
+            "date_key": "2024-01-01 00:00:00",
+            "p_value": 0.1,
+            "hedge_ratio": 1.0,
+            "coint_stat": 0.0,
+            "crit_value_1": 0.0,
+            "crit_value_2": 0.0,
+            "crit_value_3": 0.0,
+        },
+        {
+            "pair_key": "PAIR_A",
+            "date_key": "2024-01-02 00:00:00+00:00",
+            "p_value": 0.2,
+            "hedge_ratio": 1.1,
+            "coint_stat": 0.1,
+            "crit_value_1": 0.1,
+            "crit_value_2": 0.1,
+            "crit_value_3": 0.1,
+        },
+        {
+            "pair_key": "PAIR_B",
+            "date_key": "20240103000000",
+            "p_value": 0.3,
+            "hedge_ratio": 1.2,
+            "coint_stat": 0.2,
+            "crit_value_1": 0.2,
+            "crit_value_2": 0.2,
+            "crit_value_3": 0.2,
+        },
+    ]
+
+    pd.DataFrame(rows).to_csv(summary_path, index=False)
+
+    cache = PairAnalyticsCache(cache_dir)
+
+    expected_index = [
+        ("PAIR_A", "2024-01-01 00:00:00"),
+        ("PAIR_A", "2024-01-02 00:00:00+00:00"),
+        ("PAIR_B", "2024-01-03 00:00:00"),
+    ]
+
+    assert list(cache._summary_df.index) == expected_index
