@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
+import warnings
 
 import math
 import time
@@ -86,18 +87,37 @@ class PairAnalyticsCache:
             if column not in df.columns:
                 df[column] = pd.NA
         df = df[self._SUMMARY_COLUMNS]
-        df = df.set_index(["pair_key", "date_key"])
-        pair_values = df.index.get_level_values("pair_key")
-        date_values = df.index.get_level_values("date_key")
-        formatted_dates = [
-            PairAnalyticsCache._format_timestamp_for_storage(
-                PairAnalyticsCache._timestamp_from_date_key(value)
+
+        date_series = df["date_key"].astype("string")
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=(
+                    "In a future version of pandas, parsing datetimes with mixed time "
+                    "zones will raise an error unless `utc=True`."
+                ),
+                category=FutureWarning,
             )
-            for value in date_values
-        ]
-        df.index = pd.MultiIndex.from_arrays(
-            [pair_values, formatted_dates], names=["pair_key", "date_key"]
-        )
+            parsed_dates = pd.to_datetime(
+                date_series, format="ISO8601", errors="coerce"
+            )
+
+        legacy_mask = parsed_dates.isna() & date_series.notna()
+        if legacy_mask.any():
+            legacy_parsed = pd.to_datetime(
+                date_series.loc[legacy_mask],
+                format="%Y%m%d%H%M%S",
+                errors="coerce",
+            )
+            parsed_dates.loc[legacy_mask] = legacy_parsed
+
+        formatted_dates = parsed_dates.astype("string")
+        still_missing = parsed_dates.isna()
+        if still_missing.any():
+            formatted_dates.loc[still_missing] = date_series.loc[still_missing]
+
+        df["date_key"] = formatted_dates
+        df = df.set_index(["pair_key", "date_key"])
         return df
 
     def _persist(
