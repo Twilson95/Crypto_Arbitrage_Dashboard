@@ -166,22 +166,6 @@ class ConvergenceForecaster:
 
             last_value = current_index[-1]
 
-            if isinstance(current_index, pd.DatetimeIndex):
-                freq = current_index.freq or current_index.inferred_freq
-
-                if freq is not None:
-                    start = last_value + pd.tseries.frequencies.to_offset(freq)
-                    return pd.date_range(start=start, periods=steps, freq=freq)
-
-                if len(current_index) >= 2:
-                    delta = current_index[-1] - current_index[-2]
-                    if isinstance(delta, pd.Timedelta) and delta != pd.Timedelta(0):
-                        values = [last_value + delta * (i + 1) for i in range(steps)]
-                        return pd.DatetimeIndex(values)
-
-                values = [last_value + pd.Timedelta(days=i + 1) for i in range(steps)]
-                return pd.DatetimeIndex(values)
-
             if np.issubdtype(current_index.dtype, np.number):
                 if len(current_index) >= 2:
                     step = current_index[-1] - current_index[-2]
@@ -192,6 +176,34 @@ class ConvergenceForecaster:
 
                 values = [last_value + step * (i + 1) for i in range(steps)]
                 return pd.Index(values)
+
+            datetime_index: Optional[pd.DatetimeIndex] = None
+            if isinstance(current_index, pd.DatetimeIndex):
+                datetime_index = current_index
+            else:
+                from datetime import date as _date, datetime as _datetime
+
+                if isinstance(last_value, (pd.Timestamp, np.datetime64, _datetime, _date)):
+                    coerced = pd.to_datetime(current_index, errors="coerce")
+                    if getattr(coerced, "notna", None) is not None and coerced.notna().all():
+                        datetime_index = pd.DatetimeIndex(coerced)
+
+            if datetime_index is not None:
+                last_value = datetime_index[-1]
+                freq = datetime_index.freq or datetime_index.inferred_freq
+
+                if freq is not None:
+                    start = last_value + pd.tseries.frequencies.to_offset(freq)
+                    return pd.date_range(start=start, periods=steps, freq=freq)
+
+                if len(datetime_index) >= 2:
+                    delta = datetime_index[-1] - datetime_index[-2]
+                    if isinstance(delta, pd.Timedelta) and delta != pd.Timedelta(0):
+                        values = [last_value + delta * (i + 1) for i in range(steps)]
+                        return pd.DatetimeIndex(values)
+
+                values = [last_value + pd.Timedelta(days=i + 1) for i in range(steps)]
+                return pd.DatetimeIndex(values)
 
             values = np.arange(len(current_index), len(current_index) + steps)
             return pd.Index(values)
@@ -222,7 +234,15 @@ class ConvergenceForecaster:
                 return
 
             future_index = future_index[:steps]
-            combined_index = base_index_slice.append(future_index)
+            if isinstance(future_index, pd.DatetimeIndex):
+                try:
+                    anchor_index = pd.DatetimeIndex([pd.Timestamp(base_series_valid.index[-1])])
+                except (TypeError, ValueError):
+                    anchor_index = base_index_slice
+            else:
+                anchor_index = base_index_slice
+
+            combined_index = anchor_index.append(future_index)
             combined_values = pd.Series(
                 np.concatenate([[base_value], extension.to_numpy()]),
                 index=combined_index,
