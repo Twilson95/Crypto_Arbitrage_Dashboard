@@ -42,7 +42,7 @@ parameters = {
     "borrow_rate_per_day": 0.002,
     "precompute_pair_analytics": False,
     "analytics_cache_dir": f"../../../data/simulations/cached_cointegration_data/",
-    "plot_forecast": True
+    "plot_forecast": True,
 }
 
 model_setup = (
