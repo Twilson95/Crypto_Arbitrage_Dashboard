@@ -37,7 +37,9 @@ class ConvergenceForecast:
 class ConvergenceForecaster:
     """Reusable AR(1)-style convergence forecaster."""
 
-    def __init__(self, rolling_window: int, holding_period: int, lookback: Optional[int] = None):
+    def __init__(
+        self, rolling_window: int, holding_period: int, lookback: Optional[int] = None
+    ):
         self.rolling_window = max(int(rolling_window), 1)
         self.holding_period = max(int(holding_period), 0)
         self.lookback = lookback if lookback is None else max(int(lookback), 1)
@@ -82,7 +84,9 @@ class ConvergenceForecaster:
         intercept = params["intercept"]
         half_life = params.get("half_life")
         confidence = params.get("confidence", 0.0)
-        decay_factor = float(np.power(phi, self.holding_period)) if np.isfinite(phi) else None
+        decay_factor = (
+            float(np.power(phi, self.holding_period)) if np.isfinite(phi) else None
+        )
 
         spread_paths = self._build_spread_paths(spread, spread_mean, phi)
         mean_paths = self._build_mean_paths(spread, spread_paths)
@@ -91,14 +95,18 @@ class ConvergenceForecaster:
             expected_exit_spread = spread_mean.fillna(spread)
         else:
             expected_exit_spread = spread_paths.iloc[:, -1].copy()
-            expected_exit_spread = expected_exit_spread.where(~expected_exit_spread.isna(), spread_mean)
+            expected_exit_spread = expected_exit_spread.where(
+                ~expected_exit_spread.isna(), spread_mean
+            )
             expected_exit_spread = expected_exit_spread.fillna(spread)
 
         if mean_paths.empty:
             expected_exit_mean = spread_mean.fillna(expected_exit_spread)
         else:
             expected_exit_mean = mean_paths.iloc[:, -1].copy()
-            expected_exit_mean = expected_exit_mean.where(~expected_exit_mean.isna(), expected_exit_spread)
+            expected_exit_mean = expected_exit_mean.where(
+                ~expected_exit_mean.isna(), expected_exit_spread
+            )
             expected_exit_mean = expected_exit_mean.fillna(spread_mean)
 
         expected_exit_mean = expected_exit_mean.fillna(expected_exit_spread)
@@ -158,13 +166,31 @@ class ConvergenceForecaster:
             fig = ax.figure
 
         spread.plot(ax=ax, label="Spread", color="black", linewidth=1.2)
-        spread_mean.plot(ax=ax, label="Rolling mean", color="tab:blue", linestyle="--", linewidth=1.0)
+        spread_mean.plot(
+            ax=ax, label="Rolling mean", color="tab:blue", linestyle="--", linewidth=1.0
+        )
 
         def _build_future_index(current_index: pd.Index, steps: int) -> pd.Index:
             if steps <= 0:
                 return current_index[:0]
 
             last_value = current_index[-1]
+
+            if isinstance(current_index, pd.DatetimeIndex):
+                freq = current_index.freq or current_index.inferred_freq
+
+                if freq is not None:
+                    start = last_value + pd.tseries.frequencies.to_offset(freq)
+                    return pd.date_range(start=start, periods=steps, freq=freq)
+
+                if len(current_index) >= 2:
+                    delta = current_index[-1] - current_index[-2]
+                    if isinstance(delta, pd.Timedelta) and delta != pd.Timedelta(0):
+                        values = [last_value + delta * (i + 1) for i in range(steps)]
+                        return pd.DatetimeIndex(values)
+
+                values = [last_value + pd.Timedelta(days=i + 1) for i in range(steps)]
+                return pd.DatetimeIndex(values)
 
             if np.issubdtype(current_index.dtype, np.number):
                 if len(current_index) >= 2:
@@ -176,34 +202,6 @@ class ConvergenceForecaster:
 
                 values = [last_value + step * (i + 1) for i in range(steps)]
                 return pd.Index(values)
-
-            datetime_index: Optional[pd.DatetimeIndex] = None
-            if isinstance(current_index, pd.DatetimeIndex):
-                datetime_index = current_index
-            else:
-                from datetime import date as _date, datetime as _datetime
-
-                if isinstance(last_value, (pd.Timestamp, np.datetime64, _datetime, _date)):
-                    coerced = pd.to_datetime(current_index, errors="coerce")
-                    if getattr(coerced, "notna", None) is not None and coerced.notna().all():
-                        datetime_index = pd.DatetimeIndex(coerced)
-
-            if datetime_index is not None:
-                last_value = datetime_index[-1]
-                freq = datetime_index.freq or datetime_index.inferred_freq
-
-                if freq is not None:
-                    start = last_value + pd.tseries.frequencies.to_offset(freq)
-                    return pd.date_range(start=start, periods=steps, freq=freq)
-
-                if len(datetime_index) >= 2:
-                    delta = datetime_index[-1] - datetime_index[-2]
-                    if isinstance(delta, pd.Timedelta) and delta != pd.Timedelta(0):
-                        values = [last_value + delta * (i + 1) for i in range(steps)]
-                        return pd.DatetimeIndex(values)
-
-                values = [last_value + pd.Timedelta(days=i + 1) for i in range(steps)]
-                return pd.DatetimeIndex(values)
 
             values = np.arange(len(current_index), len(current_index) + steps)
             return pd.Index(values)
@@ -222,7 +220,7 @@ class ConvergenceForecaster:
                 return
 
             base_value = base_series_valid.iloc[-1]
-            base_index_slice = base_series_valid.index[-1:]
+            base_index = base_series_valid.index[-1]
 
             extension = continuation_values.dropna()
             if extension.empty:
@@ -234,15 +232,7 @@ class ConvergenceForecaster:
                 return
 
             future_index = future_index[:steps]
-            if isinstance(future_index, pd.DatetimeIndex):
-                try:
-                    anchor_index = pd.DatetimeIndex([pd.Timestamp(base_series_valid.index[-1])])
-                except (TypeError, ValueError):
-                    anchor_index = base_index_slice
-            else:
-                anchor_index = base_index_slice
-
-            combined_index = anchor_index.append(future_index)
+            combined_index = pd.Index([base_index]).append(future_index)
             combined_values = pd.Series(
                 np.concatenate([[base_value], extension.to_numpy()]),
                 index=combined_index,
@@ -280,12 +270,17 @@ class ConvergenceForecaster:
                 linewidth=1.1,
             )
 
-        if forecast.expected_exit_spread is not None and not forecast.spread_paths.empty:
+        if (
+            forecast.expected_exit_spread is not None
+            and not forecast.spread_paths.empty
+        ):
             exit_spread = forecast.expected_exit_spread.iloc[-1]
             if pd.notna(exit_spread):
                 spread_forecast = forecast.spread_paths.iloc[-1].dropna()
                 if not spread_forecast.empty:
-                    future_index = _build_future_index(spread.index, len(spread_forecast))
+                    future_index = _build_future_index(
+                        spread.index, len(spread_forecast)
+                    )
                     if len(future_index) >= len(spread_forecast):
                         ax.scatter(
                             future_index[len(spread_forecast) - 1],
@@ -374,15 +369,22 @@ class ConvergenceForecaster:
             "confidence": r_squared,
         }
 
-    def _build_spread_paths(self, spread: pd.Series, spread_mean: pd.Series, phi: float) -> pd.DataFrame:
+    def _build_spread_paths(
+        self, spread: pd.Series, spread_mean: pd.Series, phi: float
+    ) -> pd.DataFrame:
         if self.holding_period <= 0:
             return pd.DataFrame(index=spread.index)
 
         horizons = range(1, self.holding_period + 1)
-        columns = {f"horizon_{step}": spread_mean + (spread - spread_mean) * (phi ** step) for step in horizons}
+        columns = {
+            f"horizon_{step}": spread_mean + (spread - spread_mean) * (phi**step)
+            for step in horizons
+        }
         return pd.DataFrame(columns)
 
-    def _build_mean_paths(self, spread: pd.Series, spread_paths: pd.DataFrame) -> pd.DataFrame:
+    def _build_mean_paths(
+        self, spread: pd.Series, spread_paths: pd.DataFrame
+    ) -> pd.DataFrame:
         if self.holding_period <= 0 or spread_paths.empty:
             return pd.DataFrame(index=spread.index)
 
@@ -401,7 +403,9 @@ class ConvergenceForecaster:
         spread_values = spread.to_numpy(dtype=float)
         forecast_values = spread_paths.to_numpy(dtype=float)
 
-        sliding_windows = np.lib.stride_tricks.sliding_window_view(spread_values, window_shape=window)
+        sliding_windows = np.lib.stride_tricks.sliding_window_view(
+            spread_values, window_shape=window
+        )
         window_valid = ~np.isnan(sliding_windows).any(axis=1)
         window_sums = np.where(window_valid, np.sum(sliding_windows, axis=1), np.nan)
 
@@ -433,7 +437,12 @@ class ConvergenceForecaster:
         if horizons > window:
             forecast_removals[:, window:] = forecast_prefix[:, :-window]
 
-        updated_sums = window_sums_expanded + forecast_prefix_expanded - drop_initial - forecast_removals
+        updated_sums = (
+            window_sums_expanded
+            + forecast_prefix_expanded
+            - drop_initial
+            - forecast_removals
+        )
         updated_means = updated_sums / window
 
         invalid_window_rows = ~window_valid
