@@ -160,40 +160,130 @@ class ConvergenceForecaster:
         spread.plot(ax=ax, label="Spread", color="black", linewidth=1.2)
         spread_mean.plot(ax=ax, label="Rolling mean", color="tab:blue", linestyle="--", linewidth=1.0)
 
+        def _build_future_index(current_index: pd.Index, steps: int) -> pd.Index:
+            if steps <= 0:
+                return current_index[:0]
+
+            last_value = current_index[-1]
+
+            if isinstance(current_index, pd.DatetimeIndex):
+                freq = current_index.freq or current_index.inferred_freq
+
+                if freq is not None:
+                    start = last_value + pd.tseries.frequencies.to_offset(freq)
+                    return pd.date_range(start=start, periods=steps, freq=freq)
+
+                if len(current_index) >= 2:
+                    delta = current_index[-1] - current_index[-2]
+                    if isinstance(delta, pd.Timedelta) and delta != pd.Timedelta(0):
+                        values = [last_value + delta * (i + 1) for i in range(steps)]
+                        return pd.DatetimeIndex(values)
+
+                values = [last_value + pd.Timedelta(days=i + 1) for i in range(steps)]
+                return pd.DatetimeIndex(values)
+
+            if np.issubdtype(current_index.dtype, np.number):
+                if len(current_index) >= 2:
+                    step = current_index[-1] - current_index[-2]
+                    if step == 0:
+                        step = 1
+                else:
+                    step = 1
+
+                values = [last_value + step * (i + 1) for i in range(steps)]
+                return pd.Index(values)
+
+            values = np.arange(len(current_index), len(current_index) + steps)
+            return pd.Index(values)
+
+        def _plot_continuation(
+            base_series: pd.Series,
+            continuation_values: pd.Series,
+            label: str,
+            color: str,
+            linestyle: str,
+            alpha: float,
+            linewidth: float,
+        ):
+            base_value = base_series.iloc[-1]
+            if pd.isna(base_value):
+                base_series_valid = base_series.dropna()
+                if base_series_valid.empty:
+                    return
+                base_value = base_series_valid.iloc[-1]
+            extension = continuation_values.dropna()
+            if extension.empty:
+                return
+            steps = len(extension)
+            future_index = _build_future_index(base_series.index, steps)
+            if len(future_index) < steps:
+                return
+            future_index = future_index[:steps]
+            combined_index = base_series.index[-1:].append(future_index)
+            combined_values = pd.Series(
+                np.concatenate([[base_value], extension.to_numpy()]),
+                index=combined_index,
+            )
+            combined_values.plot(
+                ax=ax,
+                label=label,
+                color=color,
+                linestyle=linestyle,
+                linewidth=linewidth,
+                alpha=alpha,
+            )
+
         if not forecast.spread_paths.empty:
-            for column in forecast.spread_paths:
-                forecast.spread_paths[column].sort_index().plot(
-                    ax=ax,
-                    alpha=0.5,
-                    linestyle=":",
-                    linewidth=0.9,
-                    label=f"Forecast spread {column.split('_')[-1]}d",
-                )
+            spread_forecast = forecast.spread_paths.iloc[-1]
+            _plot_continuation(
+                spread,
+                spread_forecast,
+                label="Forecast spread path",
+                color="tab:orange",
+                linestyle=":",
+                alpha=0.7,
+                linewidth=1.1,
+            )
 
         if not forecast.mean_paths.empty:
-            for column in forecast.mean_paths:
-                forecast.mean_paths[column].sort_index().plot(
-                    ax=ax,
-                    alpha=0.4,
-                    linewidth=0.9,
-                    label=f"Forecast mean {column.split('_')[-1]}d",
-                )
-
-        if forecast.expected_exit_spread is not None:
-            forecast.expected_exit_spread.sort_index().plot(
-                ax=ax,
-                color="tab:orange",
-                linewidth=1.2,
-                label="Expected exit spread",
-            )
-
-        if forecast.expected_exit_mean is not None:
-            forecast.expected_exit_mean.sort_index().plot(
-                ax=ax,
+            mean_forecast = forecast.mean_paths.iloc[-1]
+            _plot_continuation(
+                spread_mean,
+                mean_forecast,
+                label="Forecast mean path",
                 color="tab:green",
-                linewidth=1.2,
-                label="Expected exit mean",
+                linestyle="-.",
+                alpha=0.7,
+                linewidth=1.1,
             )
+
+        if forecast.expected_exit_spread is not None and not forecast.spread_paths.empty:
+            exit_spread = forecast.expected_exit_spread.iloc[-1]
+            if pd.notna(exit_spread):
+                spread_forecast = forecast.spread_paths.iloc[-1].dropna()
+                if not spread_forecast.empty:
+                    future_index = _build_future_index(spread.index, len(spread_forecast))
+                    if len(future_index) >= len(spread_forecast):
+                        ax.scatter(
+                            future_index[len(spread_forecast) - 1],
+                            exit_spread,
+                            color="tab:orange",
+                            label="Expected exit spread",
+                        )
+
+        if forecast.expected_exit_mean is not None and not forecast.mean_paths.empty:
+            exit_mean = forecast.expected_exit_mean.iloc[-1]
+            if pd.notna(exit_mean):
+                mean_forecast = forecast.mean_paths.iloc[-1].dropna()
+                if not mean_forecast.empty:
+                    future_index = _build_future_index(spread.index, len(mean_forecast))
+                    if len(future_index) >= len(mean_forecast):
+                        ax.scatter(
+                            future_index[len(mean_forecast) - 1],
+                            exit_mean,
+                            color="tab:green",
+                            label="Expected exit mean",
+                        )
 
         ax.set_title("Convergence Forecast")
         ax.set_xlabel("Date")
