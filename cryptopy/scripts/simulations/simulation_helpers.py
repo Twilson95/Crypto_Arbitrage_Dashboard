@@ -37,7 +37,23 @@ def filter_list(list_data, date):
     return None
 
 
-def compute_spread_metrics(parameters, spread):
+def _normalise_timestamp(timestamp):
+    if timestamp is None:
+        return None
+    try:
+        ts = pd.Timestamp(timestamp)
+    except (TypeError, ValueError):
+        return None
+
+    if ts.tzinfo is not None:
+        try:
+            ts = ts.tz_localize(None)
+        except TypeError:
+            ts = ts.tz_convert(None).tz_localize(None)
+    return ts
+
+
+def compute_spread_metrics(parameters, spread, current_date=None, trade_open=False):
     rolling_window = parameters["rolling_window"]
     spread_mean = spread.rolling(window=rolling_window).mean()
     spread_std = spread.rolling(window=rolling_window).std()
@@ -50,24 +66,78 @@ def compute_spread_metrics(parameters, spread):
     upper_spread_limit = spread_mean + upper_spread_threshold * spread_std
     lower_spread_limit = spread_mean - upper_spread_threshold * spread_std
 
-    holding_period = max(int(round(parameters.get("expected_holding_days", 10))), 0)
-    convergence_window = parameters.get("convergence_lookback", rolling_window * 3)
-    forecaster = ConvergenceForecaster(
-        rolling_window, holding_period, convergence_window
-    )
-    forecast = forecaster.forecast(spread)
-    if parameters.get("plot_forecast"):
-        forecaster.plot_forecast(spread, forecast)
+    spread_std_safe = spread_std.replace(0, np.nan)
+    spread_deviation = (spread - spread_mean).abs() / spread_std_safe
+    trade_candidate_mask = (spread_deviation >= spread_threshold) & spread_deviation.notna()
+    trade_candidate_mask = trade_candidate_mask.fillna(False)
 
-    expected_exit_mean = forecast.expected_exit_mean
-    expected_exit_spread = forecast.expected_exit_spread
-    decay_factor = forecast.decay_factor
-    convergence_half_life = forecast.half_life
-    convergence_confidence = forecast.confidence
-    convergence_phi = forecast.phi
-    convergence_intercept = forecast.intercept
-    spread_paths = forecast.spread_paths
-    mean_paths = forecast.mean_paths
+    current_date = _normalise_timestamp(current_date)
+    current_date_in_index = (
+        current_date is not None and current_date in trade_candidate_mask.index
+    )
+
+    active_mask = trade_candidate_mask.copy()
+    if trade_open and current_date_in_index:
+        active_mask.loc[current_date] = True
+
+    should_forecast = False
+    if trade_open:
+        should_forecast = True
+    elif current_date_in_index and trade_candidate_mask.loc[current_date]:
+        should_forecast = True
+
+    expected_exit_mean = pd.Series(np.nan, index=spread.index, dtype="float64")
+    expected_exit_spread = pd.Series(np.nan, index=spread.index, dtype="float64")
+    spread_paths = pd.DataFrame(index=spread.index)
+    mean_paths = pd.DataFrame(index=spread.index)
+    decay_factor = None
+    convergence_half_life = None
+    convergence_confidence = 0.0
+    convergence_phi = None
+    convergence_intercept = None
+
+    if should_forecast:
+        holding_period = max(int(round(parameters.get("expected_holding_days", 10))), 0)
+        convergence_window = parameters.get("convergence_lookback", rolling_window * 3)
+        forecaster = ConvergenceForecaster(
+            rolling_window, holding_period, convergence_window
+        )
+        forecast = forecaster.forecast(spread)
+
+        if parameters.get("plot_forecast"):
+            forecaster.plot_forecast(
+                spread,
+                forecast,
+                threshold_multiplier=spread_threshold,
+                limit_multiplier=upper_spread_threshold,
+            )
+
+        expected_exit_mean = forecast.expected_exit_mean
+        expected_exit_spread = forecast.expected_exit_spread
+        decay_factor = forecast.decay_factor
+        convergence_half_life = forecast.half_life
+        convergence_confidence = forecast.confidence
+        convergence_phi = forecast.phi
+        convergence_intercept = forecast.intercept
+        spread_paths = forecast.spread_paths
+        mean_paths = forecast.mean_paths
+
+        if isinstance(expected_exit_mean, pd.Series):
+            expected_exit_mean = expected_exit_mean.where(active_mask)
+        if isinstance(expected_exit_spread, pd.Series):
+            expected_exit_spread = expected_exit_spread.where(active_mask)
+
+        if isinstance(spread_paths, pd.DataFrame) and not spread_paths.empty:
+            mask_series = active_mask.reindex(spread_paths.index).fillna(False)
+            mask_values = mask_series.to_numpy(dtype=bool)[:, None]
+            broadcast_mask = np.broadcast_to(mask_values, spread_paths.shape)
+            spread_paths = spread_paths.where(broadcast_mask)
+
+        if isinstance(mean_paths, pd.DataFrame) and not mean_paths.empty:
+            mask_series = active_mask.reindex(mean_paths.index).fillna(False)
+            mask_values = mask_series.to_numpy(dtype=bool)[:, None]
+            broadcast_mask = np.broadcast_to(mask_values, mean_paths.shape)
+            mean_paths = mean_paths.where(broadcast_mask)
 
     return {
         "spread_mean": spread_mean,
@@ -85,24 +155,55 @@ def compute_spread_metrics(parameters, spread):
         "convergence_intercept": convergence_intercept,
         "forecasted_spread_path": spread_paths,
         "forecasted_mean_path": mean_paths,
+        "spread_deviation": spread_deviation,
+        "trade_candidate_mask": trade_candidate_mask,
     }
 
 
-def get_todays_spread_data(parameters, spread, current_date, spread_metrics=None):
+def get_todays_spread_data(
+    parameters, spread, current_date, spread_metrics=None, trade_open=False
+):
     if spread_metrics is None:
-        spread_metrics = compute_spread_metrics(parameters, spread)
+        spread_metrics = compute_spread_metrics(
+            parameters, spread, current_date=current_date, trade_open=trade_open
+        )
 
     todays_spread = filter_list(spread, current_date)
     todays_spread_mean = filter_list(spread_metrics["spread_mean"], current_date)
     todays_spread_std = filter_list(spread_metrics["spread_std"], current_date)
+    todays_spread_deviation = filter_list(
+        spread_metrics.get("spread_deviation"), current_date
+    )
+
+    def _sanitize(value):
+        if value is None:
+            return None
+        if isinstance(value, (float, np.floating)) and np.isnan(value):
+            return None
+        return value
+
+    todays_spread_std = _sanitize(todays_spread_std)
+    todays_spread_mean = _sanitize(todays_spread_mean)
+    todays_spread = _sanitize(todays_spread)
+    todays_spread_deviation = _sanitize(todays_spread_deviation)
+
+    if (
+        todays_spread_deviation is None
+        and todays_spread is not None
+        and todays_spread_mean is not None
+        and todays_spread_std not in (None, 0)
+    ):
+        todays_spread_deviation = abs(todays_spread - todays_spread_mean) / todays_spread_std
+
     expected_exit_mean = filter_list(
         spread_metrics["expected_mean_at_exit"], current_date
     )
     expected_exit_spread = filter_list(
         spread_metrics["expected_spread_at_exit"], current_date
     )
-    if expected_exit_mean is None:
-        expected_exit_mean = todays_spread_mean
+    expected_exit_mean = _sanitize(expected_exit_mean)
+    expected_exit_spread = _sanitize(expected_exit_spread)
+
     forecast_spread_path = spread_metrics.get("forecasted_spread_path")
     forecast_mean_path = spread_metrics.get("forecasted_mean_path")
     todays_spread_forecast = None
@@ -125,13 +226,25 @@ def get_todays_spread_data(parameters, spread, current_date, spread_metrics=None
             key: todays_spread_forecast.get(key) - todays_mean_forecast.get(key, np.nan)
             for key in todays_spread_forecast
         }
-    spread_deviation = None
-    if (
-        todays_spread is not None
-        and todays_spread_mean is not None
+
+    spread_threshold = parameters.get("spread_threshold", 0)
+    consider_for_trade = (
+        todays_spread_deviation is not None
         and todays_spread_std not in (None, 0)
-    ):
-        spread_deviation = abs(todays_spread - todays_spread_mean) / todays_spread_std
+        and todays_spread_deviation >= spread_threshold
+    )
+
+    if not consider_for_trade and not trade_open:
+        expected_exit_mean = None
+        expected_exit_spread = None
+        todays_spread_forecast = None
+        todays_mean_forecast = None
+        forecast_diff = None
+    else:
+        if expected_exit_mean is None:
+            expected_exit_mean = todays_spread_mean
+        if expected_exit_spread is None:
+            expected_exit_spread = todays_spread_mean
 
     return {
         "date": current_date,
@@ -152,7 +265,8 @@ def get_todays_spread_data(parameters, spread, current_date, spread_metrics=None
         "forecasted_spread_path": todays_spread_forecast,
         "forecasted_mean_path": todays_mean_forecast,
         "forecast_spread_minus_mean": forecast_diff,
-        "spread_deviation": spread_deviation,
+        "spread_deviation": todays_spread_deviation,
+        "trade_considered": consider_for_trade,
     }
 
 

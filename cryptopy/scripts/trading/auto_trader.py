@@ -120,21 +120,35 @@ for pair in sorted(pair_combinations, key=lambda x: x[0]):
         historical_prices, pair, hedge_ratio
     )
     pair_key = tuple(pair)
-    cache_key = (pair_key, current_date)
+    trade_open = open_trade is not None
+    cache_key = (pair_key, current_date, trade_open)
     spread_metrics = spread_metrics_cache.get(cache_key)
     if spread_metrics is None:
-        spread_metrics = compute_spread_metrics(parameters, spread)
-        stale_keys = [
-            key
-            for key in list(spread_metrics_cache.keys())
-            if key[0] == pair_key and key[1] != current_date
-        ]
+        spread_metrics = compute_spread_metrics(
+            parameters,
+            spread,
+            current_date=current_date,
+            trade_open=trade_open,
+        )
+        stale_keys = []
+        for key in list(spread_metrics_cache.keys()):
+            if key[0] != pair_key:
+                continue
+            if len(key) > 1 and key[1] != current_date:
+                stale_keys.append(key)
+                continue
+            if len(key) > 2 and key[1] == current_date and key[2] != trade_open:
+                stale_keys.append(key)
         for key in stale_keys:
             del spread_metrics_cache[key]
         spread_metrics_cache[cache_key] = spread_metrics
 
     todays_spread_data = get_todays_spread_data(
-        parameters, spread, current_date, spread_metrics
+        parameters,
+        spread,
+        current_date,
+        spread_metrics,
+        trade_open=trade_open,
     )
 
     close_event = None

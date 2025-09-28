@@ -303,16 +303,19 @@ class ArbitrageSimulator:
             spread = base_spread
             hedge_ratio = base_hedge_ratio
 
-        spread_metrics = self._get_cached_spread_metrics(pair, current_date, spread)
+        trade_open = bool(open_event)
+        spread_metrics = self._get_cached_spread_metrics(
+            pair, current_date, spread, trade_open=trade_open
+        )
         todays_spread_data = self.get_todays_spread_data(
-            spread, current_date, spread_metrics
+            spread, current_date, spread_metrics, trade_open=trade_open
         )
 
         return p_value, hedge_ratio, todays_spread_data, currency_fees
 
-    def _get_cached_spread_metrics(self, pair, current_date, spread):
+    def _get_cached_spread_metrics(self, pair, current_date, spread, trade_open=False):
         pair_key = tuple(pair)
-        cache_key = (pair_key, current_date)
+        cache_key = (pair_key, current_date, bool(trade_open))
         cached_metrics = self._spread_metrics_cache.get(cache_key)
         if cached_metrics is not None:
             return cached_metrics
@@ -327,13 +330,22 @@ class ArbitrageSimulator:
             timestamp = PairAnalyticsCache._normalise_timestamp(current_date)
             spread_input = pd.Series([value], index=[timestamp], dtype="float64")
 
-        metrics = compute_spread_metrics(self.parameters, spread_input)
+        metrics = compute_spread_metrics(
+            self.parameters,
+            spread_input,
+            current_date=current_date,
+            trade_open=trade_open,
+        )
 
-        keys_to_remove = [
-            key
-            for key in list(self._spread_metrics_cache.keys())
-            if key[0] == pair_key and key[1] != current_date
-        ]
+        keys_to_remove = []
+        for key in list(self._spread_metrics_cache.keys()):
+            if key[0] != pair_key:
+                continue
+            if len(key) > 1 and key[1] != current_date:
+                keys_to_remove.append(key)
+                continue
+            if len(key) > 2 and key[1] == current_date and key[2] != bool(trade_open):
+                keys_to_remove.append(key)
         for key in keys_to_remove:
             del self._spread_metrics_cache[key]
 
@@ -628,9 +640,16 @@ class ArbitrageSimulator:
                 current_volatility / avg_volatility,
             )
 
-    def get_todays_spread_data(self, spread, current_date, spread_metrics=None):
+    def get_todays_spread_data(
+        self, spread, current_date, spread_metrics=None, trade_open=False
+    ):
         if spread_metrics is None:
-            spread_metrics = compute_spread_metrics(self.parameters, spread)
+            spread_metrics = compute_spread_metrics(
+                self.parameters,
+                spread,
+                current_date=current_date,
+                trade_open=trade_open,
+            )
 
         todays_spread = filter_list(spread, current_date)
         todays_spread_mean = filter_list(spread_metrics["spread_mean"], current_date)
