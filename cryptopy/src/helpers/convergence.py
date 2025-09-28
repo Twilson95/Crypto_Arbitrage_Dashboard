@@ -131,6 +131,8 @@ class ConvergenceForecaster:
         show: bool = True,
         save_path: Optional[str] = None,
         ax=None,
+        threshold_multiplier: Optional[float] = None,
+        limit_multiplier: Optional[float] = None,
     ):
         """Visualise the historical spread, rolling mean, and forecast trajectories.
 
@@ -159,6 +161,7 @@ class ConvergenceForecaster:
 
         spread = spread.sort_index()
         spread_mean = spread.rolling(window=self.rolling_window).mean()
+        spread_std = spread.rolling(window=self.rolling_window).std()
 
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 6))
@@ -166,6 +169,45 @@ class ConvergenceForecaster:
             fig = ax.figure
 
         spread.plot(ax=ax, label="Spread", color="black", linewidth=1.2)
+        spread_mean.plot(
+            ax=ax,
+            label="Rolling mean",
+            color="tab:blue",
+            linestyle="--",
+            linewidth=1.0,
+        )
+
+        if threshold_multiplier is not None and np.isfinite(threshold_multiplier):
+            upper_threshold = spread_mean + threshold_multiplier * spread_std
+            lower_threshold = spread_mean - threshold_multiplier * spread_std
+            upper_threshold.plot(
+                ax=ax,
+                label="Upper threshold",
+                color="tab:orange",
+                linestyle=":",
+            )
+            lower_threshold.plot(
+                ax=ax,
+                label="Lower threshold",
+                color="tab:orange",
+                linestyle=":",
+            )
+
+        if limit_multiplier is not None and np.isfinite(limit_multiplier):
+            upper_limit = spread_mean + limit_multiplier * spread_std
+            lower_limit = spread_mean - limit_multiplier * spread_std
+            upper_limit.plot(
+                ax=ax,
+                label="Upper limit",
+                color="tab:red",
+                linestyle="-.",
+            )
+            lower_limit.plot(
+                ax=ax,
+                label="Lower limit",
+                color="tab:red",
+                linestyle="-.",
+            )
         spread_mean.plot(
             ax=ax, label="Rolling mean", color="tab:blue", linestyle="--", linewidth=1.0
         )
