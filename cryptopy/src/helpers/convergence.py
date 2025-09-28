@@ -1,5 +1,4 @@
 import math
-from collections import deque
 from dataclasses import dataclass
 from typing import Optional
 
@@ -274,31 +273,59 @@ class ConvergenceForecaster:
         if self.holding_period <= 0 or spread_paths.empty:
             return pd.DataFrame(index=spread.index)
 
+        window = self.rolling_window
+        horizons = spread_paths.shape[1]
+
         mean_paths = pd.DataFrame(
             np.nan,
             index=spread.index,
             columns=spread_paths.columns,
         )
 
-        spread_values = spread.values
-        for idx in range(len(spread)):
-            if idx < self.rolling_window - 1:
-                continue
-            window = spread_values[idx - self.rolling_window + 1 : idx + 1]
-            if np.isnan(window).any():
-                continue
+        if len(spread) < window:
+            return mean_paths
 
-            history = deque(window.tolist(), maxlen=self.rolling_window)
-            current_mean = sum(history) / len(history)
+        spread_values = spread.to_numpy(dtype=float)
+        forecast_values = spread_paths.to_numpy(dtype=float)
 
-            for col_idx, column in enumerate(spread_paths.columns):
-                forecast_value = spread_paths.iloc[idx, col_idx]
-                if np.isnan(forecast_value):
-                    break
+        sliding_windows = np.lib.stride_tricks.sliding_window_view(spread_values, window_shape=window)
+        window_valid = ~np.isnan(sliding_windows).any(axis=1)
+        window_sums = np.where(window_valid, np.sum(sliding_windows, axis=1), np.nan)
 
-                dropped = history.popleft()
-                history.append(forecast_value)
-                current_mean = current_mean + (forecast_value - dropped) / self.rolling_window
-                mean_paths.iat[idx, col_idx] = current_mean
+        min_window_horizon = min(window, horizons)
+        if min_window_horizon:
+            window_prefix = np.cumsum(sliding_windows[:, :min_window_horizon], axis=1)
+        else:
+            window_prefix = np.empty((sliding_windows.shape[0], 0))
+
+        forecast_sub = forecast_values[window - 1 :, :]
+        if forecast_sub.size == 0:
+            return mean_paths
+
+        forecast_valid = ~np.isnan(forecast_sub)
+        cumulative_valid = np.cumprod(forecast_valid, axis=1).astype(bool)
+        forecast_filled = np.where(forecast_valid, forecast_sub, 0.0)
+        forecast_prefix = np.cumsum(forecast_filled, axis=1)
+
+        window_sums_expanded = np.broadcast_to(window_sums[:, None], forecast_sub.shape)
+        forecast_prefix_expanded = forecast_prefix
+
+        drop_initial = np.zeros_like(forecast_prefix_expanded)
+        if min_window_horizon:
+            drop_initial[:, :min_window_horizon] = window_prefix
+        if horizons > window:
+            drop_initial[:, window:] = window_sums_expanded[:, window:]
+
+        forecast_removals = np.zeros_like(forecast_prefix_expanded)
+        if horizons > window:
+            forecast_removals[:, window:] = forecast_prefix[:, :-window]
+
+        updated_sums = window_sums_expanded + forecast_prefix_expanded - drop_initial - forecast_removals
+        updated_means = updated_sums / window
+
+        updated_means[~window_valid[:, None]] = np.nan
+        updated_means[~cumulative_valid] = np.nan
+
+        mean_paths.iloc[window - 1 :, :] = updated_means
 
         return mean_paths
