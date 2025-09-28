@@ -314,7 +314,33 @@ class ArbitrageSimulator:
         if cached_metrics is not None:
             return cached_metrics
 
-        metrics = compute_spread_metrics(self.parameters, spread)
+        spread_input = spread
+        if hasattr(spread, "sort_index"):
+            spread_input = spread.sort_index()
+
+        if not hasattr(spread_input, "rolling"):
+            rolling_window = self.parameters.get("rolling_window")
+            spread_series = pd.Series(dtype="float64")
+            if (
+                self._pair_analytics_cache is not None
+                and rolling_window is not None
+                and rolling_window > 0
+            ):
+                spread_series = self._pair_analytics_cache.get_spread_series(
+                    pair, rolling_window
+                )
+
+            if spread_series is not None and not spread_series.empty:
+                spread_input = spread_series
+            else:
+                try:
+                    value = float(spread)
+                except (TypeError, ValueError):
+                    value = float("nan")
+                timestamp = PairAnalyticsCache._normalise_timestamp(current_date)
+                spread_input = pd.Series([value], index=[timestamp], dtype="float64")
+
+        metrics = compute_spread_metrics(self.parameters, spread_input)
 
         keys_to_remove = [
             key
