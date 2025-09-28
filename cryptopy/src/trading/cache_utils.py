@@ -84,6 +84,7 @@ class PairAnalyticsCache:
 
     def _load_summary_table(self) -> pd.DataFrame:
         if self.summary_path.exists():
+            print(f"Loading summary table")
             df = pd.read_csv(self.summary_path)
         else:
             df = pd.DataFrame(columns=self._SUMMARY_COLUMNS)

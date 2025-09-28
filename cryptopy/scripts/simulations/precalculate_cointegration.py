@@ -1,3 +1,7 @@
+import cProfile
+import pstats
+import io
+
 import pandas as pd
 from river import preprocessing, linear_model, tree
 
@@ -40,7 +44,7 @@ parameters = {
     },
     "expected_holding_days": 15,
     "borrow_rate_per_day": 0.002,
-    "precompute_pair_analytics": False,
+    "precompute_pair_analytics": True,
     "analytics_cache_dir": f"../../../data/simulations/cached_cointegration_data/",
 }
 
@@ -86,31 +90,16 @@ arbitrage_simulator = ArbitrageSimulator(
     trades_before_prediction=parameters["trades_before_predictions"],
 )
 
-if parameters.get("precompute_pair_analytics"):
-    print("Pre-computing pair analytics cache...")
-    arbitrage_simulator.precalculate_pair_analytics()
-
-import cProfile
-import pstats
-import io
-
-print("=== Starting simulation ===")
-
 # start profiler
 pr = cProfile.Profile()
 pr.enable()
 
 # your code will keep printing / logging as usual
-trade_results, cumulative_profit = arbitrage_simulator.run_simulation()
+arbitrage_simulator.precalculate_pair_analytics()
 
 # stop profiler
 pr.disable()
 
-print("=== Simulation finished ===")
-print(f"Trades: {len(trade_results)} | Cumulative profit: {cumulative_profit}")
-
-# ---- print *all* profiling data to the console ----
-print("=== FULL PROFILING REPORT (all functions) ===")
 s = io.StringIO()
 ps = pstats.Stats(pr, stream=s)  # no strip_dirs(), no filters
 ps.sort_stats("cumulative")  # you can change to "time", "calls", etc.
@@ -118,32 +107,5 @@ ps.print_stats()  # <-- prints all rows
 print(s.getvalue())
 
 # ---- optionally save the report to a file as well ----
-with open("full_profile_report.txt", "w") as f:
+with open("precalculate_cointegration_report.txt", "w") as f:
     f.write(s.getvalue())
-
-print("Full profiler output saved to full_profile_report.txt")
-
-
-total_profit = sum(result["profit"] for result in trade_results)
-number_of_trades = len(trade_results)
-positive_trades = len([trade for trade in trade_results if trade["profit"] > 0])
-successful_trades = len(
-    [
-        trade
-        for trade in trade_results
-        if trade["close_event"]["reason"] == "crossed_mean"
-    ]
-)
-
-print(f"Total Expected Profit: {total_profit:.2f}")
-simulation_data = {
-    "parameters": parameters,
-    "stats": {
-        "total_profit": total_profit,
-        "success_rate": successful_trades / number_of_trades,
-        "positive_results": positive_trades / number_of_trades,
-        "number_of_trades": number_of_trades,
-    },
-    "trade_events": trade_results,
-}
-JsonHelper.save_to_json(simulation_data, simulation_path)
