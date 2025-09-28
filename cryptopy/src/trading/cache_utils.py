@@ -23,7 +23,6 @@ class PairAnalyticsCache:
         "crit_value_1",
         "crit_value_2",
         "crit_value_3",
-        "spread_value",
     ]
 
     def __init__(self, cache_dir: Optional[Path | str] = None):
@@ -46,17 +45,6 @@ class PairAnalyticsCache:
         summary_to_write = self._summary_df.reset_index()
         summary_to_write = summary_to_write[self._SUMMARY_COLUMNS]
         summary_to_write.to_csv(self.summary_path, index=False)
-
-    def _append_spread_rows(self, rows: pd.DataFrame) -> None:
-        if rows is None or rows.empty:
-            return
-        rows = rows[self._SPREAD_COLUMNS]
-        header = not self.spread_path.exists() or self.spread_path.stat().st_size == 0
-        rows.to_csv(self.spread_path, mode="a", header=header, index=False)
-
-    def _rewrite_spread_csv(self) -> None:
-        spread_to_write = self._spread_df[self._SPREAD_COLUMNS]
-        spread_to_write.to_csv(self.spread_path, index=False)
 
     @staticmethod
     def _pair_key(pair: Tuple[str, str]) -> str:
@@ -116,9 +104,7 @@ class PairAnalyticsCache:
         self,
         *,
         new_summary_rows: Optional[pd.DataFrame] = None,
-        new_spread_rows: Optional[pd.DataFrame] = None,
         rewrite_summary: bool = False,
-        rewrite_spread: bool = False,
     ) -> None:
         if rewrite_summary:
             self._rewrite_summary_csv()
@@ -141,10 +127,6 @@ class PairAnalyticsCache:
             return None
 
         summary_row = self._summary_df.loc[(pair_key, date_key)]
-        spread_value = summary_row.get("spread_value")
-        if pd.isna(spread_value):
-            return None
-
         crit_values = summary_row[
             ["crit_value_1", "crit_value_2", "crit_value_3"]
         ].tolist()
@@ -156,7 +138,6 @@ class PairAnalyticsCache:
             "hedge_ratio": summary_row.get("hedge_ratio"),
             "coint_stat": summary_row.get("coint_stat"),
             "crit_values": crit_values_tuple,
-            "spread": spread_value,
         }
 
     def store(
@@ -182,18 +163,12 @@ class PairAnalyticsCache:
             "crit_value_1": None,
             "crit_value_2": None,
             "crit_value_3": None,
-            "spread_value": None,
         }
 
         if crit_values is not None:
             crit_values = tuple(float(value) for value in crit_values)
             for idx, value in enumerate(crit_values[:3]):
                 summary_data[f"crit_value_{idx + 1}"] = value
-
-        spread = spread.sort_index()
-        valid_spread = spread.dropna()
-        if not valid_spread.empty:
-            summary_data["spread_value"] = float(valid_spread.iloc[-1])
 
         new_summary_row = pd.DataFrame([summary_data]).set_index(
             ["pair_key", "date_key"]
@@ -202,23 +177,6 @@ class PairAnalyticsCache:
         if summary_exists:
             self._summary_df = self._summary_df.drop(index=(pair_key, date_key))
         self._summary_df = pd.concat([self._summary_df, new_summary_row])
-
-        spread = spread.sort_index()
-        spread_df = pd.DataFrame(
-            {
-                "pair_key": pair_key,
-                "date_key": date_key,
-                "timestamp": [
-                    PairAnalyticsCache._format_timestamp_for_storage(idx)
-                    for idx in spread.index
-                ],
-                "value": [
-                    float(value) if pd.notna(value) else float("nan")
-                    for value in spread.values
-                ],
-            }
-        )
-
         new_summary_rows = new_summary_row.reset_index()
         self._persist(
             new_summary_rows=None if summary_exists else new_summary_rows,
@@ -228,54 +186,14 @@ class PairAnalyticsCache:
     def get_spread_series(
         self, pair: Tuple[str, str], rolling_window: Optional[int]
     ) -> pd.Series:
-        """Return the latest cached spread values for ``pair``.
+        """Return cached spread values.
 
-        Parameters
-        ----------
-        pair:
-            Trading pair identifier.
-        rolling_window:
-            Maximum number of recent observations to return. When ``None`` or
-            non-positive an empty series is returned.
+        Spread values are no longer persisted, so this method returns an empty
+        series. It is kept for backwards compatibility with older simulator
+        code paths that may still invoke it conditionally.
         """
 
-        if rolling_window is None:
-            return pd.Series(dtype="float64")
-
-        rolling_window = int(rolling_window)
-        if rolling_window <= 0 or self._summary_df.empty:
-            return pd.Series(dtype="float64")
-
-        pair_key = self._pair_key(pair)
-        try:
-            pair_summary = self._summary_df.xs(pair_key, level="pair_key")
-        except KeyError:
-            return pd.Series(dtype="float64")
-
-        if "spread_value" not in pair_summary.columns or pair_summary.empty:
-            return pd.Series(dtype="float64")
-
-        pair_summary = pair_summary.reset_index()
-        pair_summary["timestamp"] = pair_summary["date_key"].apply(
-            self._timestamp_from_date_key
-        )
-        pair_summary = pair_summary.dropna(subset=["timestamp", "spread_value"])
-        if pair_summary.empty:
-            return pd.Series(dtype="float64")
-
-        pair_summary["timestamp"] = pair_summary["timestamp"].apply(
-            self._normalise_timestamp
-        )
-        pair_summary = pair_summary.sort_values("timestamp")
-        pair_summary = pair_summary.tail(rolling_window)
-        if pair_summary.empty:
-            return pd.Series(dtype="float64")
-
-        spread_series = pd.Series(
-            pair_summary["spread_value"].astype(float).to_numpy(),
-            index=pd.Index(pair_summary["timestamp"], name="timestamp"),
-        )
-        return spread_series.sort_index()
+        return pd.Series(dtype="float64")
 
     def _resume_checkpoint(
         self, required_pairs: int
@@ -343,7 +261,6 @@ class PairAnalyticsCache:
             "hedge_ratio": hedge_ratio,
             "coint_stat": coint_stat,
             "crit_values": crit_values,
-            "spread": spread,
         }
 
     @staticmethod
