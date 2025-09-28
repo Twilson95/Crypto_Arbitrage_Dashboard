@@ -23,8 +23,18 @@ def filter_df(df, current_date, days_back):
 
 
 def filter_list(list_data, date):
-    todays_data = list_data.loc[date] if date in list_data.index else None
-    return todays_data
+    """Safely extract data for a specific date from different container types."""
+
+    if isinstance(list_data, (pd.Series, pd.DataFrame)):
+        return list_data.loc[date] if date in list_data.index else None
+
+    if isinstance(list_data, dict):
+        return list_data.get(date)
+
+    if np.isscalar(list_data):
+        return list_data
+
+    return None
 
 
 def compute_spread_metrics(parameters, spread):
