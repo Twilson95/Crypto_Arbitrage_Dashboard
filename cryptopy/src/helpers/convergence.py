@@ -323,7 +323,9 @@ class ConvergenceForecaster:
         updated_sums = window_sums_expanded + forecast_prefix_expanded - drop_initial - forecast_removals
         updated_means = updated_sums / window
 
-        updated_means[~window_valid[:, None]] = np.nan
+        invalid_window_rows = ~window_valid
+        if np.any(invalid_window_rows):
+            updated_means[invalid_window_rows, :] = np.nan
         updated_means[~cumulative_valid] = np.nan
 
         mean_paths.iloc[window - 1 :, :] = updated_means
