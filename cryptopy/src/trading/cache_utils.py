@@ -168,6 +168,9 @@ class PairAnalyticsCache:
         except KeyError:
             return None
 
+        if isinstance(summary_row, pd.DataFrame):
+            summary_row = summary_row.iloc[-1]
+
         crit_values = summary_row[
             ["crit_value_1", "crit_value_2", "crit_value_3"]
         ].tolist()
