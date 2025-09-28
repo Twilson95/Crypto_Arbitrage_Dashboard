@@ -120,6 +120,7 @@ class ArbitrageSimulator:
                 f"Total Profit {cumulative_profit:.2f} \n"
                 f"Time: {end_time - start_time:.2f}secs"
             )
+            return 1, 1
 
         all_trades = self.portfolio_manager.get_all_trade_events()
         cumulative_profit = self.portfolio_manager.get_cumulative_profit()
@@ -673,7 +674,9 @@ class ArbitrageSimulator:
             and todays_spread_mean is not None
             and todays_spread_std not in (None, 0)
         ):
-            spread_deviation = abs(todays_spread - todays_spread_mean) / todays_spread_std
+            spread_deviation = (
+                abs(todays_spread - todays_spread_mean) / todays_spread_std
+            )
 
         return {
             "date": current_date,

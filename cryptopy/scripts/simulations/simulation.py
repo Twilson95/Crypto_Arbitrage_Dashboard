@@ -42,6 +42,7 @@ parameters = {
     "borrow_rate_per_day": 0.002,
     "precompute_pair_analytics": False,
     "analytics_cache_dir": f"../../../data/simulations/cached_cointegration_data/",
+    "plot_forecast": True
 }
 
 model_setup = (
@@ -76,6 +77,16 @@ if parameters["use_ml_predictor"]:
 else:
     river_predictor = None
 
+import cProfile
+import pstats
+import io
+
+print("=== Starting simulation ===")
+report_name = "one_date_simulation"
+# start profiler
+pr = cProfile.Profile()
+pr.enable()
+
 arbitrage_simulator = ArbitrageSimulator(
     parameters,
     price_df,
@@ -90,16 +101,6 @@ if parameters.get("precompute_pair_analytics"):
     print("Pre-computing pair analytics cache...")
     arbitrage_simulator.precalculate_pair_analytics()
 
-import cProfile
-import pstats
-import io
-
-print("=== Starting simulation ===")
-
-# start profiler
-pr = cProfile.Profile()
-pr.enable()
-
 # your code will keep printing / logging as usual
 trade_results, cumulative_profit = arbitrage_simulator.run_simulation()
 
@@ -107,7 +108,7 @@ trade_results, cumulative_profit = arbitrage_simulator.run_simulation()
 pr.disable()
 
 print("=== Simulation finished ===")
-print(f"Trades: {len(trade_results)} | Cumulative profit: {cumulative_profit}")
+# print(f"Trades: {len(trade_results)} | Cumulative profit: {cumulative_profit}")
 
 # ---- print *all* profiling data to the console ----
 print("=== FULL PROFILING REPORT (all functions) ===")
@@ -118,10 +119,8 @@ ps.print_stats()  # <-- prints all rows
 print(s.getvalue())
 
 # ---- optionally save the report to a file as well ----
-with open("full_profile_report.txt", "w") as f:
+with open(f"{report_name}.txt", "w") as f:
     f.write(s.getvalue())
-
-print("Full profiler output saved to full_profile_report.txt")
 
 
 total_profit = sum(result["profit"] for result in trade_results)

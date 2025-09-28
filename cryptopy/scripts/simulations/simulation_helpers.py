@@ -56,6 +56,8 @@ def compute_spread_metrics(parameters, spread):
         rolling_window, holding_period, convergence_window
     )
     forecast = forecaster.forecast(spread)
+    if parameters.get("plot_forecast"):
+        forecaster.plot_forecast(spread, forecast)
 
     expected_exit_mean = forecast.expected_exit_mean
     expected_exit_spread = forecast.expected_exit_spread

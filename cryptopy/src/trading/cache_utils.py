@@ -30,7 +30,7 @@ class PairAnalyticsCache:
         self,
         cache_dir: Optional[Path | str] = None,
         *,
-        read_only: bool = False,
+        read_only: bool = True,
     ):
         if cache_dir is None:
             cache_dir = Path(".cache") / "pair_analytics"
