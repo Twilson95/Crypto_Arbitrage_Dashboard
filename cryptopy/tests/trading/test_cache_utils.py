@@ -2,11 +2,6 @@ import pandas as pd
 import pytest
 
 from cryptopy.src.trading.cache_utils import PairAnalyticsCache
-from cryptopy.src.trading.ArbitrageSimulator import ArbitrageSimulator
-
-
-class DummyPortfolioManager:
-    pass
 
 
 def _store_spread(cache: PairAnalyticsCache, pair, date, value):
@@ -20,51 +15,39 @@ def _store_spread(cache: PairAnalyticsCache, pair, date, value):
     )
 
 
-def test_get_spread_series_returns_recent_values(tmp_path):
+def test_get_spread_series_returns_empty_series(tmp_path):
     cache = PairAnalyticsCache(tmp_path)
     pair = ("BTC/USD", "ETH/USD")
 
     _store_spread(cache, pair, "2024-01-01", 1.0)
-    _store_spread(cache, pair, "2024-01-02", 2.0)
-    _store_spread(cache, pair, "2024-01-03", 3.0)
 
     series = cache.get_spread_series(pair, rolling_window=2)
 
-    assert list(series.index) == [pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")]
-    assert list(series.values) == [2.0, 3.0]
+    assert series.empty
 
 
-def test_get_cached_spread_metrics_uses_cached_series(tmp_path):
+def test_store_and_load_summary_values(tmp_path):
     cache = PairAnalyticsCache(tmp_path)
     pair = ("BTC/USD", "ETH/USD")
+    current_date = pd.Timestamp("2024-01-02")
 
-    _store_spread(cache, pair, "2024-01-01", 1.0)
-    _store_spread(cache, pair, "2024-01-02", 2.0)
-
-    parameters = {
-        "rolling_window": 2,
-        "spread_threshold": 1.0,
-        "spread_limit": 2.0,
-        "expected_holding_days": 0,
-    }
-
-    simulator = ArbitrageSimulator(
-        parameters=parameters,
-        price_df=pd.DataFrame(),
-        volume_df=pd.DataFrame(),
-        portfolio_manager=DummyPortfolioManager(),
-        pair_combinations=[pair],
-        pair_analytics_cache=cache,
+    spread_series = pd.Series([0.5, 0.6], index=[current_date - pd.Timedelta(days=1), current_date])
+    cache.store(
+        pair,
+        current_date,
+        p_value=0.12,
+        hedge_ratio=1.5,
+        spread=spread_series,
+        coint_stat=-3.5,
+        crit_values=(0.1, 0.2, 0.3),
     )
 
-    current_date = pd.Timestamp("2024-01-02")
-    cached_spread = cache.load(pair, current_date)["spread"]
-
-    metrics = simulator._get_cached_spread_metrics(pair, current_date, cached_spread)
-
-    spread_mean = metrics["spread_mean"].dropna()
-    assert not spread_mean.empty
-    assert spread_mean.iloc[-1] == pytest.approx(1.5)
+    cached = cache.load(pair, current_date)
+    assert cached is not None
+    assert cached["p_value"] == pytest.approx(0.12)
+    assert cached["hedge_ratio"] == pytest.approx(1.5)
+    assert cached["coint_stat"] == pytest.approx(-3.5)
+    assert cached["crit_values"] == (0.1, 0.2, 0.3)
 
 
 def test_load_summary_table_vectorises_date_normalisation(tmp_path):
@@ -116,3 +99,38 @@ def test_load_summary_table_vectorises_date_normalisation(tmp_path):
     ]
 
     assert list(cache._summary_df.index) == expected_index
+
+
+def test_read_only_cache_does_not_persist_changes(tmp_path):
+    cache_dir = tmp_path / "analytics"
+    cache = PairAnalyticsCache(cache_dir)
+    pair = ("BTC/USD", "ETH/USD")
+    date = pd.Timestamp("2024-01-01")
+
+    cache.store(
+        pair,
+        date,
+        p_value=0.05,
+        hedge_ratio=1.0,
+        spread=pd.Series([0.1], index=[date]),
+    )
+
+    summary_path = cache.summary_path
+    original_contents = summary_path.read_text()
+    assert "BTC_USD__ETH_USD" in original_contents
+
+    read_only_cache = PairAnalyticsCache(cache_dir, read_only=True)
+    assert list(read_only_cache._summary_df.index) == [
+        ("BTC_USD__ETH_USD", "2024-01-01 00:00:00")
+    ]
+    assert read_only_cache.load(pair, date) is not None
+
+    read_only_cache.store(
+        pair,
+        pd.Timestamp("2024-01-02"),
+        p_value=0.06,
+        hedge_ratio=0.9,
+        spread=pd.Series([0.2], index=[pd.Timestamp("2024-01-02")]),
+    )
+
+    assert summary_path.read_text() == original_contents

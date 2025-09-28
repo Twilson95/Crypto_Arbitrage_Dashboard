@@ -26,7 +26,12 @@ class PairAnalyticsCache:
         "crit_value_3",
     ]
 
-    def __init__(self, cache_dir: Optional[Path | str] = None):
+    def __init__(
+        self,
+        cache_dir: Optional[Path | str] = None,
+        *,
+        read_only: bool = False,
+    ):
         if cache_dir is None:
             cache_dir = Path(".cache") / "pair_analytics"
         self.cache_dir = Path(cache_dir)
@@ -34,6 +39,7 @@ class PairAnalyticsCache:
 
         self.summary_path = self.cache_dir / "pair_analytics.csv"
         self._summary_df = self._load_summary_table()
+        self._read_only = read_only
 
     def _append_summary_rows(self, rows: pd.DataFrame) -> None:
         if rows is None or rows.empty:
@@ -81,7 +87,9 @@ class PairAnalyticsCache:
             index = pd.MultiIndex(
                 levels=[[], []], codes=[[], []], names=["pair_key", "date_key"]
             )
-            return pd.DataFrame(columns=self._SUMMARY_COLUMNS[2:], index=index)
+            empty_df = pd.DataFrame(columns=self._SUMMARY_COLUMNS[2:], index=index)
+            empty_df.sort_index(inplace=True)
+            return empty_df
         df = df[[col for col in self._SUMMARY_COLUMNS if col in df.columns]].copy()
         for column in self._SUMMARY_COLUMNS:
             if column not in df.columns:
@@ -111,13 +119,22 @@ class PairAnalyticsCache:
             )
             parsed_dates.loc[legacy_mask] = legacy_parsed
 
-        formatted_dates = parsed_dates.astype("string")
-        still_missing = parsed_dates.isna()
-        if still_missing.any():
-            formatted_dates.loc[still_missing] = date_series.loc[still_missing]
+        formatted_dates = pd.Series(
+            (
+                PairAnalyticsCache._format_timestamp_for_storage(timestamp)
+                if not pd.isna(timestamp)
+                else date_value
+            )
+            for timestamp, date_value in zip(parsed_dates, date_series)
+        )
+        formatted_dates = formatted_dates.astype("string")
+        missing_mask = formatted_dates.isna() | (formatted_dates == "")
+        if missing_mask.any():
+            formatted_dates.loc[missing_mask] = date_series.loc[missing_mask]
 
         df["date_key"] = formatted_dates
         df = df.set_index(["pair_key", "date_key"])
+        df.sort_index(inplace=True)
         return df
 
     def _persist(
@@ -126,6 +143,9 @@ class PairAnalyticsCache:
         new_summary_rows: Optional[pd.DataFrame] = None,
         rewrite_summary: bool = False,
     ) -> None:
+        if self._read_only:
+            return
+
         if rewrite_summary:
             self._rewrite_summary_csv()
         elif new_summary_rows is not None:
@@ -143,10 +163,11 @@ class PairAnalyticsCache:
     def load(self, pair: Tuple[str, str], current_date) -> Optional[Dict[str, Any]]:
         pair_key = self._pair_key(pair)
         date_key = self._date_key(current_date)
-        if (pair_key, date_key) not in self._summary_df.index:
+        try:
+            summary_row = self._summary_df.loc[(pair_key, date_key)]
+        except KeyError:
             return None
 
-        summary_row = self._summary_df.loc[(pair_key, date_key)]
         crit_values = summary_row[
             ["crit_value_1", "crit_value_2", "crit_value_3"]
         ].tolist()
@@ -171,6 +192,9 @@ class PairAnalyticsCache:
         coint_stat: Optional[float] = None,
         crit_values: Optional[Tuple[float, float, float]] = None,
     ) -> None:
+        if self._read_only:
+            return
+
         pair_key = self._pair_key(pair)
         date_key = self._date_key(current_date)
 
@@ -193,10 +217,17 @@ class PairAnalyticsCache:
         new_summary_row = pd.DataFrame([summary_data]).set_index(
             ["pair_key", "date_key"]
         )
-        summary_exists = (pair_key, date_key) in self._summary_df.index
-        if summary_exists:
+        try:
+            self._summary_df.loc[(pair_key, date_key)]
+        except KeyError:
+            summary_exists = False
+        else:
+            summary_exists = True
             self._summary_df = self._summary_df.drop(index=(pair_key, date_key))
+
         self._summary_df = pd.concat([self._summary_df, new_summary_row])
+        self._summary_df.sort_index(inplace=True)
+
         new_summary_rows = new_summary_row.reset_index()
         self._persist(
             new_summary_rows=None if summary_exists else new_summary_rows,
@@ -255,7 +286,7 @@ class PairAnalyticsCache:
             return None
 
         cached = self.load(pair, current_date)
-        if cached is not None:
+        if cached is not None or self._read_only:
             return cached
 
         coint_stat, p_value, crit_values = CointegrationCalculator.test_cointegration(
@@ -291,6 +322,9 @@ class PairAnalyticsCache:
         cache: PairAnalyticsCache,
     ) -> None:
         """Pre-compute analytics for every pair/day combination."""
+
+        if getattr(cache, "_read_only", False):
+            raise ValueError("Cannot precalculate analytics using a read-only cache.")
 
         index_slice = price_df.index[days_back:]
         if len(index_slice) == 0:
