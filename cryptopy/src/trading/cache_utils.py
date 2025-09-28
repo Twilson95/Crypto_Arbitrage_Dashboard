@@ -225,6 +225,58 @@ class PairAnalyticsCache:
             rewrite_summary=summary_exists,
         )
 
+    def get_spread_series(
+        self, pair: Tuple[str, str], rolling_window: Optional[int]
+    ) -> pd.Series:
+        """Return the latest cached spread values for ``pair``.
+
+        Parameters
+        ----------
+        pair:
+            Trading pair identifier.
+        rolling_window:
+            Maximum number of recent observations to return. When ``None`` or
+            non-positive an empty series is returned.
+        """
+
+        if rolling_window is None:
+            return pd.Series(dtype="float64")
+
+        rolling_window = int(rolling_window)
+        if rolling_window <= 0 or self._summary_df.empty:
+            return pd.Series(dtype="float64")
+
+        pair_key = self._pair_key(pair)
+        try:
+            pair_summary = self._summary_df.xs(pair_key, level="pair_key")
+        except KeyError:
+            return pd.Series(dtype="float64")
+
+        if "spread_value" not in pair_summary.columns or pair_summary.empty:
+            return pd.Series(dtype="float64")
+
+        pair_summary = pair_summary.reset_index()
+        pair_summary["timestamp"] = pair_summary["date_key"].apply(
+            self._timestamp_from_date_key
+        )
+        pair_summary = pair_summary.dropna(subset=["timestamp", "spread_value"])
+        if pair_summary.empty:
+            return pd.Series(dtype="float64")
+
+        pair_summary["timestamp"] = pair_summary["timestamp"].apply(
+            self._normalise_timestamp
+        )
+        pair_summary = pair_summary.sort_values("timestamp")
+        pair_summary = pair_summary.tail(rolling_window)
+        if pair_summary.empty:
+            return pd.Series(dtype="float64")
+
+        spread_series = pd.Series(
+            pair_summary["spread_value"].astype(float).to_numpy(),
+            index=pd.Index(pair_summary["timestamp"], name="timestamp"),
+        )
+        return spread_series.sort_index()
+
     def _resume_checkpoint(
         self, required_pairs: int
     ) -> Optional[Tuple[pd.Timestamp, bool]]:
