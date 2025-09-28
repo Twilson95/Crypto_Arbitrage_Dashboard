@@ -278,8 +278,10 @@ class ArbitrageSimulator:
             if cached_analytics is None:
                 return None
             p_value = cached_analytics["p_value"]
-            base_spread = cached_analytics["spread"]
             base_hedge_ratio = cached_analytics["hedge_ratio"]
+            base_spread, _ = CointegrationCalculator.calculate_spread(
+                price_df_filtered, pair, base_hedge_ratio
+            )
         else:
             coint_stat, p_value, _ = CointegrationCalculator.test_cointegration(
                 price_df_filtered, pair
@@ -314,31 +316,15 @@ class ArbitrageSimulator:
         if cached_metrics is not None:
             return cached_metrics
 
-        spread_input = spread
-        if hasattr(spread, "sort_index"):
+        if isinstance(spread, pd.Series):
             spread_input = spread.sort_index()
-
-        if not hasattr(spread_input, "rolling"):
-            rolling_window = self.parameters.get("rolling_window")
-            spread_series = pd.Series(dtype="float64")
-            if (
-                self._pair_analytics_cache is not None
-                and rolling_window is not None
-                and rolling_window > 0
-            ):
-                spread_series = self._pair_analytics_cache.get_spread_series(
-                    pair, rolling_window
-                )
-
-            if spread_series is not None and not spread_series.empty:
-                spread_input = spread_series
-            else:
-                try:
-                    value = float(spread)
-                except (TypeError, ValueError):
-                    value = float("nan")
-                timestamp = PairAnalyticsCache._normalise_timestamp(current_date)
-                spread_input = pd.Series([value], index=[timestamp], dtype="float64")
+        else:
+            try:
+                value = float(spread)
+            except (TypeError, ValueError):
+                value = float("nan")
+            timestamp = PairAnalyticsCache._normalise_timestamp(current_date)
+            spread_input = pd.Series([value], index=[timestamp], dtype="float64")
 
         metrics = compute_spread_metrics(self.parameters, spread_input)
 
