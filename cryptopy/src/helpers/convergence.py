@@ -205,21 +205,24 @@ class ConvergenceForecaster:
             alpha: float,
             linewidth: float,
         ):
-            base_value = base_series.iloc[-1]
-            if pd.isna(base_value):
-                base_series_valid = base_series.dropna()
-                if base_series_valid.empty:
-                    return
-                base_value = base_series_valid.iloc[-1]
+            base_series_valid = base_series.dropna()
+            if base_series_valid.empty:
+                return
+
+            base_value = base_series_valid.iloc[-1]
+            base_index = base_series_valid.index[-1]
+
             extension = continuation_values.dropna()
             if extension.empty:
                 return
+
             steps = len(extension)
-            future_index = _build_future_index(base_series.index, steps)
+            future_index = _build_future_index(base_series_valid.index, steps)
             if len(future_index) < steps:
                 return
+
             future_index = future_index[:steps]
-            combined_index = base_series.index[-1:].append(future_index)
+            combined_index = pd.Index([base_index]).append(future_index)
             combined_values = pd.Series(
                 np.concatenate([[base_value], extension.to_numpy()]),
                 index=combined_index,
