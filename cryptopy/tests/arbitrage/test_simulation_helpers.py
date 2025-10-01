@@ -39,6 +39,16 @@ class TestSimulationHelperForecastFiltering(unittest.TestCase):
         self.spread = pd.Series(values, index=index)
         self.metrics = sim_helpers.compute_spread_metrics(self.parameters, self.spread)
 
+    def test_compute_spread_metrics_accepts_optional_arguments(self):
+        metrics = sim_helpers.compute_spread_metrics(
+            self.parameters,
+            self.spread,
+            current_date=pd.Timestamp("2023-01-10"),
+            trade_open=True,
+        )
+
+        self.assertIn("spread_mean", metrics)
+
     def test_expected_exit_only_for_trade_candidates(self):
         expected_exit_spread = self.metrics["expected_spread_at_exit"]
         low_deviation_day = pd.Timestamp("2023-01-05")
@@ -56,12 +66,14 @@ class TestSimulationHelperForecastFiltering(unittest.TestCase):
             self.spread,
             low_deviation_day,
             spread_metrics=self.metrics,
+            trade_open=False,
         )
         high_day_data = sim_helpers.get_todays_spread_data(
             self.parameters,
             self.spread,
             high_deviation_day,
             spread_metrics=self.metrics,
+            trade_open=True,
         )
 
         self.assertFalse(low_day_data["trade_considered"])

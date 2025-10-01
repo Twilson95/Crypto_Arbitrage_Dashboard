@@ -37,7 +37,9 @@ def filter_list(list_data, date):
     return None
 
 
-def compute_spread_metrics(parameters, spread):
+def compute_spread_metrics(
+    parameters, spread, current_date=None, trade_open=False
+):
     rolling_window = parameters["rolling_window"]
     spread_mean = spread.rolling(window=rolling_window).mean()
     spread_std = spread.rolling(window=rolling_window).std()
@@ -111,9 +113,13 @@ def compute_spread_metrics(parameters, spread):
     }
 
 
-def get_todays_spread_data(parameters, spread, current_date, spread_metrics=None):
+def get_todays_spread_data(
+    parameters, spread, current_date, spread_metrics=None, trade_open=False
+):
     if spread_metrics is None:
-        spread_metrics = compute_spread_metrics(parameters, spread)
+        spread_metrics = compute_spread_metrics(
+            parameters, spread, current_date=current_date, trade_open=trade_open
+        )
 
     todays_spread = filter_list(spread, current_date)
     todays_spread_mean = filter_list(spread_metrics["spread_mean"], current_date)
