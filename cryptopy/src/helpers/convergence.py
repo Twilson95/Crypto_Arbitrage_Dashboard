@@ -221,15 +221,25 @@ class ConvergenceForecaster:
 
             last_value = current_index[-1]
 
+            datetime_index: Optional[pd.DatetimeIndex] = None
+
             if isinstance(current_index, pd.DatetimeIndex):
-                freq = current_index.freq or current_index.inferred_freq
+                datetime_index = current_index
+            elif (
+                np.issubdtype(current_index.dtype, np.datetime64)
+                or current_index.inferred_type in {"datetime64", "datetime64tz", "date"}
+            ):
+                datetime_index = pd.DatetimeIndex(current_index)
+
+            if datetime_index is not None:
+                freq = datetime_index.freq or datetime_index.inferred_freq
 
                 if freq is not None:
                     start = last_value + pd.tseries.frequencies.to_offset(freq)
                     return pd.date_range(start=start, periods=steps, freq=freq)
 
-                if len(current_index) >= 2:
-                    delta = current_index[-1] - current_index[-2]
+                if len(datetime_index) >= 2:
+                    delta = datetime_index[-1] - datetime_index[-2]
                     if isinstance(delta, pd.Timedelta) and delta != pd.Timedelta(0):
                         values = [last_value + delta * (i + 1) for i in range(steps)]
                         return pd.DatetimeIndex(values)
