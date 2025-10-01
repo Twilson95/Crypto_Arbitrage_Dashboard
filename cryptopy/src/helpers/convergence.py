@@ -160,6 +160,9 @@ class ConvergenceForecaster:
         import matplotlib.pyplot as plt
 
         spread = spread.sort_index()
+        if isinstance(spread.index, pd.PeriodIndex):
+            spread = spread.copy()
+            spread.index = spread.index.to_timestamp()
         spread_mean = spread.rolling(window=self.rolling_window).mean()
         spread_std = spread.rolling(window=self.rolling_window).std()
 
