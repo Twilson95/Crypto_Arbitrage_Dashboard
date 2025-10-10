@@ -2,6 +2,7 @@ import math
 from dataclasses import dataclass
 from typing import Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -134,31 +135,6 @@ class ConvergenceForecaster:
         threshold_multiplier: Optional[float] = None,
         limit_multiplier: Optional[float] = None,
     ):
-        """Visualise the historical spread, rolling mean, and forecast trajectories.
-
-        Parameters
-        ----------
-        spread:
-            Historical spread series used to generate the forecast.
-        forecast:
-            Convergence forecast generated via :meth:`forecast`.
-        show:
-            Whether to display the plot via ``plt.show()``. Defaults to ``True``.
-        save_path:
-            Optional path to persist the plot image. If provided the figure will be
-            written using ``plt.savefig``.
-        ax:
-            Optional matplotlib axes to draw on. When omitted a new figure/axes pair
-            is created and returned.
-
-        Returns
-        -------
-        matplotlib.axes.Axes
-            The axes containing the rendered plot.
-        """
-
-        import matplotlib.pyplot as plt
-
         spread = spread.sort_index()
         if isinstance(spread.index, pd.PeriodIndex):
             spread = spread.copy()
@@ -211,9 +187,6 @@ class ConvergenceForecaster:
                 color="tab:red",
                 linestyle="-.",
             )
-        spread_mean.plot(
-            ax=ax, label="Rolling mean", color="tab:blue", linestyle="--", linewidth=1.0
-        )
 
         def _build_future_index(current_index: pd.Index, steps: int) -> pd.Index:
             if steps <= 0:
@@ -225,10 +198,9 @@ class ConvergenceForecaster:
 
             if isinstance(current_index, pd.DatetimeIndex):
                 datetime_index = current_index
-            elif (
-                np.issubdtype(current_index.dtype, np.datetime64)
-                or current_index.inferred_type in {"datetime64", "datetime64tz", "date"}
-            ):
+            elif np.issubdtype(
+                current_index.dtype, np.datetime64
+            ) or current_index.inferred_type in {"datetime64", "datetime64tz", "date"}:
                 datetime_index = pd.DatetimeIndex(current_index)
 
             if datetime_index is not None:

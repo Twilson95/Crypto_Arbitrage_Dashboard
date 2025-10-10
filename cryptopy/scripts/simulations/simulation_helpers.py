@@ -37,9 +37,7 @@ def filter_list(list_data, date):
     return None
 
 
-def compute_spread_metrics(
-    parameters, spread, current_date=None, trade_open=False
-):
+def compute_spread_metrics(parameters, spread, current_date=None, trade_open=False):
     rolling_window = parameters["rolling_window"]
     spread_mean = spread.rolling(window=rolling_window).mean()
     spread_std = spread.rolling(window=rolling_window).std()
@@ -54,7 +52,9 @@ def compute_spread_metrics(
 
     spread_std_safe = spread_std.replace(0, np.nan)
     spread_deviation = (spread - spread_mean).abs() / spread_std_safe
-    trade_candidate_mask = (spread_deviation >= spread_threshold) & spread_deviation.notna()
+    trade_candidate_mask = (
+        spread_deviation >= spread_threshold
+    ) & spread_deviation.notna()
 
     holding_period = max(int(round(parameters.get("expected_holding_days", 10))), 0)
     convergence_window = parameters.get("convergence_lookback", rolling_window * 3)
@@ -63,7 +63,12 @@ def compute_spread_metrics(
     )
     forecast = forecaster.forecast(spread)
     if parameters.get("plot_forecast"):
-        forecaster.plot_forecast(spread, forecast)
+        forecaster.plot_forecast(
+            spread,
+            forecast,
+            threshold_multiplier=spread_threshold,
+            limit_multiplier=upper_spread_threshold,
+        )
 
     expected_exit_mean = forecast.expected_exit_mean
     expected_exit_spread = forecast.expected_exit_spread
@@ -146,7 +151,9 @@ def get_todays_spread_data(
         and todays_spread_mean is not None
         and todays_spread_std not in (None, 0)
     ):
-        todays_spread_deviation = abs(todays_spread - todays_spread_mean) / todays_spread_std
+        todays_spread_deviation = (
+            abs(todays_spread - todays_spread_mean) / todays_spread_std
+        )
 
     expected_exit_mean = filter_list(
         spread_metrics["expected_mean_at_exit"], current_date
