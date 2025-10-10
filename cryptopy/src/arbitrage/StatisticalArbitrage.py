@@ -2,7 +2,6 @@ from time import time
 
 
 class StatisticalArbitrage:
-
     @staticmethod
     def statistical_arbitrage_iteration(
         entry,
@@ -625,7 +624,9 @@ class StatisticalArbitrage:
             "trade_status": (
                 "open"
                 if exit_points[-1][0] is None
-                else None if len(entry_points) == 0 else "closed"
+                else None
+                if len(entry_points) == 0
+                else "closed"
             ),
         }
         end_time = time()

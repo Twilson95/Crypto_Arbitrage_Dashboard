@@ -36,7 +36,6 @@ class CointegrationData:
 
 
 class CointegrationCalculator:
-
     @staticmethod
     def find_cointegration_pairs(df, precalculated_pairs):
         # Start with the pre-existing cointegration pairs

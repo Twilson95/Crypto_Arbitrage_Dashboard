@@ -570,7 +570,9 @@ def create_filter_label(cointegration_data, coins_in_portfolio):
     color = (
         "green"
         if is_open_opportunity and not is_in_portfolio
-        else "red" if trade_status == "closed" and is_in_portfolio else "black"
+        else "red"
+        if trade_status == "closed" and is_in_portfolio
+        else "black"
     )
 
     return (

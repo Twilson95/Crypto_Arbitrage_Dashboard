@@ -312,7 +312,7 @@ B_mat = np.eye(S_spread.shape[1])
 best_loss = np.inf
 w_best = None
 for i in range(1000):
-    print(f"sca_mrp {i+1}")
+    print(f"sca_mrp {i + 1}")
     # w, loss = sca_mrp(S_spread, B_mat, B_bound=1.0, mu=0.1, loss_function=loss_function)
     w, loss = sca_mrp(
         S_spread,

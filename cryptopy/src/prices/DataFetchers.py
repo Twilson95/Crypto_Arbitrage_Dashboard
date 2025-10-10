@@ -203,7 +203,6 @@ class DataFetcher:
 
     @staticmethod
     def bucket_trades_into_intervals(df, interval="10S"):
-
         # Resample trades into intervals and aggregate into OHLCV
         ohlcv = df.resample(interval, on="datetime").agg(
             {"price": ["first", "max", "min", "last"], "amount": "sum"}
@@ -440,7 +439,6 @@ class DataFetcher:
             # print(f"No cached data for {currency}")
 
         if latest_cached_date is None:
-
             # No cached data, fetch the last `days_to_fetch` days
             since = self.client.parse8601(
                 (datetime.today() - timedelta(days=days_to_fetch)).strftime(

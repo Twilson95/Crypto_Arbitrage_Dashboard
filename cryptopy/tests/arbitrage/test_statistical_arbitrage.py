@@ -9,7 +9,9 @@ import unittest
 
 
 def _load_module(module_name):
-    module_path = Path(__file__).resolve().parents[2] / "src" / "arbitrage" / f"{module_name}.py"
+    module_path = (
+        Path(__file__).resolve().parents[2] / "src" / "arbitrage" / f"{module_name}.py"
+    )
     spec = importlib.util.spec_from_file_location(
         f"cryptopy.src.arbitrage.{module_name}", module_path
     )
@@ -29,7 +31,9 @@ else:
     setattr(sys.modules["cryptopy"], "StatisticalArbitrage", StatisticalArbitrage)
 
 sys.modules.setdefault("cryptopy.src", types.ModuleType("cryptopy.src"))
-sys.modules.setdefault("cryptopy.src.arbitrage", types.ModuleType("cryptopy.src.arbitrage"))
+sys.modules.setdefault(
+    "cryptopy.src.arbitrage", types.ModuleType("cryptopy.src.arbitrage")
+)
 setattr(sys.modules["cryptopy"], "src", sys.modules["cryptopy.src"])
 setattr(sys.modules["cryptopy.src"], "arbitrage", sys.modules["cryptopy.src.arbitrage"])
 sys.modules["cryptopy.src.arbitrage"].StatisticalArbitrage = _stat_module

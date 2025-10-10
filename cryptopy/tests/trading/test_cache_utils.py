@@ -31,7 +31,9 @@ def test_store_and_load_summary_values(tmp_path):
     pair = ("BTC/USD", "ETH/USD")
     current_date = pd.Timestamp("2024-01-02")
 
-    spread_series = pd.Series([0.5, 0.6], index=[current_date - pd.Timedelta(days=1), current_date])
+    spread_series = pd.Series(
+        [0.5, 0.6], index=[current_date - pd.Timedelta(days=1), current_date]
+    )
     cache.store(
         pair,
         current_date,

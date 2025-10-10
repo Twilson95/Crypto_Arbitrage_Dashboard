@@ -6,7 +6,6 @@ from time import time
 
 
 class PriceChart:
-
     @staticmethod
     def create_ohlc_chart(prices, indicators=None, mark_limit=30, title="Price Chart"):
         fig = go.Figure()
@@ -146,7 +145,6 @@ class PriceChart:
 
     @staticmethod
     def format_order_book_for_plotly(order_book, percentage_range=0.1):
-
         # Extract bids and asks
         bids = order_book["bids"]
         asks = order_book["asks"]

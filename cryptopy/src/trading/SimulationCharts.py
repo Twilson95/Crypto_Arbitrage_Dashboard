@@ -7,7 +7,6 @@ from cryptopy.src.helpers.json_helper import JsonHelper
 
 
 class SimulationCharts:
-
     @staticmethod
     def build_profit_per_open_day(df):
         df["open_days"] = (df["close_date"] - df["open_date"]).dt.days

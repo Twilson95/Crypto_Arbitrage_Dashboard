@@ -3,7 +3,6 @@ from cryptopy.src.arbitrage.ArbitrageHandler import ArbitrageHandler
 
 
 class TestArbitrageHandler(unittest.TestCase):
-
     def test_calculate_buy_step(self):
         # Test inputs
         buy_exchange = "ExchangeA"

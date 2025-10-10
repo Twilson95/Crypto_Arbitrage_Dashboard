@@ -2,8 +2,6 @@ from cryptopy import StatisticalArbitrage
 from cryptopy.src.helpers.convergence import ConvergenceForecaster
 import os
 import pandas as pd
-import json
-import datetime
 import glob
 import numpy as np
 
@@ -37,7 +35,7 @@ def filter_list(list_data, date):
     return None
 
 
-def compute_spread_metrics(parameters, spread, current_date=None, trade_open=False):
+def compute_spread_metrics(parameters, spread):
     rolling_window = parameters["rolling_window"]
     spread_mean = spread.rolling(window=rolling_window).mean()
     spread_std = spread.rolling(window=rolling_window).std()

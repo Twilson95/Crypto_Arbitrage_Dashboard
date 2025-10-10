@@ -2,7 +2,6 @@ import itertools
 
 
 class TriangularArbitrage:
-
     @staticmethod
     def calculate_fees(currency_fees, pair, amount, fee_type="taker"):
         """Calculate the fees for a given trading pair."""

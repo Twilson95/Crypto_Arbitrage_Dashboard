@@ -99,7 +99,6 @@ pair_combinations_df = pd.read_csv(cointegration_pairs_path)
 pair_combinations = list(pair_combinations_df.itertuples(index=False, name=None))
 
 for pair in sorted(pair_combinations, key=lambda x: x[0]):
-
     if "XRP/USD" in pair:
         continue
     currency_fees = {pair[0]: {"taker": 0.004}, pair[1]: {"taker": 0.004}}

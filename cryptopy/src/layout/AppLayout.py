@@ -46,7 +46,6 @@ class AppLayout:
         )
 
     def create_filters(self):
-
         arbitrage_filter = html.Div(
             [
                 html.Label("Arbitrage"),

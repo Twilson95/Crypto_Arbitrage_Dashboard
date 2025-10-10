@@ -1,5 +1,4 @@
 class SimpleArbitrage:
-
     @staticmethod
     def calculate_buy_step(
         buy_exchange, currency, buy_price, input_funds, buy_taker_fee

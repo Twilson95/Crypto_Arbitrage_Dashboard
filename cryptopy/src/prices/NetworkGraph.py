@@ -166,7 +166,7 @@ def generate_arbitrage_edge_positions(G, pos, arbitrage_route, shorten_factor=0.
             arb_edge_text.append(f"{format_amount(rate)}")
         elif G.has_edge(edge[1], edge[0]):
             rate = G[edge[1]][edge[0]]["weight"]
-            arb_edge_text.append(f"{format_amount(1/rate)}")
+            arb_edge_text.append(f"{format_amount(1 / rate)}")
         else:
             arb_edge_text.append("")
 

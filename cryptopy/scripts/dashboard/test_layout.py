@@ -109,13 +109,11 @@ def update_historic_price_chart(currency, exchange, selected_indicators):
     ],
 )
 def update_live_price_chart(currency, exchange, n_intervals, indicator):
-
     return price_chart.create_ohlc_chart(live_data, mark_limit=20, title="Live Price")
 
 
 @app.callback(Output("news-table", "children"), [Input("currency-selector", "value")])
 def update_news_chart(currency):
-
     return news_chart.create_table_layout(news)
 
 
