@@ -35,7 +35,7 @@ def filter_list(list_data, date):
     return None
 
 
-def compute_spread_metrics(parameters, spread):
+def compute_spread_metrics(parameters, spread, current_date, trade_open):
     rolling_window = parameters["rolling_window"]
     spread_mean = spread.rolling(window=rolling_window).mean()
     spread_std = spread.rolling(window=rolling_window).std()
@@ -59,41 +59,45 @@ def compute_spread_metrics(parameters, spread):
     forecaster = ConvergenceForecaster(
         rolling_window, holding_period, convergence_window
     )
-    forecast = forecaster.forecast(spread)
-    if parameters.get("plot_forecast"):
-        forecaster.plot_forecast(
-            spread,
-            forecast,
-            threshold_multiplier=spread_threshold,
-            limit_multiplier=upper_spread_threshold,
-        )
+    if trade_open or trade_candidate_mask:
+        forecast = forecaster.forecast(spread)
+        if parameters.get("plot_forecast"):
+            forecaster.plot_forecast(
+                spread,
+                forecast,
+                threshold_multiplier=spread_threshold,
+                limit_multiplier=upper_spread_threshold,
+            )
+    else:
+        forecast = None
 
-    expected_exit_mean = forecast.expected_exit_mean
-    expected_exit_spread = forecast.expected_exit_spread
-    decay_factor = forecast.decay_factor
-    convergence_half_life = forecast.half_life
-    convergence_confidence = forecast.confidence
-    convergence_phi = forecast.phi
-    convergence_intercept = forecast.intercept
-    spread_paths = forecast.spread_paths
-    mean_paths = forecast.mean_paths
+    expected_exit_mean = forecast.expected_exit_mean if forecast is not None else None
+    expected_exit_spread = forecast.expected_exit_spread if forecast is not None else None
+    decay_factor = forecast.decay_factor if forecast is not None else None
+    convergence_half_life = forecast.half_life if forecast is not None else None
+    convergence_confidence = forecast.confidence if forecast is not None else None
+    convergence_phi = forecast.phi if forecast is not None else None
+    convergence_intercept = forecast.intercept if forecast is not None else None
+    spread_paths = forecast.spread_paths if forecast is not None else None
+    mean_paths = forecast.mean_paths if forecast is not None else None
 
-    if isinstance(expected_exit_mean, pd.Series):
-        expected_exit_mean = expected_exit_mean.where(trade_candidate_mask)
-    if isinstance(expected_exit_spread, pd.Series):
-        expected_exit_spread = expected_exit_spread.where(trade_candidate_mask)
+    if trade_open or trade_candidate_mask:
+        if isinstance(expected_exit_mean, pd.Series):
+            expected_exit_mean = expected_exit_mean.where(trade_candidate_mask)
+        if isinstance(expected_exit_spread, pd.Series):
+            expected_exit_spread = expected_exit_spread.where(trade_candidate_mask)
 
-    if isinstance(spread_paths, pd.DataFrame) and not spread_paths.empty:
-        mask_series = trade_candidate_mask.reindex(spread_paths.index).fillna(False)
-        mask_values = mask_series.to_numpy(dtype=bool)[:, None]
-        broadcast_mask = np.broadcast_to(mask_values, spread_paths.shape)
-        spread_paths = spread_paths.where(broadcast_mask)
+        if isinstance(spread_paths, pd.DataFrame) and not spread_paths.empty:
+            mask_series = trade_candidate_mask.reindex(spread_paths.index).fillna(False)
+            mask_values = mask_series.to_numpy(dtype=bool)[:, None]
+            broadcast_mask = np.broadcast_to(mask_values, spread_paths.shape)
+            spread_paths = spread_paths.where(broadcast_mask)
 
-    if isinstance(mean_paths, pd.DataFrame) and not mean_paths.empty:
-        mask_series = trade_candidate_mask.reindex(mean_paths.index).fillna(False)
-        mask_values = mask_series.to_numpy(dtype=bool)[:, None]
-        broadcast_mask = np.broadcast_to(mask_values, mean_paths.shape)
-        mean_paths = mean_paths.where(broadcast_mask)
+        if isinstance(mean_paths, pd.DataFrame) and not mean_paths.empty:
+            mask_series = trade_candidate_mask.reindex(mean_paths.index).fillna(False)
+            mask_values = mask_series.to_numpy(dtype=bool)[:, None]
+            broadcast_mask = np.broadcast_to(mask_values, mean_paths.shape)
+            mean_paths = mean_paths.where(broadcast_mask)
 
     return {
         "spread_mean": spread_mean,

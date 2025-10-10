@@ -1,16 +1,3 @@
-from river import (
-    compose,
-    preprocessing,
-    linear_model,
-    feature_extraction,
-    naive_bayes,
-    tree,
-    forest,
-    ensemble,
-)
-import copy
-
-
 class RiverPredictor:
     def __init__(self, prediction_threshold, model_setup):
         # self.cat_features = ["coin_1", "coin_2"]
