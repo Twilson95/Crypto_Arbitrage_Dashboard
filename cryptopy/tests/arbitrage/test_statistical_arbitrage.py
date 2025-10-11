@@ -300,6 +300,77 @@ class TestStatisticalArbitrageIteration(unittest.TestCase):
         self.assertAlmostEqual(waterfall["Coin-2 Fees"], -btc_fees_usd)
         self.assertEqual(summary["coins_used"], ["ETH", "BTC"])
 
+    def test_short_iteration_simple_inputs_produce_expected_profit_and_fees(self):
+        entry_time = pd.Timestamp("2023-01-01 00:00:00")
+        exit_time = pd.Timestamp("2023-01-02 00:00:00")
+        price_df = pd.DataFrame(
+            {
+                "BTC/USD": [200.0, 180.0],
+                "ETH/USD": [100.0, 120.0],
+            },
+            index=[entry_time, exit_time],
+        )
+
+        usd_start = 100.0
+        taker_fee = 0.10
+        hedge_ratio = 1.0
+        borrow_rate = 0.05
+
+        result = StatisticalArbitrage.statistical_arbitrage_iteration(
+            entry=(entry_time, 0.5, "short"),
+            exit=(exit_time, 0.25),
+            pairs=("BTC/USD", "ETH/USD"),
+            currency_fees={
+                "BTC/USD": {"taker": taker_fee},
+                "ETH/USD": {"taker": taker_fee},
+            },
+            price_df=price_df,
+            usd_start=usd_start,
+            hedge_ratio=hedge_ratio,
+            exchange="unit-test",
+            borrow_rate_per_day=borrow_rate,
+            expected_holding_days=1.0,
+        )
+
+        eth_entry_price = price_df.loc[entry_time, "ETH/USD"]
+        eth_exit_price = price_df.loc[exit_time, "ETH/USD"]
+        btc_entry_price = price_df.loc[entry_time, "BTC/USD"]
+        btc_exit_price = price_df.loc[exit_time, "BTC/USD"]
+
+        amount_eth_bought = usd_start / eth_entry_price
+        eth_entry_fee = amount_eth_bought * taker_fee
+        net_eth_after_entry = amount_eth_bought - eth_entry_fee
+        eth_exit_fee = net_eth_after_entry * taker_fee
+        usd_after_eth_exit = (net_eth_after_entry - eth_exit_fee) * eth_exit_price
+        eth_profit = usd_after_eth_exit - usd_start
+        eth_fees_usd = eth_entry_fee * eth_entry_price + eth_exit_fee * eth_exit_price
+
+        amount_btc_shorted = amount_eth_bought * hedge_ratio
+        btc_entry_fee = amount_btc_shorted * taker_fee
+        net_btc_after_entry = amount_btc_shorted - btc_entry_fee
+        btc_exit_fee = net_btc_after_entry * taker_fee
+        usd_received_from_short = amount_btc_shorted * btc_entry_price
+        usd_spent_covering_short = (
+            net_btc_after_entry - btc_exit_fee
+        ) * btc_exit_price
+        btc_profit = usd_received_from_short - usd_spent_covering_short
+        btc_fees_usd = btc_entry_fee * btc_entry_price + btc_exit_fee * btc_exit_price
+
+        short_notional = amount_btc_shorted * btc_entry_price
+        expected_borrow_cost = borrow_rate * 1.0 * short_notional
+
+        expected_total_profit = eth_profit + btc_profit - expected_borrow_cost
+
+        summary = result["summary_header"]
+        waterfall = result["waterfall_data"]
+
+        self.assertAlmostEqual(summary["total_profit"], expected_total_profit)
+        self.assertAlmostEqual(summary["borrow_costs"], expected_borrow_cost)
+        self.assertAlmostEqual(result["borrow_costs"], expected_borrow_cost)
+        self.assertAlmostEqual(waterfall["Coin-1 Fees"], -eth_fees_usd)
+        self.assertAlmostEqual(waterfall["Coin-2 Fees"], -btc_fees_usd)
+        self.assertAlmostEqual(waterfall["Borrow/Funding Costs"], -expected_borrow_cost)
+
 
 class TestCointegrationCalculator(unittest.TestCase):
     def test_calculate_spread_with_negative_cached_ratio(self):
