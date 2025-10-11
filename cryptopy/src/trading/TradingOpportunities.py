@@ -1,5 +1,3 @@
-
-
 class TradingOpportunities:
     @staticmethod
     def check_for_opening_event(
