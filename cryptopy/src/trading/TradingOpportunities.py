@@ -1,5 +1,3 @@
-
-
 class TradingOpportunities:
     @staticmethod
     def check_for_opening_event(
@@ -162,17 +160,31 @@ class TradingOpportunities:
                 "reason": "crossed_mean",
             }
 
-        if open_event["direction"] == "short" and spread > open_event["stop_loss"]:
+        stop_loss_value = TradingOpportunities._resolve_stop_loss_value(open_event)
+
+        if (
+            stop_loss_value is not None
+            and open_event["direction"] == "short"
+            and spread > stop_loss_value
+        ):
             if parameters.get("stop_loss_triggered_immediately"):
-                todays_data["spread"] = todays_data["upper_limit"]
+                TradingOpportunities._apply_stop_loss_cap(
+                    todays_data, open_event, stop_loss_value
+                )
             return {
                 "date": current_date,
                 "spread_data": todays_data,
                 "reason": "stop_loss",
             }
-        elif open_event["direction"] == "long" and spread < open_event["stop_loss"]:
+        elif (
+            stop_loss_value is not None
+            and open_event["direction"] == "long"
+            and spread < stop_loss_value
+        ):
             if parameters.get("stop_loss_triggered_immediately"):
-                todays_data["spread"] = todays_data["lower_limit"]
+                TradingOpportunities._apply_stop_loss_cap(
+                    todays_data, open_event, stop_loss_value
+                )
             return {
                 "date": current_date,
                 "spread_data": todays_data,
@@ -184,7 +196,9 @@ class TradingOpportunities:
             and spread_mean > open_event["spread_data"]["spread"]
         ):
             if parameters.get("stop_loss_triggered_immediately"):
-                todays_data["spread"] = todays_data["upper_limit"]
+                TradingOpportunities._apply_stop_loss_cap(
+                    todays_data, open_event, stop_loss_value
+                )
             return {
                 "date": current_date,
                 "spread_data": todays_data,
@@ -195,7 +209,9 @@ class TradingOpportunities:
             and spread_mean < open_event["spread_data"]["spread"]
         ):
             if parameters.get("stop_loss_triggered_immediately"):
-                todays_data["spread"] = todays_data["lower_limit"]
+                TradingOpportunities._apply_stop_loss_cap(
+                    todays_data, open_event, stop_loss_value
+                )
             return {
                 "date": current_date,
                 "spread_data": todays_data,
@@ -203,6 +219,46 @@ class TradingOpportunities:
             }
 
         return None
+
+    @staticmethod
+    def _resolve_stop_loss_value(open_event):
+        stop_loss = open_event.get("stop_loss")
+        spread_data = open_event.get("spread_data") or {}
+
+        spread_override = spread_data.get("stop_loss_spread")
+        if spread_override is not None:
+            return spread_override
+
+        if isinstance(stop_loss, dict):
+            if "spread" in stop_loss:
+                return stop_loss["spread"]
+            if "value" in stop_loss:
+                value = stop_loss["value"]
+                if isinstance(value, (int, float)):
+                    return value
+
+        return stop_loss if isinstance(stop_loss, (int, float)) else None
+
+    @staticmethod
+    def _apply_stop_loss_cap(todays_data, open_event, stop_loss_value=None):
+        """Clamp the spread so it never exceeds the configured stop loss."""
+
+        if stop_loss_value is None:
+            stop_loss_value = TradingOpportunities._resolve_stop_loss_value(open_event)
+
+        if stop_loss_value is None:
+            return
+
+        spread = todays_data.get("spread")
+        if spread is None:
+            todays_data["spread"] = stop_loss_value
+            return
+
+        direction = open_event.get("direction")
+        if direction == "short":
+            todays_data["spread"] = min(spread, stop_loss_value)
+        elif direction == "long":
+            todays_data["spread"] = max(spread, stop_loss_value)
 
     @staticmethod
     def _evaluate_forecast_exit(todays_data, parameters, open_event):

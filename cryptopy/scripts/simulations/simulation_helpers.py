@@ -64,8 +64,9 @@ def compute_spread_metrics(parameters, spread, current_date, trade_open):
         or (spread_mean.iloc[-1] < lower_spread_limit.iloc[-1])
         or (upper_spread_limit.iloc[-1] < spread_mean.iloc[-1])
     ):
-        forecast = forecaster.forecast(spread)
-        if parameters.get("plot_forecast"):
+        forecast_parameters = parameters["forecasting_parameters"]
+        forecast = forecaster.forecast(spread, forecast_parameters)
+        if forecast_parameters.get("plot_forecast"):
             forecaster.plot_forecast(
                 spread,
                 forecast,

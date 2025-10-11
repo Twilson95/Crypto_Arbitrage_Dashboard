@@ -3,15 +3,15 @@ import pstats
 import io
 
 import pandas as pd
-from river import preprocessing, linear_model, tree
+from river import preprocessing, linear_model
 
-from cryptopy import PortfolioManager, JsonHelper, ArbitrageSimulator, RiverPredictor
+from cryptopy import PortfolioManager, ArbitrageSimulator, RiverPredictor
 from cryptopy.scripts.simulations.simulation_helpers import get_combined_df_of_data
 
 simulation_name = "long_history_perceptron"
 exchange_name = "Kraken"
 historic_folder_path = "../../../data/historical_data/Kraken_long_history"
-cointegration_pairs_path = f"../../../data/historical_data/cointegration_pairs.csv"
+cointegration_pairs_path = "../../../data/historical_data/cointegration_pairs.csv"
 simulation_path = f"../../../data/simulations/portfolio_sim/{simulation_name}.json"
 
 parameters = {
@@ -45,7 +45,7 @@ parameters = {
     "expected_holding_days": 15,
     "borrow_rate_per_day": 0.002,
     "precompute_pair_analytics": True,
-    "analytics_cache_dir": f"../../../data/simulations/cached_cointegration_data/",
+    "analytics_cache_dir": "../../../data/simulations/cached_cointegration_data/",
 }
 
 model_setup = (
