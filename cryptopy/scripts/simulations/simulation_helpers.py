@@ -250,6 +250,107 @@ def get_trade_profit(
     df_filtered,
     trade_amount,
 ):
+    exit_event_actual = dict(close_event)
+    exit_spread_data_actual = close_event.get("spread_data")
+    if exit_spread_data_actual is None:
+        exit_spread_data_actual = {}
+    else:
+        exit_spread_data_actual = dict(exit_spread_data_actual)
+    exit_event_actual["spread_data"] = exit_spread_data_actual
+
+    stop_loss_exit_spread = open_event.get("stop_loss")
+    stop_loss_immediate = open_event.get("stop_loss_triggered_immediately")
+
+    price_df_actual = df_filtered
+    if exit_spread_data_actual.get("spread") is None and stop_loss_exit_spread is not None:
+        adjusted_prices = _apply_stop_loss_exit_prices(
+            df_filtered,
+            pair,
+            open_event,
+            close_event.get("date"),
+            stop_loss_exit_spread,
+        )
+        if adjusted_prices is not None:
+            price_df_actual = adjusted_prices
+            exit_spread_data_actual["spread"] = stop_loss_exit_spread
+
+    selected_exit_event = exit_event_actual
+
+    arbitrage_actual, profit_actual = _calculate_trade_profit(
+        open_event,
+        exit_event_actual,
+        pair,
+        currency_fees,
+        price_df_actual,
+        trade_amount,
+    )
+
+    selected_arbitrage = arbitrage_actual
+    selected_profit = profit_actual
+
+    if stop_loss_immediate and stop_loss_exit_spread is not None:
+        exit_event_stop_loss = dict(exit_event_actual)
+        exit_spread_data_stop_loss = dict(exit_event_actual.get("spread_data", {}))
+        exit_spread_data_stop_loss["spread"] = stop_loss_exit_spread
+        exit_event_stop_loss["spread_data"] = exit_spread_data_stop_loss
+
+        stop_loss_price_df = _apply_stop_loss_exit_prices(
+            df_filtered,
+            pair,
+            open_event,
+            close_event.get("date"),
+            stop_loss_exit_spread,
+        )
+
+        if stop_loss_price_df is not None:
+            (
+                arbitrage_stop_loss,
+                profit_stop_loss,
+            ) = _calculate_trade_profit(
+                open_event,
+                exit_event_stop_loss,
+                pair,
+                currency_fees,
+                stop_loss_price_df,
+                trade_amount,
+            )
+
+            if profit_stop_loss is not None:
+                should_replace = False
+
+                if selected_profit is None:
+                    should_replace = True
+                elif selected_profit < 0 and profit_stop_loss <= 0:
+                    should_replace = profit_stop_loss > selected_profit
+
+                if should_replace:
+                    selected_profit = profit_stop_loss
+                    selected_exit_event = exit_event_stop_loss
+                    selected_arbitrage = arbitrage_stop_loss
+
+    if selected_arbitrage and selected_profit is not None:
+        print(
+            f"Pair: {pair}\n"
+            f"Live Dates: {open_event['date']} to {selected_exit_event['date']}\n"
+            f"Close Reason: {close_event['reason']}\n"
+            f"Profit {selected_profit:.2f}"
+        )
+        return selected_profit
+
+
+def _calculate_trade_profit(
+    open_event,
+    exit_event,
+    pair,
+    currency_fees,
+    price_df,
+    trade_amount,
+):
+    spread_data = exit_event.get("spread_data", {})
+    exit_spread = spread_data.get("spread")
+    if exit_spread is None:
+        return None, None
+
     arbitrage = StatisticalArbitrage.statistical_arbitrage_iteration(
         entry=(
             open_event["date"],
@@ -257,25 +358,86 @@ def get_trade_profit(
             open_event["direction"],
             open_event.get("expected_exit_spread"),
         ),
-        exit=(close_event["date"], close_event["spread_data"]["spread"]),
+        exit=(exit_event["date"], exit_spread),
         pairs=pair,
-        currency_fees=currency_fees,  # Example transaction cost
-        price_df=df_filtered,
+        currency_fees=currency_fees,
+        price_df=price_df,
         usd_start=trade_amount,
         hedge_ratio=open_event["hedge_ratio"],
         exchange="test",
         borrow_rate_per_day=open_event.get("borrow_rate_per_day", 0.0),
         expected_holding_days=open_event.get("expected_holding_days", 0.0),
     )
-    if arbitrage:
-        profit = arbitrage.get("summary_header", {}).get("total_profit", 0)
-        print(
-            f"Pair: {pair}\n"
-            f"Live Dates: {open_event['date']} to {close_event['date']}\n"
-            f"Close Reason: {close_event['reason']}\n"
-            f"Profit {profit:.2f}"
-        )
-        return profit
+
+    if not arbitrage:
+        return None, None
+
+    profit = arbitrage.get("summary_header", {}).get("total_profit")
+    return arbitrage, profit
+
+
+def _apply_stop_loss_exit_prices(
+    price_df,
+    pair,
+    open_event,
+    exit_date,
+    exit_spread,
+):
+    if not isinstance(price_df, pd.DataFrame):
+        return None
+
+    hedge_ratio = open_event.get("hedge_ratio")
+    direction = open_event.get("direction")
+
+    if hedge_ratio in (None, 0) or direction is None:
+        return None
+
+    pair1, pair2 = pair
+    ratio = hedge_ratio
+    normalized_ratio, legs_flipped = StatisticalArbitrage.normalize_hedge_ratio(
+        hedge_ratio
+    )
+    if normalized_ratio is not None:
+        ratio = normalized_ratio
+
+    if ratio in (None, 0):
+        return None
+
+    pair1_col, pair2_col = pair1, pair2
+    if legs_flipped:
+        pair1_col, pair2_col = pair2_col, pair1_col
+
+    if direction == "short":
+        try:
+            ratio = 1 / ratio
+        except ZeroDivisionError:
+            return None
+        pair1_col, pair2_col = pair2_col, pair1_col
+
+    ratio = abs(ratio)
+
+    try:
+        exit_row = price_df.loc[exit_date]
+    except KeyError:
+        return None
+
+    exit_price2 = exit_row.get(pair2_col)
+    if exit_price2 is None or pd.isna(exit_price2):
+        try:
+            exit_price2 = price_df.at[open_event["date"], pair2_col]
+        except (KeyError, TypeError):
+            exit_price2 = None
+
+    if exit_price2 is None or pd.isna(exit_price2):
+        return None
+
+    exit_price1 = exit_spread + ratio * exit_price2
+    if exit_price1 < 0:
+        exit_price1 = 0.0
+
+    adjusted_prices = price_df.copy()
+    adjusted_prices.at[exit_date, pair1_col] = exit_price1
+    return adjusted_prices
 
 
 def get_combined_df_of_data(folder_path, field="close"):
