@@ -59,7 +59,11 @@ def compute_spread_metrics(parameters, spread, current_date, trade_open):
     forecaster = ConvergenceForecaster(
         rolling_window, holding_period, convergence_window
     )
-    if trade_open or trade_candidate_mask:
+    if (
+        trade_open
+        or (spread_mean.iloc[-1] < lower_spread_limit.iloc[-1])
+        or (upper_spread_limit.iloc[-1] < spread_mean.iloc[-1])
+    ):
         forecast = forecaster.forecast(spread)
         if parameters.get("plot_forecast"):
             forecaster.plot_forecast(
@@ -72,7 +76,9 @@ def compute_spread_metrics(parameters, spread, current_date, trade_open):
         forecast = None
 
     expected_exit_mean = forecast.expected_exit_mean if forecast is not None else None
-    expected_exit_spread = forecast.expected_exit_spread if forecast is not None else None
+    expected_exit_spread = (
+        forecast.expected_exit_spread if forecast is not None else None
+    )
     decay_factor = forecast.decay_factor if forecast is not None else None
     convergence_half_life = forecast.half_life if forecast is not None else None
     convergence_confidence = forecast.confidence if forecast is not None else None
@@ -81,7 +87,11 @@ def compute_spread_metrics(parameters, spread, current_date, trade_open):
     spread_paths = forecast.spread_paths if forecast is not None else None
     mean_paths = forecast.mean_paths if forecast is not None else None
 
-    if trade_open or trade_candidate_mask:
+    if (
+        trade_open
+        or (spread_mean.iloc[-1] < lower_spread_limit.iloc[-1])
+        or (upper_spread_limit.iloc[-1] < spread_mean.iloc[-1])
+    ):
         if isinstance(expected_exit_mean, pd.Series):
             expected_exit_mean = expected_exit_mean.where(trade_candidate_mask)
         if isinstance(expected_exit_spread, pd.Series):

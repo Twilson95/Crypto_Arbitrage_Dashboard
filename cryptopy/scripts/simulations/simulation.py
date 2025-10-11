@@ -4,7 +4,7 @@ from river import preprocessing, linear_model
 from cryptopy import PortfolioManager, JsonHelper, ArbitrageSimulator, RiverPredictor
 from cryptopy.scripts.simulations.simulation_helpers import get_combined_df_of_data
 
-simulation_name = "long_history_perceptron"
+simulation_name = "long_history_forecast_exit_price_min_exp_0.005"
 exchange_name = "Kraken"
 historic_folder_path = "../../../data/historical_data/Kraken_long_history"
 cointegration_pairs_path = "../../../data/historical_data/cointegration_pairs.csv"
@@ -22,9 +22,9 @@ parameters = {
     "stop_loss_multiplier": 1.5,  # optimised 1.5-1.8
     "max_coin_price_ratio": 50,  # default 50
     "max_concurrent_trades": 12,  # default 12
-    "min_expected_profit": 0.0025,  # must expect at least half a percent of the portfolio amount
+    "min_expected_profit": 0.005,  # must expect at least half a percent of the portfolio amount
     "max_expected_profit": 0.025,  # no more at risk as 5% percent of the portfolio amount
-    "trade_size": 0.05,  # proportion of portfolio bought in each trade - default 0.06
+    "trade_size": 0.050,  # proportion of portfolio bought in each trade - default 0.06
     "trade_size_same_risk": True,
     "volume_period": 30,  # default 30
     "volume_threshold": 999,  # default 2
@@ -40,9 +40,10 @@ parameters = {
     },
     "expected_holding_days": 15,
     "borrow_rate_per_day": 0.002,
+    "stop_loss_triggered_immediately": True,
     "precompute_pair_analytics": False,
     "analytics_cache_dir": "../../../data/simulations/cached_cointegration_data/",
-    "plot_forecast": True,
+    "plot_forecast": False,
 }
 
 model_setup = (
@@ -77,15 +78,15 @@ if parameters["use_ml_predictor"]:
 else:
     river_predictor = None
 
-import cProfile
-import pstats
-import io
-
-print("=== Starting simulation ===")
-report_name = "one_date_simulation"
-# start profiler
-pr = cProfile.Profile()
-pr.enable()
+# import cProfile
+# import pstats
+# import io
+#
+# print("=== Starting simulation ===")
+# report_name = "one_date_simulation"
+# # start profiler
+# pr = cProfile.Profile()
+# pr.enable()
 
 arbitrage_simulator = ArbitrageSimulator(
     parameters,
@@ -105,22 +106,22 @@ if parameters.get("precompute_pair_analytics"):
 trade_results, cumulative_profit = arbitrage_simulator.run_simulation()
 
 # stop profiler
-pr.disable()
+# pr.disable()
 
 print("=== Simulation finished ===")
 # print(f"Trades: {len(trade_results)} | Cumulative profit: {cumulative_profit}")
 
 # ---- print *all* profiling data to the console ----
-print("=== FULL PROFILING REPORT (all functions) ===")
-s = io.StringIO()
-ps = pstats.Stats(pr, stream=s)  # no strip_dirs(), no filters
-ps.sort_stats("cumulative")  # you can change to "time", "calls", etc.
-ps.print_stats()  # <-- prints all rows
-print(s.getvalue())
+# print("=== FULL PROFILING REPORT (all functions) ===")
+# s = io.StringIO()
+# ps = pstats.Stats(pr, stream=s)  # no strip_dirs(), no filters
+# ps.sort_stats("cumulative")  # you can change to "time", "calls", etc.
+# ps.print_stats()  # <-- prints all rows
+# print(s.getvalue())
 
 # ---- optionally save the report to a file as well ----
-with open(f"{report_name}.txt", "w") as f:
-    f.write(s.getvalue())
+# with open(f"{report_name}.txt", "w") as f:
+#     f.write(s.getvalue())
 
 
 total_profit = sum(result["profit"] for result in trade_results)

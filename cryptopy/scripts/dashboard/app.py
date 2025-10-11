@@ -633,10 +633,11 @@ def get_json_files():
 @app.callback(
     Output("simulation-selector", "options"),
     Output("simulation-selector", "value"),
-    Input("interval-component", "n_intervals"),
+    # Input("interval-component", "n_intervals"),
+    Input("tabs", "value"),
     State("simulation-selector", "value"),
 )
-def update_dropdown(n, value):
+def update_dropdown(tabs, value):
     options = [{"label": f, "value": f} for f in get_json_files()]
     if options and value is None:
         value = options[0]["value"]

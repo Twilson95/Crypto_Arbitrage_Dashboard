@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 import warnings
 
-import math
 import time
 import pandas as pd
 
@@ -79,7 +78,7 @@ class PairAnalyticsCache:
 
     def _load_summary_table(self) -> pd.DataFrame:
         if self.summary_path.exists():
-            print(f"Loading summary table")
+            print("Loading summary table")
             df = pd.read_csv(self.summary_path)
         else:
             df = pd.DataFrame(columns=self._SUMMARY_COLUMNS)
@@ -134,7 +133,7 @@ class PairAnalyticsCache:
 
         df["date_key"] = formatted_dates
         df = df.set_index(["pair_key", "date_key"])
-        df.sort_index(inplace=True)
+        df = df.sort_index()
         return df
 
     def _persist(
@@ -164,7 +163,9 @@ class PairAnalyticsCache:
         pair_key = self._pair_key(pair)
         date_key = self._date_key(current_date)
         try:
-            summary_row = self._summary_df.loc[(pair_key, date_key)]
+            # summary_row = self._summary_df.loc[(pair_key, date_key)]
+            summary_row = self._summary_df.loc[pair_key].loc[date_key]
+
         except KeyError:
             return None
 
@@ -221,7 +222,9 @@ class PairAnalyticsCache:
             ["pair_key", "date_key"]
         )
         try:
-            self._summary_df.loc[(pair_key, date_key)]
+            # self._summary_df.loc[(pair_key, date_key)]
+            self._summary_df.loc[pair_key].loc[date_key]
+
         except KeyError:
             summary_exists = False
         else:

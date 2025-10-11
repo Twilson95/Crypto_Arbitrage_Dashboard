@@ -120,7 +120,7 @@ class ArbitrageSimulator:
                 f"Total Profit {cumulative_profit:.2f} \n"
                 f"Time: {end_time - start_time:.2f}secs"
             )
-            return 1, 1
+            # return 1, 1
 
         all_trades = self.portfolio_manager.get_all_trade_events()
         cumulative_profit = self.portfolio_manager.get_cumulative_profit()
@@ -531,11 +531,11 @@ class ArbitrageSimulator:
             except (TypeError, ValueError):
                 pass
 
-        print(
-            f"{pair} convergence forecast -> expected exit spread: {exit_str}, "
-            f"half-life: {half_life_str}, confidence: {confidence_str}, "
-            f"decay factor: {decay_str}, phi: {phi_str}, intercept: {intercept_str}"
-        )
+        # print(
+        #     f"{pair} convergence forecast -> expected exit spread: {exit_str}, "
+        #     f"half-life: {half_life_str}, confidence: {confidence_str}, "
+        #     f"decay factor: {decay_str}, phi: {phi_str}, intercept: {intercept_str}"
+        # )
         if forecast_diff:
             print(f"{pair} forecast spread minus mean: {forecast_diff}")
         print(f"{pair} expected profit: {expected_profit:.2f}")
