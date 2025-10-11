@@ -38,6 +38,10 @@ class TradingOpportunities:
                     "direction": "short",
                     "avg_price_ratio": avg_price_ratio,
                     "stop_loss": short_stop_loss,
+                    "stop_loss_triggered_immediately": parameters.get(
+                        "stop_loss_triggered_immediately",
+                        False,
+                    ),
                     "expected_exit_spread": todays_spread_data.get(
                         "expected_spread_mean_at_exit"
                     ),
@@ -78,6 +82,10 @@ class TradingOpportunities:
                     "direction": "long",
                     "avg_price_ratio": avg_price_ratio,
                     "stop_loss": long_stop_loss,
+                    "stop_loss_triggered_immediately": parameters.get(
+                        "stop_loss_triggered_immediately",
+                        False,
+                    ),
                     "expected_exit_spread": todays_spread_data.get(
                         "expected_spread_mean_at_exit"
                     ),
@@ -163,16 +171,30 @@ class TradingOpportunities:
                 "reason": "crossed_mean",
             }
 
+        stop_loss_exit_spread = open_event.get("stop_loss")
+        trigger_stop_loss_immediately = open_event.get(
+            "stop_loss_triggered_immediately",
+            parameters.get("stop_loss_triggered_immediately", False),
+        )
+
         if open_event["direction"] == "short" and spread > open_event["stop_loss"]:
+            spread_data = todays_data
+            if trigger_stop_loss_immediately and stop_loss_exit_spread is not None:
+                spread_data = dict(todays_data)
+                spread_data["spread"] = stop_loss_exit_spread
             return {
                 "date": current_date,
-                "spread_data": todays_data,
+                "spread_data": spread_data,
                 "reason": "stop_loss",
             }
         elif open_event["direction"] == "long" and spread < open_event["stop_loss"]:
+            spread_data = todays_data
+            if trigger_stop_loss_immediately and stop_loss_exit_spread is not None:
+                spread_data = dict(todays_data)
+                spread_data["spread"] = stop_loss_exit_spread
             return {
                 "date": current_date,
-                "spread_data": todays_data,
+                "spread_data": spread_data,
                 "reason": "stop_loss",
             }
 
