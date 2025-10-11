@@ -285,7 +285,8 @@ def get_trade_profit(
         trade_amount,
     )
 
-    worst_profit = profit_actual
+    selected_arbitrage = arbitrage_actual
+    selected_profit = profit_actual
 
     if stop_loss_immediate and stop_loss_exit_spread is not None:
         exit_event_stop_loss = dict(exit_event_actual)
@@ -315,20 +316,20 @@ def get_trade_profit(
             )
 
             if profit_stop_loss is not None and (
-                worst_profit is None or profit_stop_loss < worst_profit
+                selected_profit is None or profit_stop_loss > selected_profit
             ):
-                worst_profit = profit_stop_loss
+                selected_profit = profit_stop_loss
                 selected_exit_event = exit_event_stop_loss
-                arbitrage_actual = arbitrage_stop_loss
+                selected_arbitrage = arbitrage_stop_loss
 
-    if arbitrage_actual and worst_profit is not None:
+    if selected_arbitrage and selected_profit is not None:
         print(
             f"Pair: {pair}\n"
             f"Live Dates: {open_event['date']} to {selected_exit_event['date']}\n"
             f"Close Reason: {close_event['reason']}\n"
-            f"Profit {worst_profit:.2f}"
+            f"Profit {selected_profit:.2f}"
         )
-        return worst_profit
+        return selected_profit
 
 
 def _calculate_trade_profit(
