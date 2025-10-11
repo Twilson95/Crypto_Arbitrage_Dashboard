@@ -1,4 +1,3 @@
-from cryptopy.src.trading.PortfolioManager import PortfolioManager
 
 
 class TradingOpportunities:
@@ -164,12 +163,16 @@ class TradingOpportunities:
             }
 
         if open_event["direction"] == "short" and spread > open_event["stop_loss"]:
+            if parameters.get("stop_loss_triggered_immediately"):
+                todays_data["spread"] = todays_data["upper_limit"]
             return {
                 "date": current_date,
                 "spread_data": todays_data,
                 "reason": "stop_loss",
             }
         elif open_event["direction"] == "long" and spread < open_event["stop_loss"]:
+            if parameters.get("stop_loss_triggered_immediately"):
+                todays_data["spread"] = todays_data["lower_limit"]
             return {
                 "date": current_date,
                 "spread_data": todays_data,
@@ -180,6 +183,8 @@ class TradingOpportunities:
             open_event["direction"] == "short"
             and spread_mean > open_event["spread_data"]["spread"]
         ):
+            if parameters.get("stop_loss_triggered_immediately"):
+                todays_data["spread"] = todays_data["upper_limit"]
             return {
                 "date": current_date,
                 "spread_data": todays_data,
@@ -189,6 +194,8 @@ class TradingOpportunities:
             open_event["direction"] == "long"
             and spread_mean < open_event["spread_data"]["spread"]
         ):
+            if parameters.get("stop_loss_triggered_immediately"):
+                todays_data["spread"] = todays_data["lower_limit"]
             return {
                 "date": current_date,
                 "spread_data": todays_data,
