@@ -89,7 +89,7 @@ async def watch_order_books(
 
 async def evaluate_and_execute(
     calculator: TriangularArbitrageCalculator,
-    executor: TriangularArbitrageExecutor,
+    executor: Optional[TriangularArbitrageExecutor],
     routes: Sequence[TriangularRoute],
     *,
     order_books: Dict[str, OrderBookSnapshot],
@@ -98,6 +98,7 @@ async def evaluate_and_execute(
     min_profit_percentage: float,
     max_route_length: Optional[int],
     evaluation_interval: float,
+    enable_execution: bool,
     wake_event: asyncio.Event,
     stop_event: asyncio.Event,
 ) -> None:
@@ -147,6 +148,15 @@ async def evaluate_and_execute(
             logger.debug("Opportunity already executed recently; skipping duplicate execution")
             continue
 
+        if not enable_execution or executor is None:
+            logger.info(
+                "Execution disabled. Opportunity would yield %.6f (%.4f%%) if executed.",
+                best.profit,
+                best.profit_percentage,
+            )
+            last_execution = OpportunityExecution(best.route, profit_signature)
+            continue
+
         try:
             orders = await executor.execute_async(best)
         except ValueError as exc:
@@ -159,6 +169,9 @@ async def evaluate_and_execute(
 
 
 async def run_from_args(args: argparse.Namespace) -> None:
+    if args.live_trading and not args.enable_execution:
+        raise SystemExit("--live-trading requires --enable-execution to be set.")
+
     credentials: Dict[str, str] = {}
     if args.api_key:
         credentials["apiKey"] = args.api_key
@@ -179,11 +192,13 @@ async def run_from_args(args: argparse.Namespace) -> None:
         exchange,
         slippage_buffer=args.slippage_buffer,
     )
-    executor = TriangularArbitrageExecutor(
-        exchange,
-        dry_run=not args.live_trading,
-        trade_log_path=args.trade_log,
-    )
+    executor: Optional[TriangularArbitrageExecutor] = None
+    if args.enable_execution:
+        executor = TriangularArbitrageExecutor(
+            exchange,
+            dry_run=not args.live_trading,
+            trade_log_path=args.trade_log,
+        )
 
     symbols = sorted({symbol for route in args.routes for symbol in route.symbols})
     order_books: Dict[str, OrderBookSnapshot] = {}
@@ -214,6 +229,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             min_profit_percentage=args.min_profit_percentage,
             max_route_length=args.max_route_length,
             evaluation_interval=args.evaluation_interval,
+            enable_execution=args.enable_execution,
             wake_event=wake_event,
             stop_event=stop_event,
         ),
@@ -316,6 +332,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--disable-websocket",
         action="store_true",
         help="Disable websocket usage and rely on REST polling for order books.",
+    )
+    parser.add_argument(
+        "--enable-execution",
+        action="store_true",
+        help="Allow the executor to place simulated or live orders.",
     )
     parser.add_argument(
         "--live-trading",
