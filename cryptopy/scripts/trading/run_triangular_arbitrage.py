@@ -171,16 +171,25 @@ class OpportunityExecution:
 def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> Dict[str, str]:
     """Load API credentials for ``exchange`` from a YAML configuration file."""
 
-    path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
-    if not path.exists():
+    raw_path = config_path if config_path else DEFAULT_CONFIG_PATH
+    try:
+        config_file = Path(raw_path).expanduser()
+    except TypeError:
+        logger.warning("Invalid config path %r supplied; skipping credential load.", raw_path)
+        return {}
+
+    if isinstance(config_file, str):  # pragma: no cover - defensive for unexpected types
+        config_file = Path(config_file)
+
+    if not config_file.exists():
         return {}
 
     try:
-        data = yaml.safe_load(path.read_text()) or {}
+        data = yaml.safe_load(config_file.read_text()) or {}
     except FileNotFoundError:  # pragma: no cover - race condition guard
         return {}
     except yaml.YAMLError:  # pragma: no cover - malformed config
-        logger.warning("Unable to parse credentials from %s", path)
+        logger.warning("Unable to parse credentials from %s", config_file)
         return {}
 
     section_name = CONFIG_SECTION_BY_EXCHANGE.get(exchange.lower())
