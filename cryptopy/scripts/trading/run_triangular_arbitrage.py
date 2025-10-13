@@ -5,7 +5,10 @@ import argparse
 import asyncio
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Optional, Sequence, Tuple
+
+import yaml
 
 from cryptopy.src.trading.triangular_arbitrage import (
     ExchangeConnection,
@@ -18,6 +21,25 @@ from cryptopy.src.trading.triangular_arbitrage import (
 
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Runtime defaults
+# ---------------------------------------------------------------------------
+# These flags can be adjusted directly in the source file to quickly change the
+# runner behaviour without editing the CLI invocation. Command-line arguments
+# still take precedence when explicitly supplied.
+ENABLE_EXECUTION_DEFAULT = False
+LIVE_TRADING_DEFAULT = False
+USE_TESTNET_DEFAULT = True
+DISABLE_WEBSOCKET_DEFAULT = False
+LOG_LEVEL_DEFAULT = "INFO"
+
+# Optional configuration file used to source API credentials when present.
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config.yaml"
+CONFIG_SECTION_BY_EXCHANGE = {
+    "kraken": "kraken_websocket",
+}
 
 
 def parse_route(route_definition: str) -> TriangularRoute:
@@ -46,6 +68,36 @@ class OpportunityExecution:
 
     route: TriangularRoute
     profit_signature: Tuple[float, float]
+
+
+def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> Dict[str, str]:
+    """Load API credentials for ``exchange`` from a YAML configuration file."""
+
+    path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
+    if not path.exists():
+        return {}
+
+    try:
+        data = yaml.safe_load(path.read_text()) or {}
+    except FileNotFoundError:  # pragma: no cover - race condition guard
+        return {}
+    except yaml.YAMLError:  # pragma: no cover - malformed config
+        logger.warning("Unable to parse credentials from %s", path)
+        return {}
+
+    section_name = CONFIG_SECTION_BY_EXCHANGE.get(exchange.lower())
+    if not section_name:
+        return {}
+
+    section = data.get(section_name) or {}
+    credentials: Dict[str, str] = {}
+    api_key = section.get("api_key")
+    api_secret = section.get("api_secret")
+    if api_key:
+        credentials["apiKey"] = api_key
+    if api_secret:
+        credentials["secret"] = api_secret
+    return credentials
 
 
 async def watch_order_books(
@@ -172,7 +224,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
     if args.live_trading and not args.enable_execution:
         raise SystemExit("--live-trading requires --enable-execution to be set.")
 
-    credentials: Dict[str, str] = {}
+    credentials = load_credentials_from_config(args.exchange, args.config)
     if args.api_key:
         credentials["apiKey"] = args.api_key
     if args.secret:
@@ -323,29 +375,37 @@ def build_parser() -> argparse.ArgumentParser:
         "--password", dest="password", default=None, help="Exchange password if required."
     )
     parser.add_argument(
+        "--config",
+        default=None,
+        help="Optional path to a YAML file containing API credentials.",
+    )
+    parser.add_argument(
         "--use-testnet",
-        action="store_true",
-        default=False,
-        help="Enable the exchange sandbox/testnet when supported.",
+        action=argparse.BooleanOptionalAction,
+        default=USE_TESTNET_DEFAULT,
+        help="Enable or disable the exchange sandbox/testnet when supported.",
     )
     parser.add_argument(
         "--disable-websocket",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=DISABLE_WEBSOCKET_DEFAULT,
         help="Disable websocket usage and rely on REST polling for order books.",
     )
     parser.add_argument(
         "--enable-execution",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=ENABLE_EXECUTION_DEFAULT,
         help="Allow the executor to place simulated or live orders.",
     )
     parser.add_argument(
         "--live-trading",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=LIVE_TRADING_DEFAULT,
         help="Execute real trades instead of running in dry-run mode.",
     )
     parser.add_argument(
         "--log-level",
-        default="INFO",
+        default=LOG_LEVEL_DEFAULT,
         help="Configure the logging level (e.g. DEBUG, INFO).",
     )
     return parser
@@ -354,7 +414,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[Sequence[str]] = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
+    default_level = getattr(logging, LOG_LEVEL_DEFAULT.upper(), logging.INFO)
+    logging.basicConfig(level=getattr(logging, args.log_level.upper(), default_level))
     try:
         asyncio.run(run_from_args(args))
     except KeyboardInterrupt:  # pragma: no cover - outer signal handler

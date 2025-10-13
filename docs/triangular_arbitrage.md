@@ -2,6 +2,8 @@
 
 The `run_triangular_arbitrage.py` script monitors real-time order books and evaluates configured triangular routes. By default it only reports opportunities and does **not** attempt to place any orders.
 
+At the top of the script you will find a handful of boolean defaults (for example `ENABLE_EXECUTION_DEFAULT`, `LIVE_TRADING_DEFAULT`, and `USE_TESTNET_DEFAULT`). Toggle these flags to quickly change the runner's behaviour without modifying your command line each time. CLI arguments still override the inline defaults when explicitly supplied.
+
 ## Usage
 
 ```
@@ -18,6 +20,13 @@ Key options:
 - `--live-trading` switches from simulated test orders to real exchange orders. It requires `--enable-execution`.
 - `--use-testnet` enables the sandbox/testnet for exchanges that provide one.
 - `--trade-log` stores each simulated or live leg in a CSV file for auditing.
+- `--config` can point at a YAML file (defaults to `config.yaml` in the project root) that contains credentials. For Kraken, the loader expects an entry in the form:
+
+  ```yaml
+  kraken_websocket:
+    api_key: YOUR_KEY
+    api_secret: YOUR_SECRET
+  ```
 
 ## Kraken testing
 
