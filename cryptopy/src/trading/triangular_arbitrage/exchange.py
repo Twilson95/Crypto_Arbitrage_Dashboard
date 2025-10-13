@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any, AsyncIterator, Dict, Optional, Sequence
 
 from .models import OrderBookSnapshot
 
@@ -65,6 +65,16 @@ class ExchangeConnection:
         self._default_fee = (
             self.rest_client.fees.get("trading", {}).get("taker") if hasattr(self.rest_client, "fees") else None
         )
+
+    def get_markets(self) -> Dict[str, Any]:
+        """Return the cached market metadata loaded during initialisation."""
+
+        return self._market_cache
+
+    def list_symbols(self) -> Sequence[str]:
+        """Return the list of symbols supported by the exchange."""
+
+        return list(self._market_cache.keys())
 
     def get_taker_fee(self, symbol: str) -> float:
         market = self._market_cache.get(symbol, {})

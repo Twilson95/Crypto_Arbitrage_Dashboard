@@ -4,9 +4,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import math
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import yaml
 
@@ -29,6 +31,7 @@ logger = logging.getLogger(__name__)
 # These flags can be adjusted directly in the source file to quickly change the
 # runner behaviour without editing the CLI invocation. Command-line arguments
 # still take precedence when explicitly supplied.
+EXCHANGE_DEFAULT = "kraken"
 ENABLE_EXECUTION_DEFAULT = False
 LIVE_TRADING_DEFAULT = False
 USE_TESTNET_DEFAULT = True
@@ -42,24 +45,119 @@ CONFIG_SECTION_BY_EXCHANGE = {
 }
 
 
-def parse_route(route_definition: str) -> TriangularRoute:
-    """Parse a CLI route definition into a :class:`TriangularRoute` instance.
+def generate_triangular_routes(markets: Dict[str, Dict[str, object]]) -> List[TriangularRoute]:
+    """Construct all distinct three-leg triangular routes from exchange markets."""
 
-    The expected format is ``PAIR1>PAIR2>PAIR3:START_CURRENCY``.
-    """
+    currency_graph: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+    for symbol, metadata in markets.items():
+        if not isinstance(metadata, dict):
+            continue
+        if metadata.get("active") is False:
+            continue
+        base = metadata.get("base")
+        quote = metadata.get("quote")
+        if not base or not quote:
+            continue
+        currency_graph[str(quote)].append((symbol, str(base)))
+        currency_graph[str(base)].append((symbol, str(quote)))
 
-    try:
-        symbols_part, starting_currency = route_definition.split(":", maxsplit=1)
-    except ValueError as exc:  # pragma: no cover - defensive guard
-        raise argparse.ArgumentTypeError(
-            "Routes must follow the format 'PAIR1>PAIR2>PAIR3:START'."
-        ) from exc
-    symbols = tuple(symbol.strip().upper() for symbol in symbols_part.split(">") if symbol.strip())
-    if len(symbols) < 3:
-        raise argparse.ArgumentTypeError(
-            "A triangular route must contain at least three trading pairs."
-        )
-    return TriangularRoute(symbols, starting_currency.upper())
+    routes: List[TriangularRoute] = []
+    seen: set[Tuple[str, Tuple[str, str, str]]] = set()
+
+    for start_currency, first_edges in currency_graph.items():
+        for symbol_a, currency_b in first_edges:
+            for symbol_b, currency_c in currency_graph.get(currency_b, []):
+                if symbol_b == symbol_a:
+                    continue
+                for symbol_c, currency_d in currency_graph.get(currency_c, []):
+                    if symbol_c in (symbol_a, symbol_b):
+                        continue
+                    if currency_d != start_currency:
+                        continue
+                    route_symbols = (symbol_a, symbol_b, symbol_c)
+                    key = (start_currency, route_symbols)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    routes.append(TriangularRoute(route_symbols, start_currency))
+
+    routes.sort(key=lambda route: (route.starting_currency, route.symbols))
+    return routes
+
+
+def compute_route_log_cost(
+    route: TriangularRoute,
+    order_books: Dict[str, OrderBookSnapshot],
+    markets: Dict[str, Dict[str, object]],
+    fee_lookup: Dict[str, float],
+) -> Optional[float]:
+    """Return the logarithmic cost of a route; negative implies arbitrage potential."""
+
+    current_currency = route.starting_currency
+    log_sum = 0.0
+
+    for symbol in route.symbols:
+        market = markets.get(symbol)
+        order_book = order_books.get(symbol)
+        if market is None or order_book is None:
+            return None
+
+        base = market.get("base")
+        quote = market.get("quote")
+        if not base or not quote:
+            return None
+
+        fee = fee_lookup.get(symbol, 0.0)
+        fee_factor = 1.0 - float(fee)
+        if fee_factor <= 0:
+            return None
+
+        if current_currency == quote:
+            best_level = order_book.best_ask()
+            if not best_level:
+                return None
+            price = float(best_level[0])
+            if price <= 0:
+                return None
+            cost = price / fee_factor
+            next_currency = str(base)
+        elif current_currency == base:
+            best_level = order_book.best_bid()
+            if not best_level:
+                return None
+            price = float(best_level[0])
+            if price <= 0:
+                return None
+            cost = 1.0 / (price * fee_factor)
+            next_currency = str(quote)
+        else:
+            return None
+
+        log_sum += math.log(cost)
+        current_currency = next_currency
+
+    if current_currency != route.starting_currency:
+        return None
+
+    return log_sum
+
+
+def select_routes_with_negative_log_sum(
+    routes: Sequence[TriangularRoute],
+    order_books: Dict[str, OrderBookSnapshot],
+    markets: Dict[str, Dict[str, object]],
+    fee_lookup: Dict[str, float],
+) -> List[TriangularRoute]:
+    """Return only the routes whose cumulative log cost is negative."""
+
+    selected: List[TriangularRoute] = []
+    for route in routes:
+        log_cost = compute_route_log_cost(route, order_books, markets, fee_lookup)
+        if log_cost is None:
+            continue
+        if log_cost < 0:
+            selected.append(route)
+    return selected
 
 
 @dataclass
@@ -145,7 +243,8 @@ async def evaluate_and_execute(
     routes: Sequence[TriangularRoute],
     *,
     order_books: Dict[str, OrderBookSnapshot],
-    required_symbols: Sequence[str],
+    markets: Dict[str, Dict[str, object]],
+    fee_lookup: Dict[str, float],
     starting_amount: float,
     min_profit_percentage: float,
     max_route_length: Optional[int],
@@ -169,12 +268,20 @@ async def evaluate_and_execute(
             break
         if not order_books:
             continue
-        if any(symbol not in order_books for symbol in required_symbols):
+
+        candidate_routes = select_routes_with_negative_log_sum(
+            routes,
+            order_books,
+            markets,
+            fee_lookup,
+        )
+        if not candidate_routes:
+            logger.debug("No routes satisfied the negative log-sum arbitrage condition.")
             continue
 
         try:
             opportunities = calculator.find_profitable_routes(
-                routes,
+                candidate_routes,
                 order_books,
                 starting_amount=starting_amount,
                 min_profit_percentage=min_profit_percentage,
@@ -221,10 +328,14 @@ async def evaluate_and_execute(
 
 
 async def run_from_args(args: argparse.Namespace) -> None:
+    exchange_name = args.exchange or EXCHANGE_DEFAULT
+    if not exchange_name:
+        raise SystemExit("An exchange must be specified either inline or via --exchange.")
+
     if args.live_trading and not args.enable_execution:
         raise SystemExit("--live-trading requires --enable-execution to be set.")
 
-    credentials = load_credentials_from_config(args.exchange, args.config)
+    credentials = load_credentials_from_config(exchange_name, args.config)
     if args.api_key:
         credentials["apiKey"] = args.api_key
     if args.secret:
@@ -233,12 +344,18 @@ async def run_from_args(args: argparse.Namespace) -> None:
         credentials["password"] = args.password
 
     exchange = ExchangeConnection(
-        args.exchange,
+        exchange_name,
         credentials=credentials or None,
         use_testnet=args.use_testnet,
         enable_websocket=not args.disable_websocket,
         make_trades=args.live_trading,
     )
+
+    markets = exchange.get_markets()
+    routes = generate_triangular_routes(markets)
+    if not routes:
+        raise SystemExit(f"No triangular routes discovered for {exchange_name}.")
+    logger.info("Discovered %d triangular routes on %s", len(routes), exchange_name)
 
     calculator = TriangularArbitrageCalculator(
         exchange,
@@ -252,10 +369,26 @@ async def run_from_args(args: argparse.Namespace) -> None:
             trade_log_path=args.trade_log,
         )
 
-    symbols = sorted({symbol for route in args.routes for symbol in route.symbols})
+    symbols = sorted({symbol for route in routes for symbol in route.symbols})
+    fee_lookup = {symbol: float(exchange.get_taker_fee(symbol)) for symbol in symbols}
     order_books: Dict[str, OrderBookSnapshot] = {}
     wake_event = asyncio.Event()
     stop_event = asyncio.Event()
+
+    if symbols:
+        for symbol in symbols:
+            try:
+                snapshot = await asyncio.to_thread(
+                    exchange.get_order_book,
+                    symbol,
+                    limit=args.order_book_depth,
+                )
+            except Exception:
+                logger.debug("Initial order book fetch failed for %s", symbol, exc_info=True)
+            else:
+                order_books[symbol] = snapshot
+        if order_books:
+            wake_event.set()
 
     watcher = asyncio.create_task(
         watch_order_books(
@@ -274,9 +407,10 @@ async def run_from_args(args: argparse.Namespace) -> None:
         evaluate_and_execute(
             calculator,
             executor,
-            args.routes,
+            routes,
             order_books=order_books,
-            required_symbols=symbols,
+            markets=markets,
+            fee_lookup=fee_lookup,
             starting_amount=args.starting_amount,
             min_profit_percentage=args.min_profit_percentage,
             max_route_length=args.max_route_length,
@@ -308,16 +442,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--exchange",
-        required=True,
+        default=EXCHANGE_DEFAULT,
         help="Name of the exchange supported by ccxt (e.g. binance, kraken).",
-    )
-    parser.add_argument(
-        "--route",
-        dest="routes",
-        action="append",
-        type=parse_route,
-        required=True,
-        help="Triangular route definition formatted as PAIR1>PAIR2>PAIR3:START_CURRENCY. Repeat for multiple routes.",
     )
     parser.add_argument(
         "--starting-amount",
