@@ -128,9 +128,7 @@ class ExchangeConnection:
                 except (CcxtNotSupported, AttributeError):  # type: ignore[misc]
                     if not websocket_failed:
                         logger.info(
-                            "%s websocket order book not supported for %s; falling back to REST polling.",
-                            self.exchange_name,
-                            symbol,
+                            f"{self.exchange_name} websocket order book not supported for {symbol}; falling back to REST polling."
                         )
                     use_websocket = False
                     websocket_failed = True
@@ -139,15 +137,11 @@ class ExchangeConnection:
                 except asyncio.TimeoutError:
                     if not websocket_failed:
                         logger.warning(
-                            "%s websocket order book timed out for %s; falling back to REST polling.",
-                            self.exchange_name,
-                            symbol,
+                            f"{self.exchange_name} websocket order book timed out for {symbol}; falling back to REST polling."
                         )
                     else:
                         logger.debug(
-                            "%s websocket order book still timing out for %s; polling via REST.",
-                            self.exchange_name,
-                            symbol,
+                            f"{self.exchange_name} websocket order book still timing out for {symbol}; polling via REST."
                         )
                     use_websocket = False
                     websocket_failed = True
@@ -155,17 +149,11 @@ class ExchangeConnection:
                 except Exception as exc:  # pragma: no cover - network failure path
                     if not websocket_failed:
                         logger.warning(
-                            "%s websocket order book failed for %s; falling back to REST polling (%s).",
-                            self.exchange_name,
-                            symbol,
-                            exc,
+                            f"{self.exchange_name} websocket order book failed for {symbol}; falling back to REST polling ({exc})."
                         )
                     else:
                         logger.debug(
-                            "%s websocket order book still unavailable for %s (%s); polling via REST.",
-                            self.exchange_name,
-                            symbol,
-                            exc,
+                            f"{self.exchange_name} websocket order book still unavailable for {symbol} ({exc}); polling via REST."
                         )
                     use_websocket = False
                     websocket_failed = True
@@ -238,10 +226,7 @@ class ExchangeConnection:
                     fetched = None
                 except Exception as exc:  # pragma: no cover - network failure path
                     logger.debug(
-                        "%s REST fetch_tickers failed for %s: %s",
-                        self.exchange_name,
-                        symbol_list,
-                        exc,
+                        f"{self.exchange_name} REST fetch_tickers failed for {symbol_list}: {exc}"
                     )
                     fetched = None
 
@@ -302,8 +287,7 @@ class ExchangeConnection:
                 except (CcxtNotSupported, AttributeError):  # type: ignore[misc]
                     if not websocket_failed:
                         logger.info(
-                            "%s websocket ticker stream not supported; falling back to REST polling.",
-                            self.exchange_name,
+                            f"{self.exchange_name} websocket ticker stream not supported; falling back to REST polling."
                         )
                     use_websocket = False
                     websocket_failed = True
@@ -311,8 +295,7 @@ class ExchangeConnection:
                 except asyncio.TimeoutError:
                     if not websocket_failed:
                         logger.warning(
-                            "%s websocket ticker stream timed out; falling back to REST polling.",
-                            self.exchange_name,
+                            f"{self.exchange_name} websocket ticker stream timed out; falling back to REST polling."
                         )
                     use_websocket = False
                     websocket_failed = True
@@ -320,9 +303,7 @@ class ExchangeConnection:
                 except Exception as exc:  # pragma: no cover - network failure path
                     if not websocket_failed:
                         logger.warning(
-                            "%s websocket ticker stream failed; falling back to REST polling (%s).",
-                            self.exchange_name,
-                            exc,
+                            f"{self.exchange_name} websocket ticker stream failed; falling back to REST polling ({exc})."
                         )
                     use_websocket = False
                     websocket_failed = True
@@ -346,9 +327,7 @@ class ExchangeConnection:
 
         if not hasattr(client, "set_sandbox_mode"):
             logger.info(
-                "%s sandbox mode is not available for %s connections via ccxt.",
-                self.exchange_name,
-                transport,
+                f"{self.exchange_name} sandbox mode is not available for {transport} connections via ccxt."
             )
             return False
 
@@ -357,16 +336,11 @@ class ExchangeConnection:
             return True
         except CcxtNotSupported as exc:  # type: ignore[misc]
             logger.info(
-                "%s does not provide a ccxt sandbox endpoint; running against production API. (%s)",
-                self.exchange_name,
-                exc,
+                f"{self.exchange_name} does not provide a ccxt sandbox endpoint; running against production API. ({exc})"
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning(
-                "Failed to enable sandbox mode for %s (%s connection): %s",
-                self.exchange_name,
-                transport,
-                exc,
+                f"Failed to enable sandbox mode for {self.exchange_name} ({transport} connection): {exc}"
             )
         return False
 

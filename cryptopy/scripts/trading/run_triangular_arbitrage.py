@@ -210,7 +210,9 @@ def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> D
     try:
         config_file = Path(raw_path).expanduser()
     except TypeError:
-        logger.warning("Invalid config path %r supplied; skipping credential load.", raw_path)
+        logger.warning(
+            f"Invalid config path {raw_path!r} supplied; skipping credential load."
+        )
         return {}
 
     if isinstance(config_file, str):  # pragma: no cover - defensive for unexpected types
@@ -224,7 +226,7 @@ def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> D
     except FileNotFoundError:  # pragma: no cover - race condition guard
         return {}
     except yaml.YAMLError:  # pragma: no cover - malformed config
-        logger.warning("Unable to parse credentials from %s", config_file)
+        logger.warning(f"Unable to parse credentials from {config_file}")
         return {}
 
     section_name = CONFIG_SECTION_BY_EXCHANGE.get(exchange.lower())
@@ -280,7 +282,9 @@ async def watch_market_data(
                 try:
                     trigger_queue.put_nowait("market_data")
                 except asyncio.QueueFull:  # pragma: no cover - unbounded by default
-                    logger.debug("Trigger queue full; dropping market_data notification")
+                    logger.debug(
+                        "Trigger queue full; dropping market_data notification"
+                    )
             if stop_event.is_set():
                 break
     except asyncio.CancelledError:
@@ -323,7 +327,9 @@ async def maintain_price_cache(
                         symbol,
                     )
                 except Exception:
-                    logger.debug("Price refresh failed for %s", symbol, exc_info=True)
+                    logger.debug(
+                        f"Price refresh failed for {symbol}", exc_info=True
+                    )
                 else:
                     snapshot = PriceSnapshot.from_ccxt(symbol, ticker)
                     if snapshot is not None:
@@ -331,7 +337,9 @@ async def maintain_price_cache(
                         try:
                             trigger_queue.put_nowait("price_refresh")
                         except asyncio.QueueFull:  # pragma: no cover - unbounded by default
-                            logger.debug("Trigger queue full; dropping price_refresh notification")
+                            logger.debug(
+                                "Trigger queue full; dropping price_refresh notification"
+                            )
             await asyncio.sleep(per_symbol_delay)
     except asyncio.CancelledError:
         raise
@@ -393,11 +401,8 @@ async def evaluate_and_execute(
         if not fresh_prices:
             duration = perf_counter() - evaluation_started_at
             logger.info(
-                "Route evaluation (%s) started at %s; skipped in %.3fs due to missing fresh prices (max age %.1fs)",
-                reason_summary,
-                evaluation_started_wall_clock,
-                duration,
-                price_max_age,
+                f"Route evaluation ({reason_summary}) started at {evaluation_started_wall_clock}; "
+                f"skipped in {duration:.3f}s due to missing fresh prices (max age {price_max_age:.1f}s)"
             )
             continue
 
@@ -412,13 +417,9 @@ async def evaluate_and_execute(
         if candidate_count == 0:
             duration = perf_counter() - evaluation_started_at
             logger.info(
-                "Route evaluation (%s) started at %s; evaluated %d/%d candidate routes (from %d discovered) in %.3fs",
-                reason_summary,
-                evaluation_started_wall_clock,
-                candidate_count,
-                evaluable_route_count,
-                discovered_count,
-                duration,
+                f"Route evaluation ({reason_summary}) started at {evaluation_started_wall_clock}; "
+                f"evaluated {candidate_count}/{evaluable_route_count} candidate routes "
+                f"(from {discovered_count} discovered) in {duration:.3f}s"
             )
             logger.debug("No routes satisfied the negative log-sum arbitrage condition.")
             continue
@@ -434,26 +435,18 @@ async def evaluate_and_execute(
         except (InsufficientLiquidityError, KeyError, ValueError) as exc:
             duration = perf_counter() - evaluation_started_at
             logger.info(
-                "Route evaluation (%s) started at %s; evaluated %d/%d candidate routes (from %d discovered) in %.3fs",
-                reason_summary,
-                evaluation_started_wall_clock,
-                candidate_count,
-                evaluable_route_count,
-                discovered_count,
-                duration,
+                f"Route evaluation ({reason_summary}) started at {evaluation_started_wall_clock}; "
+                f"evaluated {candidate_count}/{evaluable_route_count} candidate routes "
+                f"(from {discovered_count} discovered) in {duration:.3f}s"
             )
-            logger.debug("Skipping evaluation due to error: %s", exc)
+            logger.debug(f"Skipping evaluation due to error: {exc}")
             continue
 
         duration = perf_counter() - evaluation_started_at
         logger.info(
-            "Route evaluation (%s) started at %s; evaluated %d/%d candidate routes (from %d discovered) in %.3fs",
-            reason_summary,
-            evaluation_started_wall_clock,
-            candidate_count,
-            evaluable_route_count,
-            discovered_count,
-            duration,
+            f"Route evaluation ({reason_summary}) started at {evaluation_started_wall_clock}; "
+            f"evaluated {candidate_count}/{evaluable_route_count} candidate routes "
+            f"(from {discovered_count} discovered) in {duration:.3f}s"
         )
 
         if not opportunities:
@@ -461,10 +454,8 @@ async def evaluate_and_execute(
 
         best = opportunities[0]
         logger.info(
-            "Best opportunity: route=%s profit=%.6f (%.4f%%)",
-            " -> ".join(best.route.symbols),
-            best.profit,
-            best.profit_percentage,
+            f"Best opportunity: route={' -> '.join(best.route.symbols)} "
+            f"profit={best.profit:.6f} ({best.profit_percentage:.4f}%)"
         )
 
         profit_signature = (round(best.final_amount, 8), round(best.profit_percentage, 4))
@@ -474,9 +465,8 @@ async def evaluate_and_execute(
 
         if not enable_execution or executor is None:
             logger.info(
-                "Execution disabled. Opportunity would yield %.6f (%.4f%%) if executed.",
-                best.profit,
-                best.profit_percentage,
+                f"Execution disabled. Opportunity would yield {best.profit:.6f} "
+                f"({best.profit_percentage:.4f}%) if executed."
             )
             last_execution = OpportunityExecution(best.route, profit_signature)
             continue
@@ -484,12 +474,12 @@ async def evaluate_and_execute(
         try:
             orders = await executor.execute_async(best)
         except ValueError as exc:
-            logger.debug("Skipping execution: %s", exc)
+            logger.debug(f"Skipping execution: {exc}")
             continue
 
         last_execution = OpportunityExecution(best.route, profit_signature)
         if orders:
-            logger.info("Placed %d order(s) for opportunity.", len(orders))
+            logger.info(f"Placed {len(orders)} order(s) for opportunity.")
             try:
                 trigger_queue.put_nowait("post_trade")
             except asyncio.QueueFull:  # pragma: no cover - unbounded by default
@@ -534,8 +524,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
 
     if args.use_testnet and not exchange.sandbox_supported:
         logger.warning(
-            "Sandbox mode is not available for %s via ccxt; requests will hit the production API.",
-            exchange_name,
+            f"Sandbox mode is not available for {exchange_name} via ccxt; requests will hit the production API."
         )
 
     markets = exchange.get_markets()
@@ -546,10 +535,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
     if not routes:
         raise SystemExit(f"No triangular routes discovered for {exchange_name}.")
     logger.info(
-        "Discovered %d triangular routes on %s starting and ending in %s",
-        len(routes),
-        exchange_name,
-        starting_currency,
+        f"Discovered {len(routes)} triangular routes on {exchange_name} starting and ending in {starting_currency}"
     )
 
     calculator = TriangularArbitrageCalculator(
@@ -564,7 +550,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             trade_log_path=trade_log_path,
         )
         if trade_log_path:
-            logger.info("Logging executed trades to %s", trade_log_path)
+            logger.info(f"Logging executed trades to {trade_log_path}")
 
     symbols = sorted({symbol for route in routes for symbol in route.symbols})
     fee_lookup = {symbol: float(exchange.get_taker_fee(symbol)) for symbol in symbols}
@@ -581,7 +567,9 @@ async def run_from_args(args: argparse.Namespace) -> None:
                     symbol,
                 )
             except Exception:
-                logger.debug("Initial price fetch failed for %s", symbol, exc_info=True)
+                logger.debug(
+                    f"Initial price fetch failed for {symbol}", exc_info=True
+                )
             else:
                 snapshot = PriceSnapshot.from_ccxt(symbol, ticker)
                 if snapshot is not None:
