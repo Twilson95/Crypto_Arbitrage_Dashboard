@@ -208,6 +208,133 @@ class ExchangeConnection:
             }
         return self.rest_client.create_order(symbol, "market", side, amount, params=params)
 
+    async def watch_tickers(
+        self,
+        symbols: Sequence[str],
+        *,
+        poll_interval: float = 2.0,
+        websocket_timeout: Optional[float] = 10.0,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """Yield the latest ticker data for ``symbols``.
+
+        The implementation favours websocket streaming when supported by the
+        exchange, falling back to REST polling via :meth:`fetch_tickers` and
+        :meth:`fetch_ticker` when websockets are unavailable. The yielded
+        dictionaries always contain the requested symbols (when data could be
+        fetched) mapped to the native ccxt ticker payloads.
+        """
+
+        if not symbols:
+            return
+
+        symbol_list = list(dict.fromkeys(symbols))
+
+        async def _rest_poll() -> AsyncIterator[Dict[str, Any]]:
+            while True:
+                tickers: Dict[str, Any] = {}
+                try:
+                    fetched = await asyncio.to_thread(self.rest_client.fetch_tickers, symbol_list)
+                except TypeError:
+                    fetched = None
+                except Exception as exc:  # pragma: no cover - network failure path
+                    logger.debug(
+                        "%s REST fetch_tickers failed for %s: %s",
+                        self.exchange_name,
+                        symbol_list,
+                        exc,
+                    )
+                    fetched = None
+
+                if fetched:
+                    tickers = {symbol: fetched.get(symbol) for symbol in symbol_list if fetched.get(symbol) is not None}
+                if not tickers:
+                    for symbol in symbol_list:
+                        try:
+                            ticker = await asyncio.to_thread(self.rest_client.fetch_ticker, symbol)
+                        except Exception:
+                            continue
+                        else:
+                            tickers[symbol] = ticker
+
+                if tickers:
+                    yield tickers
+
+                await asyncio.sleep(max(poll_interval, 0.1))
+
+        use_websocket = self.websocket_client is not None
+        websocket_failed = False
+
+        while True:
+            if use_websocket and self.websocket_client is not None:
+                try:
+                    if hasattr(self.websocket_client, "watch_tickers"):
+                        if websocket_timeout and websocket_timeout > 0:
+                            payload = await asyncio.wait_for(
+                                self.websocket_client.watch_tickers(symbol_list),
+                                timeout=websocket_timeout,
+                            )
+                        else:
+                            payload = await self.websocket_client.watch_tickers(symbol_list)
+                        tickers = {
+                            symbol: payload.get(symbol)
+                            for symbol in symbol_list
+                            if payload and payload.get(symbol) is not None
+                        }
+                        if tickers:
+                            websocket_failed = False
+                            yield tickers
+                            continue
+                    elif len(symbol_list) == 1 and hasattr(self.websocket_client, "watch_ticker"):
+                        symbol = symbol_list[0]
+                        if websocket_timeout and websocket_timeout > 0:
+                            ticker = await asyncio.wait_for(
+                                self.websocket_client.watch_ticker(symbol),
+                                timeout=websocket_timeout,
+                            )
+                        else:
+                            ticker = await self.websocket_client.watch_ticker(symbol)
+                        if ticker:
+                            websocket_failed = False
+                            yield {symbol: ticker}
+                            continue
+                    else:
+                        raise AttributeError("watch_tickers not supported")
+                except (CcxtNotSupported, AttributeError):  # type: ignore[misc]
+                    if not websocket_failed:
+                        logger.info(
+                            "%s websocket ticker stream not supported; falling back to REST polling.",
+                            self.exchange_name,
+                        )
+                    use_websocket = False
+                    websocket_failed = True
+                    continue
+                except asyncio.TimeoutError:
+                    if not websocket_failed:
+                        logger.warning(
+                            "%s websocket ticker stream timed out; falling back to REST polling.",
+                            self.exchange_name,
+                        )
+                    use_websocket = False
+                    websocket_failed = True
+                    continue
+                except Exception as exc:  # pragma: no cover - network failure path
+                    if not websocket_failed:
+                        logger.warning(
+                            "%s websocket ticker stream failed; falling back to REST polling (%s).",
+                            self.exchange_name,
+                            exc,
+                        )
+                    use_websocket = False
+                    websocket_failed = True
+                    continue
+
+            async for tickers in _rest_poll():
+                yield tickers
+                if self.websocket_client is not None and websocket_failed:
+                    # Periodically attempt to resume websocket streaming when available again.
+                    use_websocket = True
+                    break
+
     @property
     def sandbox_supported(self) -> bool:
         """Return ``True`` if ccxt successfully enabled sandbox mode."""

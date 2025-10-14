@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import logging
 import math
+import itertools
 from datetime import datetime
 from collections import defaultdict
 from dataclasses import dataclass
@@ -45,6 +46,8 @@ LOG_LEVEL_DEFAULT = "INFO"
 MAX_ROUTE_LENGTH_DEFAULT: Optional[int] = 3
 EVALUATION_INTERVAL_DEFAULT = 30.0
 WEBSOCKET_TIMEOUT_DEFAULT = 10.0
+ORDER_BOOK_REFRESH_INTERVAL_DEFAULT = 30.0
+ORDER_BOOK_MAX_AGE_DEFAULT = 60.0
 
 # Location where executed trades will be persisted when trade logging is enabled.
 TRADE_LOG_PATH_DEFAULT: Optional[Path] = (
@@ -198,6 +201,14 @@ class OpportunityExecution:
     profit_signature: Tuple[float, float]
 
 
+@dataclass
+class CachedOrderBook:
+    """Stores an order book snapshot along with the time it was fetched."""
+
+    snapshot: OrderBookSnapshot
+    updated_at: float
+
+
 def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> Dict[str, str]:
     """Load API credentials for ``exchange`` from a YAML configuration file."""
 
@@ -237,48 +248,88 @@ def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> D
     return credentials
 
 
-async def watch_order_books(
+async def watch_market_data(
+    exchange: ExchangeConnection,
+    symbols: Sequence[str],
+    *,
+    poll_interval: float,
+    websocket_timeout: float,
+    trigger_queue: "asyncio.Queue[str]",
+    stop_event: asyncio.Event,
+) -> None:
+    """Listen for ticker updates and notify the evaluator when data changes."""
+
+    if not symbols:
+        await stop_event.wait()
+        return
+
+    try:
+        async for _ in exchange.watch_tickers(
+            symbols,
+            poll_interval=poll_interval,
+            websocket_timeout=websocket_timeout,
+        ):
+            try:
+                trigger_queue.put_nowait("market_data")
+            except asyncio.QueueFull:  # pragma: no cover - unbounded by default
+                logger.debug("Trigger queue full; dropping market_data notification")
+            if stop_event.is_set():
+                break
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # pragma: no cover - network failure path
+        logger.exception("Market data watcher stopped unexpectedly")
+        stop_event.set()
+
+
+async def maintain_order_books(
     exchange: ExchangeConnection,
     symbols: Sequence[str],
     *,
     limit: int,
-    poll_interval: float,
-    websocket_timeout: float,
-    cache: Dict[str, OrderBookSnapshot],
+    refresh_interval: float,
+    cache: Dict[str, CachedOrderBook],
     trigger_queue: "asyncio.Queue[str]",
     stop_event: asyncio.Event,
 ) -> None:
-    """Continuously populate ``cache`` with the latest order book snapshots."""
+    """Refresh order book snapshots at a controlled cadence using REST."""
 
-    async def _watch_symbol(symbol: str) -> None:
-        try:
-            async for snapshot in exchange.watch_order_book(
-                symbol,
-                limit=limit,
-                poll_interval=poll_interval,
-                websocket_timeout=websocket_timeout,
-            ):
-                cache[symbol] = snapshot
-                try:
-                    trigger_queue.put_nowait("market_data")
-                except asyncio.QueueFull:  # pragma: no cover - unbounded by default
-                    logger.debug("Trigger queue full; dropping market_data notification")
-                if stop_event.is_set():
-                    break
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # pragma: no cover - network failure path
-            logger.exception("Order book watcher for %s stopped unexpectedly", symbol)
-            stop_event.set()
+    if not symbols:
+        await stop_event.wait()
+        return
 
-    tasks = [asyncio.create_task(_watch_symbol(symbol), name=f"watch-{symbol}") for symbol in symbols]
+    loop = asyncio.get_running_loop()
+    refresh_interval = max(refresh_interval, 0.1)
+    symbol_cycle = itertools.cycle(symbols)
+    per_symbol_delay = max(refresh_interval / max(len(symbols), 1), 0.1)
 
     try:
-        await stop_event.wait()
-    finally:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        while not stop_event.is_set():
+            symbol = next(symbol_cycle)
+            entry = cache.get(symbol)
+            now = loop.time()
+            needs_refresh = entry is None or (now - entry.updated_at) >= refresh_interval
+            if needs_refresh:
+                try:
+                    snapshot = await asyncio.to_thread(
+                        exchange.get_order_book,
+                        symbol,
+                        limit,
+                    )
+                except Exception:
+                    logger.debug("Order book refresh failed for %s", symbol, exc_info=True)
+                else:
+                    cache[symbol] = CachedOrderBook(snapshot, loop.time())
+                    try:
+                        trigger_queue.put_nowait("order_book_refresh")
+                    except asyncio.QueueFull:  # pragma: no cover - unbounded by default
+                        logger.debug("Trigger queue full; dropping order_book_refresh notification")
+            await asyncio.sleep(per_symbol_delay)
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # pragma: no cover - defensive guard
+        logger.exception("Order book maintainer stopped unexpectedly")
+        stop_event.set()
 
 
 async def evaluate_and_execute(
@@ -286,7 +337,7 @@ async def evaluate_and_execute(
     executor: Optional[TriangularArbitrageExecutor],
     routes: Sequence[TriangularRoute],
     *,
-    order_books: Dict[str, OrderBookSnapshot],
+    order_book_cache: Dict[str, CachedOrderBook],
     markets: Dict[str, Dict[str, object]],
     fee_lookup: Dict[str, float],
     starting_amount: float,
@@ -294,6 +345,7 @@ async def evaluate_and_execute(
     max_route_length: Optional[int],
     evaluation_interval: float,
     enable_execution: bool,
+    order_book_max_age: float,
     trigger_queue: "asyncio.Queue[str]",
     stop_event: asyncio.Event,
 ) -> None:
@@ -322,19 +374,28 @@ async def evaluate_and_execute(
         evaluation_started_at = perf_counter()
         reason_summary = ",".join(sorted(set(reasons)))
 
-        if not order_books:
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        fresh_order_books: Dict[str, OrderBookSnapshot] = {
+            symbol: entry.snapshot
+            for symbol, entry in order_book_cache.items()
+            if now - entry.updated_at <= order_book_max_age
+        }
+
+        if not fresh_order_books:
             duration = perf_counter() - evaluation_started_at
             logger.info(
-                "Route evaluation (%s) started at %s; skipped in %.3fs due to missing order books",
+                "Route evaluation (%s) started at %s; skipped in %.3fs due to missing fresh order books (max age %.1fs)",
                 reason_summary,
                 evaluation_started_wall_clock,
                 duration,
+                order_book_max_age,
             )
             continue
 
         candidate_routes, evaluable_route_count = select_routes_with_negative_log_sum(
             routes,
-            order_books,
+            fresh_order_books,
             markets,
             fee_lookup,
         )
@@ -357,7 +418,7 @@ async def evaluate_and_execute(
         try:
             opportunities = calculator.find_profitable_routes(
                 candidate_routes,
-                order_books,
+                fresh_order_books,
                 starting_amount=starting_amount,
                 min_profit_percentage=min_profit_percentage,
                 max_route_length=max_route_length,
@@ -448,6 +509,9 @@ async def run_from_args(args: argparse.Namespace) -> None:
     if max_route_length is not None and max_route_length <= 0:
         max_route_length = None
 
+    order_book_refresh_interval = max(args.order_book_refresh_interval, 0.1)
+    order_book_max_age = max(args.order_book_max_age, order_book_refresh_interval)
+
     trade_log_path: Optional[Path] = None
     if args.trade_log:
         trade_log_path = Path(args.trade_log).expanduser()
@@ -496,11 +560,12 @@ async def run_from_args(args: argparse.Namespace) -> None:
 
     symbols = sorted({symbol for route in routes for symbol in route.symbols})
     fee_lookup = {symbol: float(exchange.get_taker_fee(symbol)) for symbol in symbols}
-    order_books: Dict[str, OrderBookSnapshot] = {}
+    order_book_cache: Dict[str, CachedOrderBook] = {}
     trigger_queue: "asyncio.Queue[str]" = asyncio.Queue()
     stop_event = asyncio.Event()
 
     if symbols:
+        loop = asyncio.get_running_loop()
         for symbol in symbols:
             try:
                 snapshot = await asyncio.to_thread(
@@ -511,22 +576,33 @@ async def run_from_args(args: argparse.Namespace) -> None:
             except Exception:
                 logger.debug("Initial order book fetch failed for %s", symbol, exc_info=True)
             else:
-                order_books[symbol] = snapshot
-        if order_books:
+                order_book_cache[symbol] = CachedOrderBook(snapshot, loop.time())
+        if order_book_cache:
             await trigger_queue.put("initial_snapshot")
 
-    watcher = asyncio.create_task(
-        watch_order_books(
+    market_data_task = asyncio.create_task(
+        watch_market_data(
             exchange,
             symbols,
-            limit=args.order_book_depth,
             poll_interval=args.poll_interval,
             websocket_timeout=args.websocket_timeout,
-            cache=order_books,
             trigger_queue=trigger_queue,
             stop_event=stop_event,
         ),
-        name="order-book-watcher",
+        name="market-data-watcher",
+    )
+
+    order_book_task = asyncio.create_task(
+        maintain_order_books(
+            exchange,
+            symbols,
+            limit=args.order_book_depth,
+            refresh_interval=order_book_refresh_interval,
+            cache=order_book_cache,
+            trigger_queue=trigger_queue,
+            stop_event=stop_event,
+        ),
+        name="order-book-maintainer",
     )
 
     evaluator = asyncio.create_task(
@@ -534,7 +610,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             calculator,
             executor,
             routes,
-            order_books=order_books,
+            order_book_cache=order_book_cache,
             markets=markets,
             fee_lookup=fee_lookup,
             starting_amount=args.starting_amount,
@@ -542,6 +618,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             max_route_length=max_route_length,
             evaluation_interval=args.evaluation_interval,
             enable_execution=args.enable_execution,
+            order_book_max_age=order_book_max_age,
             trigger_queue=trigger_queue,
             stop_event=stop_event,
         ),
@@ -549,16 +626,17 @@ async def run_from_args(args: argparse.Namespace) -> None:
     )
 
     try:
-        await asyncio.gather(watcher, evaluator)
+        await asyncio.gather(market_data_task, order_book_task, evaluator)
     except asyncio.CancelledError:  # pragma: no cover - cancellation path
         pass
     except KeyboardInterrupt:
         logger.info("Interrupted by user. Shutting down...")
     finally:
         stop_event.set()
-        watcher.cancel()
+        market_data_task.cancel()
+        order_book_task.cancel()
         evaluator.cancel()
-        await asyncio.gather(watcher, evaluator, return_exceptions=True)
+        await asyncio.gather(market_data_task, order_book_task, evaluator, return_exceptions=True)
         await exchange.aclose()
 
 
@@ -607,6 +685,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of price levels to request for each order book.",
     )
     parser.add_argument(
+        "--order-book-refresh-interval",
+        type=float,
+        default=ORDER_BOOK_REFRESH_INTERVAL_DEFAULT,
+        help="Target interval in seconds between REST order book refreshes per symbol.",
+    )
+    parser.add_argument(
+        "--order-book-max-age",
+        type=float,
+        default=ORDER_BOOK_MAX_AGE_DEFAULT,
+        help="Maximum age in seconds for order book snapshots to be considered fresh.",
+    )
+    parser.add_argument(
         "--poll-interval",
         type=float,
         default=2.0,
@@ -616,7 +706,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--websocket-timeout",
         type=float,
         default=WEBSOCKET_TIMEOUT_DEFAULT,
-        help="Maximum time to wait for a websocket order book update before polling via REST.",
+        help="Maximum time to wait for a websocket ticker update before polling via REST.",
     )
     parser.add_argument(
         "--evaluation-interval",
