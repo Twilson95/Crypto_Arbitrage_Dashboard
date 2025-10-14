@@ -13,12 +13,31 @@ sys.modules[spec.name] = triangular_arbitrage
 assert spec.loader is not None
 spec.loader.exec_module(triangular_arbitrage)
 
+RUNNER_MODULE_PATH = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "scripts"
+    / "trading"
+    / "run_triangular_arbitrage.py"
+)
+runner_spec = importlib.util.spec_from_file_location(
+    "triangular_arbitrage_runner",
+    RUNNER_MODULE_PATH,
+)
+runner_module = importlib.util.module_from_spec(runner_spec)
+sys.modules[runner_spec.name] = runner_module
+assert runner_spec.loader is not None
+runner_spec.loader.exec_module(runner_module)
+
 InsufficientLiquidityError = triangular_arbitrage.InsufficientLiquidityError
 PriceSnapshot = triangular_arbitrage.PriceSnapshot
 TriangularArbitrageCalculator = triangular_arbitrage.TriangularArbitrageCalculator
 TriangularArbitrageExecutor = triangular_arbitrage.TriangularArbitrageExecutor
 TriangularOpportunity = triangular_arbitrage.TriangularOpportunity
 TriangularRoute = triangular_arbitrage.TriangularRoute
+
+filter_markets_for_triangular_routes = (
+    runner_module.filter_markets_for_triangular_routes
+)
 
 
 @dataclass
@@ -177,3 +196,51 @@ def test_error_reasons_tracked_for_missing_prices():
     assert stats.evaluation_error_reasons == {
         "KeyError: Missing price snapshot for ETH/BTC": 1
     }
+
+
+def test_market_filter_allows_matching_settle_currency():
+    markets = {
+        "ETH/USDT": {
+            "active": True,
+            "base": "ETH",
+            "quote": "USDT",
+            "settle": "USDT",
+        }
+    }
+
+    filtered, stats = filter_markets_for_triangular_routes(
+        markets,
+        starting_currencies=["USDT"],
+    )
+
+    assert "ETH/USDT" in filtered
+    assert stats.total == 1
+    assert stats.retained == 1
+    assert stats.skipped == 0
+
+
+def test_market_filter_rejects_unmatched_settle_currency():
+    markets = {
+        "ETH/USD": {
+            "active": True,
+            "base": "ETH",
+            "quote": "USD",
+            "settle": "BTC",
+        }
+    }
+
+    filtered_usdt, stats_usdt = filter_markets_for_triangular_routes(
+        markets,
+        starting_currencies=["USDT"],
+    )
+
+    assert "ETH/USD" not in filtered_usdt
+    assert stats_usdt.skipped_by_reason.get("derivative_settlement") == 1
+
+    filtered_btc, stats_btc = filter_markets_for_triangular_routes(
+        markets,
+        starting_currencies=["BTC"],
+    )
+
+    assert "ETH/USD" in filtered_btc
+    assert stats_btc.retained == 1

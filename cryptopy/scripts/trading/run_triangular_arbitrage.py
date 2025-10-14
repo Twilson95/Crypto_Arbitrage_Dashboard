@@ -66,8 +66,8 @@ MARKET_FILTER_REASON_DESCRIPTIONS = {
         "currency, so trimming the suffix would misrepresent the contract."
     ),
     "derivative_settlement": (
-        "Instrument settles in a non-spot currency or asset, so the USD cashflow cannot be "
-        "modelled accurately."
+        "Instrument settles in a currency outside the configured starting currencies, so cash "
+        "flows cannot be modelled accurately for the current route discovery run."
     ),
     "derivative_type": (
         "Marked as swap/future/option; pricing and settlement differ from spot requirements for "
@@ -234,14 +234,30 @@ class MarketFilterStats:
         return self.total - self.retained
 
 
+def _split_currency_parts(value: str) -> Tuple[str, Optional[str]]:
+    """Return the main currency code and any settlement suffix."""
+
+    if ":" not in value:
+        return value, None
+    main, suffix = value.split(":", 1)
+    return main, suffix or None
+
+
 def filter_markets_for_triangular_routes(
-    markets: Dict[str, Dict[str, object]]
+    markets: Dict[str, Dict[str, object]],
+    *,
+    starting_currencies: Optional[Sequence[str]] = None,
 ) -> Tuple[Dict[str, Dict[str, object]], MarketFilterStats]:
-    """Remove inactive or derivative markets that cannot seed USD spot routes."""
+    """Remove inactive or derivative markets that cannot seed triangular routes."""
 
     filtered: Dict[str, Dict[str, object]] = {}
     skipped = Counter()
     total = 0
+    allowed_settlements = (
+        {currency.upper() for currency in starting_currencies}
+        if starting_currencies
+        else set()
+    )
 
     for symbol, metadata in markets.items():
         total += 1
@@ -261,13 +277,24 @@ def filter_markets_for_triangular_routes(
 
         base_str = str(base)
         quote_str = str(quote)
-        if ":" in base_str or ":" in quote_str:
+        base_main, base_suffix = _split_currency_parts(base_str)
+        quote_main, quote_suffix = _split_currency_parts(quote_str)
+        if base_suffix or quote_suffix:
             skipped["synthetic_currency"] += 1
             continue
 
-        if metadata.get("settle"):
-            skipped["derivative_settlement"] += 1
-            continue
+        settle_value = metadata.get("settle")
+        if settle_value:
+            settle_str = str(settle_value)
+            settle_main, settle_suffix = _split_currency_parts(settle_str)
+            settle_upper = (settle_suffix or settle_main).upper()
+            base_upper = base_main.upper()
+            quote_upper = quote_main.upper()
+            if settle_upper not in {base_upper, quote_upper} and (
+                not allowed_settlements or settle_upper not in allowed_settlements
+            ):
+                skipped["derivative_settlement"] += 1
+                continue
 
         market_type = str(metadata.get("type") or "").lower()
         if market_type in {"swap", "future", "futures", "perpetual", "option"}:
@@ -635,7 +662,10 @@ async def run_from_args(args: argparse.Namespace) -> None:
         )
 
     markets = exchange.get_markets()
-    markets, market_filter_stats = filter_markets_for_triangular_routes(markets)
+    markets, market_filter_stats = filter_markets_for_triangular_routes(
+        markets,
+        starting_currencies=[starting_currency],
+    )
     if market_filter_stats.skipped:
         sorted_reasons = sorted(
             market_filter_stats.skipped_by_reason.items(), key=lambda item: item[1], reverse=True
