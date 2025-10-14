@@ -60,6 +60,24 @@ CONFIG_SECTION_BY_EXCHANGE = {
     "kraken": "kraken_websocket",
 }
 
+MARKET_FILTER_REASON_DESCRIPTIONS = {
+    "synthetic_currency": (
+        "Symbol includes a settlement suffix (e.g. ETH/USD:BTC) whose payouts occur in a third "
+        "currency, so trimming the suffix would misrepresent the contract."
+    ),
+    "derivative_settlement": (
+        "Instrument settles in a non-spot currency or asset, so the USD cashflow cannot be "
+        "modelled accurately."
+    ),
+    "derivative_type": (
+        "Marked as swap/future/option; pricing and settlement differ from spot requirements for "
+        "triangular arbitrage."
+    ),
+    "derivative_flag": (
+        "Exchange metadata flags the market as derivative-only, indicating non-spot behaviour."
+    ),
+}
+
 
 def generate_triangular_routes(
     markets: Dict[str, Dict[str, object]],
@@ -268,6 +286,13 @@ def filter_markets_for_triangular_routes(
         filtered[symbol] = metadata
 
     stats = MarketFilterStats(total=total, retained=len(filtered), skipped_by_reason=dict(skipped))
+    if stats.skipped:
+        for reason, count in stats.skipped_by_reason.items():
+            description = MARKET_FILTER_REASON_DESCRIPTIONS.get(reason)
+            if description:
+                logger.debug(
+                    f"Filtered markets reason {reason.replace('_', ' ')} ({count}): {description}"
+                )
     return filtered, stats
 
 
@@ -615,9 +640,16 @@ async def run_from_args(args: argparse.Namespace) -> None:
         sorted_reasons = sorted(
             market_filter_stats.skipped_by_reason.items(), key=lambda item: item[1], reverse=True
         )
-        reason_summary = ", ".join(
-            f"{reason.replace('_', ' ')} ({count})" for reason, count in sorted_reasons
-        )
+        reason_parts = []
+        for reason, count in sorted_reasons:
+            description = MARKET_FILTER_REASON_DESCRIPTIONS.get(reason)
+            if description:
+                reason_parts.append(
+                    f"{reason.replace('_', ' ')} ({count}) - {description}"
+                )
+            else:
+                reason_parts.append(f"{reason.replace('_', ' ')} ({count})")
+        reason_summary = "; ".join(reason_parts)
         logger.info(
             f"Filtered {market_filter_stats.skipped} market(s) prior to route discovery: {reason_summary}"
         )

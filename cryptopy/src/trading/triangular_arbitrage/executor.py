@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
-from .models import TriangularOpportunity
+from cryptopy.src.trading.triangular_arbitrage.models import TriangularOpportunity
 
 
 class TriangularArbitrageExecutor:

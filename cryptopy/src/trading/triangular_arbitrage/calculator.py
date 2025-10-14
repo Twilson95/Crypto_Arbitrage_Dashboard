@@ -4,8 +4,10 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from .exceptions import InsufficientLiquidityError
-from .models import (
+from cryptopy.src.trading.triangular_arbitrage.exceptions import (
+    InsufficientLiquidityError,
+)
+from cryptopy.src.trading.triangular_arbitrage.models import (
     PriceSnapshot,
     RouteEvaluationStats,
     TriangularOpportunity,

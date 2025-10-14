@@ -5,7 +5,7 @@ import asyncio
 import logging
 from typing import Any, AsyncIterator, Dict, Optional, Sequence
 
-from .models import OrderBookSnapshot
+from cryptopy.src.trading.triangular_arbitrage.models import OrderBookSnapshot
 
 logger = logging.getLogger(__name__)
 
