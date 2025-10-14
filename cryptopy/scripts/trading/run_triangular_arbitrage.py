@@ -32,11 +32,18 @@ logger = logging.getLogger(__name__)
 # runner behaviour without editing the CLI invocation. Command-line arguments
 # still take precedence when explicitly supplied.
 EXCHANGE_DEFAULT = "kraken"
+STARTING_CURRENCY_DEFAULT = "USD"
 ENABLE_EXECUTION_DEFAULT = False
 LIVE_TRADING_DEFAULT = False
 USE_TESTNET_DEFAULT = True
 DISABLE_WEBSOCKET_DEFAULT = False
 LOG_LEVEL_DEFAULT = "INFO"
+MAX_ROUTE_LENGTH_DEFAULT: Optional[int] = 3
+
+# Location where executed trades will be persisted when trade logging is enabled.
+TRADE_LOG_PATH_DEFAULT: Optional[Path] = (
+    Path(__file__).resolve().parents[3] / "logs" / "triangular_trades.csv"
+)
 
 # Optional configuration file used to source API credentials when present.
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config.yaml"
@@ -45,7 +52,11 @@ CONFIG_SECTION_BY_EXCHANGE = {
 }
 
 
-def generate_triangular_routes(markets: Dict[str, Dict[str, object]]) -> List[TriangularRoute]:
+def generate_triangular_routes(
+    markets: Dict[str, Dict[str, object]],
+    *,
+    starting_currencies: Optional[Sequence[str]] = None,
+) -> List[TriangularRoute]:
     """Construct all distinct three-leg triangular routes from exchange markets."""
 
     currency_graph: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
@@ -61,10 +72,17 @@ def generate_triangular_routes(markets: Dict[str, Dict[str, object]]) -> List[Tr
         currency_graph[str(quote)].append((symbol, str(base)))
         currency_graph[str(base)].append((symbol, str(quote)))
 
+    allowed_currencies: Optional[set[str]] = None
+    if starting_currencies:
+        allowed_currencies = {str(currency).upper() for currency in starting_currencies}
+
     routes: List[TriangularRoute] = []
     seen: set[Tuple[str, Tuple[str, str, str]]] = set()
 
     for start_currency, first_edges in currency_graph.items():
+        start_currency_key = str(start_currency)
+        if allowed_currencies and start_currency_key.upper() not in allowed_currencies:
+            continue
         for symbol_a, currency_b in first_edges:
             for symbol_b, currency_c in currency_graph.get(currency_b, []):
                 if symbol_b == symbol_a:
@@ -72,14 +90,14 @@ def generate_triangular_routes(markets: Dict[str, Dict[str, object]]) -> List[Tr
                 for symbol_c, currency_d in currency_graph.get(currency_c, []):
                     if symbol_c in (symbol_a, symbol_b):
                         continue
-                    if currency_d != start_currency:
+                    if str(currency_d) != start_currency_key:
                         continue
                     route_symbols = (symbol_a, symbol_b, symbol_c)
-                    key = (start_currency, route_symbols)
+                    key = (start_currency_key, route_symbols)
                     if key in seen:
                         continue
                     seen.add(key)
-                    routes.append(TriangularRoute(route_symbols, start_currency))
+                    routes.append(TriangularRoute(route_symbols, start_currency_key))
 
     routes.sort(key=lambda route: (route.starting_currency, route.symbols))
     return routes
@@ -352,6 +370,15 @@ async def run_from_args(args: argparse.Namespace) -> None:
     if args.password:
         credentials["password"] = args.password
 
+    starting_currency = (args.starting_currency or STARTING_CURRENCY_DEFAULT).upper()
+    max_route_length = args.max_route_length
+    if max_route_length is not None and max_route_length <= 0:
+        max_route_length = None
+
+    trade_log_path: Optional[Path] = None
+    if args.trade_log:
+        trade_log_path = Path(args.trade_log).expanduser()
+
     exchange = ExchangeConnection(
         exchange_name,
         credentials=credentials or None,
@@ -367,10 +394,18 @@ async def run_from_args(args: argparse.Namespace) -> None:
         )
 
     markets = exchange.get_markets()
-    routes = generate_triangular_routes(markets)
+    routes = generate_triangular_routes(
+        markets,
+        starting_currencies=[starting_currency],
+    )
     if not routes:
         raise SystemExit(f"No triangular routes discovered for {exchange_name}.")
-    logger.info("Discovered %d triangular routes on %s", len(routes), exchange_name)
+    logger.info(
+        "Discovered %d triangular routes on %s starting and ending in %s",
+        len(routes),
+        exchange_name,
+        starting_currency,
+    )
 
     calculator = TriangularArbitrageCalculator(
         exchange,
@@ -381,8 +416,10 @@ async def run_from_args(args: argparse.Namespace) -> None:
         executor = TriangularArbitrageExecutor(
             exchange,
             dry_run=not args.live_trading,
-            trade_log_path=args.trade_log,
+            trade_log_path=trade_log_path,
         )
+        if trade_log_path:
+            logger.info("Logging executed trades to %s", trade_log_path)
 
     symbols = sorted({symbol for route in routes for symbol in route.symbols})
     fee_lookup = {symbol: float(exchange.get_taker_fee(symbol)) for symbol in symbols}
@@ -428,7 +465,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             fee_lookup=fee_lookup,
             starting_amount=args.starting_amount,
             min_profit_percentage=args.min_profit_percentage,
-            max_route_length=args.max_route_length,
+            max_route_length=max_route_length,
             evaluation_interval=args.evaluation_interval,
             enable_execution=args.enable_execution,
             wake_event=wake_event,
@@ -461,6 +498,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Name of the exchange supported by ccxt (e.g. binance, kraken).",
     )
     parser.add_argument(
+        "--starting-currency",
+        default=STARTING_CURRENCY_DEFAULT,
+        help="Currency used to seed and settle each arbitrage route.",
+    )
+    parser.add_argument(
         "--starting-amount",
         type=float,
         default=100.0,
@@ -475,7 +517,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-route-length",
         type=int,
-        default=None,
+        default=MAX_ROUTE_LENGTH_DEFAULT,
         help="Optional maximum number of legs per route to evaluate.",
     )
     parser.add_argument(
@@ -504,7 +546,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--trade-log",
-        default=None,
+        default=TRADE_LOG_PATH_DEFAULT,
         help="Optional path to a CSV file where executed legs will be appended.",
     )
     parser.add_argument(

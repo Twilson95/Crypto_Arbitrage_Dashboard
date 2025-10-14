@@ -2,22 +2,24 @@
 
 The `run_triangular_arbitrage.py` script monitors real-time order books and evaluates triangular routes that it discovers automatically from the exchange markets. By default it only reports opportunities and does **not** attempt to place any orders.
 
-At the top of the script you will find a handful of boolean defaults (for example `ENABLE_EXECUTION_DEFAULT`, `LIVE_TRADING_DEFAULT`, and `USE_TESTNET_DEFAULT`) along with `EXCHANGE_DEFAULT`. Toggle these flags to quickly change the runner's behaviour without modifying your command line each time. CLI arguments still override the inline defaults when explicitly supplied.
+At the top of the script you will find a handful of boolean defaults (for example `ENABLE_EXECUTION_DEFAULT`, `LIVE_TRADING_DEFAULT`, and `USE_TESTNET_DEFAULT`) along with `EXCHANGE_DEFAULT`. New helpers such as `STARTING_CURRENCY_DEFAULT`, `MAX_ROUTE_LENGTH_DEFAULT`, and `TRADE_LOG_PATH_DEFAULT` make it easy to pin the seed currency to USD, control the longest route to evaluate, and decide where executed legs should be logged. Toggle these values to quickly change the runner's behaviour without modifying your command line each time. CLI arguments still override the inline defaults when explicitly supplied.
 
 ## Usage
 
 ```
 python -m cryptopy.scripts.trading.run_triangular_arbitrage \
+  --starting-currency USD \
   --starting-amount 100 \
   --min-profit-percentage 0.2
 ```
 
 Key options:
 
+- `--starting-currency` restricts discovery to routes that both begin and end in the chosen currency (USD by default).
 - `--enable-execution` toggles order placement. Omit the flag to keep execution disabled and simply review the logs.
 - `--live-trading` switches from simulated test orders to real exchange orders. It requires `--enable-execution`.
 - `--use-testnet` enables the sandbox/testnet for exchanges that provide one.
-- `--trade-log` stores each simulated or live leg in a CSV file for auditing.
+- `--trade-log` stores each simulated or live leg in a CSV file for auditing (defaults to the `TRADE_LOG_PATH_DEFAULT` location if left unspecified).
 - `--config` can point at a YAML file (defaults to `config.yaml` in the project root) that contains credentials. For Kraken, the loader expects an entry in the form:
 
   ```yaml
@@ -28,7 +30,7 @@ Key options:
 
 ## Automatic route discovery
 
-When the runner starts it queries the exchange metadata to build every distinct three-leg triangular route. It then primes each order book and filters the routes using the arbitrage-friendly condition:
+When the runner starts it queries the exchange metadata to build every distinct three-leg triangular route that begins with the configured starting currency (USD by default). It then primes each order book and filters the routes using the arbitrage-friendly condition:
 
 \[
 \ln(p_1 f_1) + \ln(p_2 f_2) + \ln(p_3 f_3) < 0,
