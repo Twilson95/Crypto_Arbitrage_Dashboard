@@ -116,3 +116,14 @@ class TriangularOpportunity:
         if self.starting_amount == 0:
             return 0.0
         return (self.final_amount / self.starting_amount - 1.0) * 100.0
+
+
+@dataclass(frozen=True)
+class RouteEvaluationStats:
+    """Summarises how candidate routes fared during evaluation."""
+
+    total_routes: int
+    considered: int
+    filtered_by_length: int
+    evaluation_errors: int
+    rejected_by_profit: int

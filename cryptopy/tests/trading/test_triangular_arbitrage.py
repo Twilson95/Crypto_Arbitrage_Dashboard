@@ -140,7 +140,7 @@ def test_find_routes_respects_max_route_length():
         "ETH/USD": make_price_snapshot("ETH/USD", bid=0.55, ask=0.56),
     }
 
-    opportunities = calculator.find_profitable_routes(
+    opportunities, stats = calculator.find_profitable_routes(
         [long_route, short_route],
         prices,
         starting_amount=100.0,
@@ -149,3 +149,5 @@ def test_find_routes_respects_max_route_length():
 
     assert all(len(opp.route.symbols) <= 3 for opp in opportunities)
     assert all(opp.route != long_route for opp in opportunities)
+    assert stats.filtered_by_length == 1
+    assert stats.considered == 1

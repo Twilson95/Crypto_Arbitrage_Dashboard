@@ -1,11 +1,12 @@
 """Core arbitrage opportunity calculations."""
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .exceptions import InsufficientLiquidityError
 from .models import (
     PriceSnapshot,
+    RouteEvaluationStats,
     TriangularOpportunity,
     TriangularRoute,
     TriangularTradeLeg,
@@ -76,11 +77,19 @@ class TriangularArbitrageCalculator:
         starting_amount: float,
         min_profit_percentage: float = 0.0,
         max_route_length: Optional[int] = None,
-    ) -> List[TriangularOpportunity]:
+    ) -> Tuple[List[TriangularOpportunity], RouteEvaluationStats]:
         opportunities: List[TriangularOpportunity] = []
+        total_routes = 0
+        filtered_by_length = 0
+        considered = 0
+        evaluation_errors = 0
+        rejected_by_profit = 0
         for route in routes:
+            total_routes += 1
             if max_route_length is not None and len(route.symbols) > max_route_length:
+                filtered_by_length += 1
                 continue
+            considered += 1
             try:
                 opportunity = self.evaluate_route(
                     route,
@@ -89,11 +98,21 @@ class TriangularArbitrageCalculator:
                     min_profit_percentage=min_profit_percentage,
                 )
             except (InsufficientLiquidityError, KeyError, ValueError):
+                evaluation_errors += 1
                 continue
             if opportunity is not None:
                 opportunities.append(opportunity)
+            else:
+                rejected_by_profit += 1
         opportunities.sort(key=lambda opp: opp.profit_percentage, reverse=True)
-        return opportunities
+        stats = RouteEvaluationStats(
+            total_routes=total_routes,
+            considered=considered,
+            filtered_by_length=filtered_by_length,
+            evaluation_errors=evaluation_errors,
+            rejected_by_profit=rejected_by_profit,
+        )
+        return opportunities, stats
 
     def _simulate_buy(
         self,

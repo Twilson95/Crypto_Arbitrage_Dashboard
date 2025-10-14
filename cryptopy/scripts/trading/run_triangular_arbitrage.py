@@ -244,7 +244,7 @@ def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> D
     return credentials
 
 
-async def watch_market_data(
+async def watch_realtime_prices(
     exchange: ExchangeConnection,
     symbols: Sequence[str],
     *,
@@ -254,7 +254,7 @@ async def watch_market_data(
     trigger_queue: "asyncio.Queue[str]",
     stop_event: asyncio.Event,
 ) -> None:
-    """Listen for ticker updates and notify the evaluator when data changes."""
+    """Listen for ticker updates (websocket/REST) and notify the evaluator."""
 
     if not symbols:
         await stop_event.wait()
@@ -280,10 +280,10 @@ async def watch_market_data(
 
             if updated:
                 try:
-                    trigger_queue.put_nowait("market_data")
+                    trigger_queue.put_nowait("websocket_update")
                 except asyncio.QueueFull:  # pragma: no cover - unbounded by default
                     logger.debug(
-                        "Trigger queue full; dropping market_data notification"
+                        "Trigger queue full; dropping websocket_update notification"
                     )
             if stop_event.is_set():
                 break
@@ -294,7 +294,7 @@ async def watch_market_data(
         stop_event.set()
 
 
-async def maintain_price_cache(
+async def refresh_prices_via_rest(
     exchange: ExchangeConnection,
     symbols: Sequence[str],
     *,
@@ -335,10 +335,10 @@ async def maintain_price_cache(
                     if snapshot is not None:
                         cache[symbol] = CachedPrice(snapshot, loop.time())
                         try:
-                            trigger_queue.put_nowait("price_refresh")
+                            trigger_queue.put_nowait("rest_refresh")
                         except asyncio.QueueFull:  # pragma: no cover - unbounded by default
                             logger.debug(
-                                "Trigger queue full; dropping price_refresh notification"
+                                "Trigger queue full; dropping rest_refresh notification"
                             )
             await asyncio.sleep(per_symbol_delay)
     except asyncio.CancelledError:
@@ -425,7 +425,7 @@ async def evaluate_and_execute(
             continue
 
         try:
-            opportunities = calculator.find_profitable_routes(
+            opportunities, stats = calculator.find_profitable_routes(
                 candidate_routes,
                 fresh_prices,
                 starting_amount=starting_amount,
@@ -450,6 +450,12 @@ async def evaluate_and_execute(
         )
 
         if not opportunities:
+            logger.info(
+                "No profitable opportunities found; "
+                f"{stats.rejected_by_profit} route(s) fell below the {min_profit_percentage:.4f}% minimum, "
+                f"{stats.evaluation_errors} route(s) encountered errors, "
+                f"{stats.filtered_by_length} route(s) exceeded the length limit."
+            )
             continue
 
         best = opportunities[0]
@@ -578,7 +584,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             await trigger_queue.put("initial_snapshot")
 
     market_data_task = asyncio.create_task(
-        watch_market_data(
+        watch_realtime_prices(
             exchange,
             symbols,
             poll_interval=args.poll_interval,
@@ -587,11 +593,11 @@ async def run_from_args(args: argparse.Namespace) -> None:
             trigger_queue=trigger_queue,
             stop_event=stop_event,
         ),
-        name="market-data-watcher",
+        name="realtime-price-watcher",
     )
 
     price_task = asyncio.create_task(
-        maintain_price_cache(
+        refresh_prices_via_rest(
             exchange,
             symbols,
             refresh_interval=price_refresh_interval,
@@ -599,7 +605,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             trigger_queue=trigger_queue,
             stop_event=stop_event,
         ),
-        name="price-maintainer",
+        name="rest-price-refresher",
     )
 
     evaluator = asyncio.create_task(
