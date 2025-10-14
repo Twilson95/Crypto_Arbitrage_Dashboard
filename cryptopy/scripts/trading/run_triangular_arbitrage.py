@@ -5,9 +5,11 @@ import argparse
 import asyncio
 import logging
 import math
+from datetime import datetime
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import yaml
@@ -296,13 +298,24 @@ async def evaluate_and_execute(
         if not order_books:
             continue
 
+        evaluation_started_wall_clock = datetime.now().isoformat()
+        evaluation_started_at = perf_counter()
+
         candidate_routes = select_routes_with_negative_log_sum(
             routes,
             order_books,
             markets,
             fee_lookup,
         )
-        if not candidate_routes:
+        candidate_count = len(candidate_routes)
+        if candidate_count == 0:
+            duration = perf_counter() - evaluation_started_at
+            logger.info(
+                "Route evaluation started at %s; evaluated %d candidate routes in %.3fs",
+                evaluation_started_wall_clock,
+                candidate_count,
+                duration,
+            )
             logger.debug("No routes satisfied the negative log-sum arbitrage condition.")
             continue
 
@@ -315,8 +328,23 @@ async def evaluate_and_execute(
                 max_route_length=max_route_length,
             )
         except (InsufficientLiquidityError, KeyError, ValueError) as exc:
+            duration = perf_counter() - evaluation_started_at
+            logger.info(
+                "Route evaluation started at %s; evaluated %d candidate routes in %.3fs",
+                evaluation_started_wall_clock,
+                candidate_count,
+                duration,
+            )
             logger.debug("Skipping evaluation due to error: %s", exc)
             continue
+
+        duration = perf_counter() - evaluation_started_at
+        logger.info(
+            "Route evaluation started at %s; evaluated %d candidate routes in %.3fs",
+            evaluation_started_wall_clock,
+            candidate_count,
+            duration,
+        )
 
         if not opportunities:
             continue
