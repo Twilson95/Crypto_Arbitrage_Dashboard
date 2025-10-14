@@ -127,3 +127,4 @@ class RouteEvaluationStats:
     filtered_by_length: int
     evaluation_errors: int
     rejected_by_profit: int
+    evaluation_error_reasons: Dict[str, int]

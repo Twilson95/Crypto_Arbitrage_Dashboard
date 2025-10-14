@@ -1,6 +1,7 @@
 """Core arbitrage opportunity calculations."""
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .exceptions import InsufficientLiquidityError
@@ -84,6 +85,7 @@ class TriangularArbitrageCalculator:
         considered = 0
         evaluation_errors = 0
         rejected_by_profit = 0
+        error_reasons: Counter[str] = Counter()
         for route in routes:
             total_routes += 1
             if max_route_length is not None and len(route.symbols) > max_route_length:
@@ -97,8 +99,11 @@ class TriangularArbitrageCalculator:
                     starting_amount=starting_amount,
                     min_profit_percentage=min_profit_percentage,
                 )
-            except (InsufficientLiquidityError, KeyError, ValueError):
+            except (InsufficientLiquidityError, KeyError, ValueError) as exc:
                 evaluation_errors += 1
+                error_detail = exc.args[0] if getattr(exc, "args", None) else str(exc)
+                error_message = f"{exc.__class__.__name__}: {error_detail}"
+                error_reasons[error_message] += 1
                 continue
             if opportunity is not None:
                 opportunities.append(opportunity)
@@ -111,6 +116,7 @@ class TriangularArbitrageCalculator:
             filtered_by_length=filtered_by_length,
             evaluation_errors=evaluation_errors,
             rejected_by_profit=rejected_by_profit,
+            evaluation_error_reasons=dict(error_reasons),
         )
         return opportunities, stats
 

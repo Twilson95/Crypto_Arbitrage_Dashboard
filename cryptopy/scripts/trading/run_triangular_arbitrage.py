@@ -456,6 +456,14 @@ async def evaluate_and_execute(
                 f"{stats.evaluation_errors} route(s) encountered errors, "
                 f"{stats.filtered_by_length} route(s) exceeded the length limit."
             )
+            if stats.evaluation_error_reasons:
+                sorted_reasons = sorted(
+                    stats.evaluation_error_reasons.items(), key=lambda item: item[1], reverse=True
+                )
+                formatted_reasons = ", ".join(
+                    f"{reason} ({count})" for reason, count in sorted_reasons
+                )
+                logger.info(f"Route error breakdown: {formatted_reasons}")
             continue
 
         best = opportunities[0]

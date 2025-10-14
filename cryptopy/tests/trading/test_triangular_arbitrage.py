@@ -151,3 +151,29 @@ def test_find_routes_respects_max_route_length():
     assert all(opp.route != long_route for opp in opportunities)
     assert stats.filtered_by_length == 1
     assert stats.considered == 1
+    assert stats.evaluation_error_reasons == {}
+
+
+def test_error_reasons_tracked_for_missing_prices():
+    exchange = MockExchange()
+    calculator = TriangularArbitrageCalculator(exchange)  # type: ignore[arg-type]
+    route = TriangularRoute(("BTC/USD", "ETH/BTC", "ETH/USD"), "USD")
+
+    prices = {
+        "BTC/USD": make_price_snapshot("BTC/USD", bid=101.0, ask=100.0),
+        # Intentionally omit ETH/BTC snapshot to trigger KeyError
+        "ETH/USD": make_price_snapshot("ETH/USD", bid=0.55, ask=0.56),
+    }
+
+    opportunities, stats = calculator.find_profitable_routes(
+        [route],
+        prices,
+        starting_amount=100.0,
+    )
+
+    assert opportunities == []
+    assert stats.evaluation_errors == 1
+    assert stats.rejected_by_profit == 0
+    assert stats.evaluation_error_reasons == {
+        "KeyError: Missing price snapshot for ETH/BTC": 1
+    }
