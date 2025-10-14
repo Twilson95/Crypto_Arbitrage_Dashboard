@@ -41,6 +41,8 @@ When the runner starts it queries the exchange metadata to build every distinct 
 
 where `p` is the effective conversion price for a leg (buy uses the best ask while sell uses the inverse of the best bid) and `f` reflects the taker fee. Routes that satisfy this negative log-sum constraint are passed to the simulator for a full best-bid/ask evaluation, ensuring that only promising opportunities are explored without requiring manual route definitions.
 
+Many derivative venues, such as BitMEX, expose symbols like `ETH/USD:BTC-251226` where the currency after the colon represents the settlement asset for a quanto or futures contract. These instruments cannot be traded with spot USD balances, so the runner automatically filters them (along with inactive and non-spot markets) before attempting route discovery. The log entry starting with `Filtered ... market(s)` summarises how many symbols were skipped and why. If you notice recurring `Currency mismatch` errors, confirm that the exchange offers true spot markets for your starting currency or switch to a venue with native USD pairs.
+
 ## Sandbox and exchange support
 
 Some ccxt exchanges expose official sandbox or testnet environments that can be toggled through `set_sandbox_mode(True)`. Examples include **Binance** (spot and futures testnet), **BitMEX**, **KuCoin**, and **OKX**. These are ideal for rehearsing end-to-end order placement without risking funds—set `USE_TESTNET_DEFAULT = True` or pass `--use-testnet` on the CLI to request the sandbox where it is available.

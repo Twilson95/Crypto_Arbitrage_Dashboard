@@ -7,7 +7,7 @@ import logging
 import math
 import itertools
 from datetime import datetime
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -201,6 +201,74 @@ class CachedPrice:
 
     snapshot: PriceSnapshot
     updated_at: float
+
+
+@dataclass(frozen=True)
+class MarketFilterStats:
+    """Summarises how many markets were usable for route discovery."""
+
+    total: int
+    retained: int
+    skipped_by_reason: Dict[str, int]
+
+    @property
+    def skipped(self) -> int:
+        return self.total - self.retained
+
+
+def filter_markets_for_triangular_routes(
+    markets: Dict[str, Dict[str, object]]
+) -> Tuple[Dict[str, Dict[str, object]], MarketFilterStats]:
+    """Remove inactive or derivative markets that cannot seed USD spot routes."""
+
+    filtered: Dict[str, Dict[str, object]] = {}
+    skipped = Counter()
+    total = 0
+
+    for symbol, metadata in markets.items():
+        total += 1
+        if not isinstance(metadata, dict):
+            skipped["invalid_metadata"] += 1
+            continue
+
+        if metadata.get("active") is False:
+            skipped["inactive"] += 1
+            continue
+
+        base = metadata.get("base")
+        quote = metadata.get("quote")
+        if not base or not quote:
+            skipped["missing_currency"] += 1
+            continue
+
+        base_str = str(base)
+        quote_str = str(quote)
+        if ":" in base_str or ":" in quote_str:
+            skipped["synthetic_currency"] += 1
+            continue
+
+        if metadata.get("settle"):
+            skipped["derivative_settlement"] += 1
+            continue
+
+        market_type = str(metadata.get("type") or "").lower()
+        if market_type in {"swap", "future", "futures", "perpetual", "option"}:
+            skipped["derivative_type"] += 1
+            continue
+
+        if metadata.get("swap") or metadata.get("future") or metadata.get("option"):
+            skipped["derivative_flag"] += 1
+            continue
+
+        spot_flag = metadata.get("spot")
+        if spot_flag is False:
+            skipped["non_spot"] += 1
+            continue
+
+        filtered[symbol] = metadata
+
+    stats = MarketFilterStats(total=total, retained=len(filtered), skipped_by_reason=dict(skipped))
+    return filtered, stats
 
 
 def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> Dict[str, str]:
@@ -542,6 +610,17 @@ async def run_from_args(args: argparse.Namespace) -> None:
         )
 
     markets = exchange.get_markets()
+    markets, market_filter_stats = filter_markets_for_triangular_routes(markets)
+    if market_filter_stats.skipped:
+        sorted_reasons = sorted(
+            market_filter_stats.skipped_by_reason.items(), key=lambda item: item[1], reverse=True
+        )
+        reason_summary = ", ".join(
+            f"{reason.replace('_', ' ')} ({count})" for reason, count in sorted_reasons
+        )
+        logger.info(
+            f"Filtered {market_filter_stats.skipped} market(s) prior to route discovery: {reason_summary}"
+        )
     routes = generate_triangular_routes(
         markets,
         starting_currencies=[starting_currency],
