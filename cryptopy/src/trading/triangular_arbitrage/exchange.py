@@ -104,19 +104,63 @@ class ExchangeConnection:
         limit: int = 10,
         poll_interval: float = 2.0,
     ) -> AsyncIterator[OrderBookSnapshot]:
-        if self.websocket_client is None:
-            async def _poller() -> AsyncIterator[OrderBookSnapshot]:
-                while True:
-                    order_book = self.rest_client.fetch_order_book(symbol, limit)
-                    yield OrderBookSnapshot.from_ccxt(symbol, order_book)
-                    await asyncio.sleep(poll_interval)
-
-            async for snapshot in _poller():
-                yield snapshot
-        else:
+        async def _poll_rest() -> AsyncIterator[OrderBookSnapshot]:
             while True:
-                order_book = await self.websocket_client.watch_order_book(symbol, limit)
+                order_book = await asyncio.to_thread(self.rest_client.fetch_order_book, symbol, limit)
                 yield OrderBookSnapshot.from_ccxt(symbol, order_book)
+                await asyncio.sleep(poll_interval)
+
+        use_websocket = self.websocket_client is not None
+        websocket_failed = False
+        websocket_permanently_unavailable = False
+
+        while True:
+            if use_websocket and self.websocket_client is not None and not websocket_permanently_unavailable:
+                try:
+                    order_book = await self.websocket_client.watch_order_book(symbol, limit)
+                except (CcxtNotSupported, AttributeError):  # type: ignore[misc]
+                    if not websocket_failed:
+                        logger.info(
+                            "%s websocket order book not supported for %s; falling back to REST polling.",
+                            self.exchange_name,
+                            symbol,
+                        )
+                    use_websocket = False
+                    websocket_failed = True
+                    websocket_permanently_unavailable = True
+                    continue
+                except Exception as exc:  # pragma: no cover - network failure path
+                    if not websocket_failed:
+                        logger.warning(
+                            "%s websocket order book failed for %s; falling back to REST polling (%s).",
+                            self.exchange_name,
+                            symbol,
+                            exc,
+                        )
+                    else:
+                        logger.debug(
+                            "%s websocket order book still unavailable for %s (%s); polling via REST.",
+                            self.exchange_name,
+                            symbol,
+                            exc,
+                        )
+                    use_websocket = False
+                    websocket_failed = True
+                    continue
+                else:
+                    yield OrderBookSnapshot.from_ccxt(symbol, order_book)
+                    continue
+
+            async for snapshot in _poll_rest():
+                yield snapshot
+                if (
+                    self.websocket_client is not None
+                    and websocket_failed
+                    and not websocket_permanently_unavailable
+                ):
+                    # Periodically attempt to return to websocket streaming if available again.
+                    use_websocket = True
+                    break
 
     def create_market_order(
         self,

@@ -170,17 +170,23 @@ def select_routes_with_negative_log_sum(
     order_books: Dict[str, OrderBookSnapshot],
     markets: Dict[str, Dict[str, object]],
     fee_lookup: Dict[str, float],
-) -> List[TriangularRoute]:
-    """Return only the routes whose cumulative log cost is negative."""
+) -> Tuple[List[TriangularRoute], int]:
+    """Return only the routes whose cumulative log cost is negative.
+
+    The integer in the returned tuple represents how many routes had sufficient
+    market data to be evaluated (i.e. their log cost could be computed).
+    """
 
     selected: List[TriangularRoute] = []
+    evaluable_routes = 0
     for route in routes:
         log_cost = compute_route_log_cost(route, order_books, markets, fee_lookup)
         if log_cost is None:
             continue
+        evaluable_routes += 1
         if log_cost < 0:
             selected.append(route)
-    return selected
+    return selected, evaluable_routes
 
 
 @dataclass
@@ -323,20 +329,23 @@ async def evaluate_and_execute(
             )
             continue
 
-        candidate_routes = select_routes_with_negative_log_sum(
+        candidate_routes, evaluable_route_count = select_routes_with_negative_log_sum(
             routes,
             order_books,
             markets,
             fee_lookup,
         )
         candidate_count = len(candidate_routes)
+        discovered_count = len(routes)
         if candidate_count == 0:
             duration = perf_counter() - evaluation_started_at
             logger.info(
-                "Route evaluation (%s) started at %s; evaluated %d candidate routes in %.3fs",
+                "Route evaluation (%s) started at %s; evaluated %d/%d candidate routes (from %d discovered) in %.3fs",
                 reason_summary,
                 evaluation_started_wall_clock,
                 candidate_count,
+                evaluable_route_count,
+                discovered_count,
                 duration,
             )
             logger.debug("No routes satisfied the negative log-sum arbitrage condition.")
@@ -353,10 +362,12 @@ async def evaluate_and_execute(
         except (InsufficientLiquidityError, KeyError, ValueError) as exc:
             duration = perf_counter() - evaluation_started_at
             logger.info(
-                "Route evaluation (%s) started at %s; evaluated %d candidate routes in %.3fs",
+                "Route evaluation (%s) started at %s; evaluated %d/%d candidate routes (from %d discovered) in %.3fs",
                 reason_summary,
                 evaluation_started_wall_clock,
                 candidate_count,
+                evaluable_route_count,
+                discovered_count,
                 duration,
             )
             logger.debug("Skipping evaluation due to error: %s", exc)
@@ -364,10 +375,12 @@ async def evaluate_and_execute(
 
         duration = perf_counter() - evaluation_started_at
         logger.info(
-            "Route evaluation (%s) started at %s; evaluated %d candidate routes in %.3fs",
+            "Route evaluation (%s) started at %s; evaluated %d/%d candidate routes (from %d discovered) in %.3fs",
             reason_summary,
             evaluation_started_wall_clock,
             candidate_count,
+            evaluable_route_count,
+            discovered_count,
             duration,
         )
 
