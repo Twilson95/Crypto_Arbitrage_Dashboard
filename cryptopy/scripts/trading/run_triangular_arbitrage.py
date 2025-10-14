@@ -20,7 +20,7 @@ import yaml
 from cryptopy.src.trading.triangular_arbitrage import (
     ExchangeConnection,
     InsufficientLiquidityError,
-    OrderBookSnapshot,
+    PriceSnapshot,
     TriangularArbitrageCalculator,
     TriangularArbitrageExecutor,
     TriangularRoute,
@@ -42,12 +42,12 @@ ENABLE_EXECUTION_DEFAULT = False
 LIVE_TRADING_DEFAULT = False
 USE_TESTNET_DEFAULT = True
 DISABLE_WEBSOCKET_DEFAULT = False
-LOG_LEVEL_DEFAULT = "INFO"
+LOG_LEVEL_DEFAULT = "DEBUG"
 MAX_ROUTE_LENGTH_DEFAULT: Optional[int] = 3
 EVALUATION_INTERVAL_DEFAULT = 30.0
 WEBSOCKET_TIMEOUT_DEFAULT = 10.0
-ORDER_BOOK_REFRESH_INTERVAL_DEFAULT = 30.0
-ORDER_BOOK_MAX_AGE_DEFAULT = 60.0
+PRICE_REFRESH_INTERVAL_DEFAULT = 30.0
+PRICE_MAX_AGE_DEFAULT = 60.0
 
 # Location where executed trades will be persisted when trade logging is enabled.
 TRADE_LOG_PATH_DEFAULT: Optional[Path] = (
@@ -114,7 +114,7 @@ def generate_triangular_routes(
 
 def compute_route_log_cost(
     route: TriangularRoute,
-    order_books: Dict[str, OrderBookSnapshot],
+    prices: Dict[str, PriceSnapshot],
     markets: Dict[str, Dict[str, object]],
     fee_lookup: Dict[str, float],
 ) -> Optional[float]:
@@ -125,8 +125,8 @@ def compute_route_log_cost(
 
     for symbol in route.symbols:
         market = markets.get(symbol)
-        order_book = order_books.get(symbol)
-        if market is None or order_book is None:
+        price_snapshot = prices.get(symbol)
+        if market is None or price_snapshot is None:
             return None
 
         base = market.get("base")
@@ -140,22 +140,16 @@ def compute_route_log_cost(
             return None
 
         if current_currency == quote:
-            best_level = order_book.best_ask()
-            if not best_level:
+            ask = price_snapshot.ask
+            if ask is None or ask <= 0:
                 return None
-            price = float(best_level[0])
-            if price <= 0:
-                return None
-            cost = price / fee_factor
+            cost = float(ask) / fee_factor
             next_currency = str(base)
         elif current_currency == base:
-            best_level = order_book.best_bid()
-            if not best_level:
+            bid = price_snapshot.bid
+            if bid is None or bid <= 0:
                 return None
-            price = float(best_level[0])
-            if price <= 0:
-                return None
-            cost = 1.0 / (price * fee_factor)
+            cost = 1.0 / (float(bid) * fee_factor)
             next_currency = str(quote)
         else:
             return None
@@ -171,7 +165,7 @@ def compute_route_log_cost(
 
 def select_routes_with_negative_log_sum(
     routes: Sequence[TriangularRoute],
-    order_books: Dict[str, OrderBookSnapshot],
+    prices: Dict[str, PriceSnapshot],
     markets: Dict[str, Dict[str, object]],
     fee_lookup: Dict[str, float],
 ) -> Tuple[List[TriangularRoute], int]:
@@ -184,7 +178,7 @@ def select_routes_with_negative_log_sum(
     selected: List[TriangularRoute] = []
     evaluable_routes = 0
     for route in routes:
-        log_cost = compute_route_log_cost(route, order_books, markets, fee_lookup)
+        log_cost = compute_route_log_cost(route, prices, markets, fee_lookup)
         if log_cost is None:
             continue
         evaluable_routes += 1
@@ -202,10 +196,10 @@ class OpportunityExecution:
 
 
 @dataclass
-class CachedOrderBook:
-    """Stores an order book snapshot along with the time it was fetched."""
+class CachedPrice:
+    """Stores a price snapshot along with the time it was observed."""
 
-    snapshot: OrderBookSnapshot
+    snapshot: PriceSnapshot
     updated_at: float
 
 
@@ -254,6 +248,7 @@ async def watch_market_data(
     *,
     poll_interval: float,
     websocket_timeout: float,
+    price_cache: Dict[str, CachedPrice],
     trigger_queue: "asyncio.Queue[str]",
     stop_event: asyncio.Event,
 ) -> None:
@@ -263,16 +258,29 @@ async def watch_market_data(
         await stop_event.wait()
         return
 
+    loop = asyncio.get_running_loop()
+
     try:
-        async for _ in exchange.watch_tickers(
+        async for payload in exchange.watch_tickers(
             symbols,
             poll_interval=poll_interval,
             websocket_timeout=websocket_timeout,
         ):
-            try:
-                trigger_queue.put_nowait("market_data")
-            except asyncio.QueueFull:  # pragma: no cover - unbounded by default
-                logger.debug("Trigger queue full; dropping market_data notification")
+            updated = False
+            if payload:
+                now = loop.time()
+                for symbol, ticker in payload.items():
+                    snapshot = PriceSnapshot.from_ccxt(symbol, ticker)
+                    if snapshot is None:
+                        continue
+                    price_cache[symbol] = CachedPrice(snapshot, now)
+                    updated = True
+
+            if updated:
+                try:
+                    trigger_queue.put_nowait("market_data")
+                except asyncio.QueueFull:  # pragma: no cover - unbounded by default
+                    logger.debug("Trigger queue full; dropping market_data notification")
             if stop_event.is_set():
                 break
     except asyncio.CancelledError:
@@ -282,17 +290,16 @@ async def watch_market_data(
         stop_event.set()
 
 
-async def maintain_order_books(
+async def maintain_price_cache(
     exchange: ExchangeConnection,
     symbols: Sequence[str],
     *,
-    limit: int,
     refresh_interval: float,
-    cache: Dict[str, CachedOrderBook],
+    cache: Dict[str, CachedPrice],
     trigger_queue: "asyncio.Queue[str]",
     stop_event: asyncio.Event,
 ) -> None:
-    """Refresh order book snapshots at a controlled cadence using REST."""
+    """Refresh price snapshots at a controlled cadence using REST tickers."""
 
     if not symbols:
         await stop_event.wait()
@@ -311,24 +318,25 @@ async def maintain_order_books(
             needs_refresh = entry is None or (now - entry.updated_at) >= refresh_interval
             if needs_refresh:
                 try:
-                    snapshot = await asyncio.to_thread(
-                        exchange.get_order_book,
+                    ticker = await asyncio.to_thread(
+                        exchange.rest_client.fetch_ticker,
                         symbol,
-                        limit,
                     )
                 except Exception:
-                    logger.debug("Order book refresh failed for %s", symbol, exc_info=True)
+                    logger.debug("Price refresh failed for %s", symbol, exc_info=True)
                 else:
-                    cache[symbol] = CachedOrderBook(snapshot, loop.time())
-                    try:
-                        trigger_queue.put_nowait("order_book_refresh")
-                    except asyncio.QueueFull:  # pragma: no cover - unbounded by default
-                        logger.debug("Trigger queue full; dropping order_book_refresh notification")
+                    snapshot = PriceSnapshot.from_ccxt(symbol, ticker)
+                    if snapshot is not None:
+                        cache[symbol] = CachedPrice(snapshot, loop.time())
+                        try:
+                            trigger_queue.put_nowait("price_refresh")
+                        except asyncio.QueueFull:  # pragma: no cover - unbounded by default
+                            logger.debug("Trigger queue full; dropping price_refresh notification")
             await asyncio.sleep(per_symbol_delay)
     except asyncio.CancelledError:
         raise
     except Exception:  # pragma: no cover - defensive guard
-        logger.exception("Order book maintainer stopped unexpectedly")
+        logger.exception("Price maintainer stopped unexpectedly")
         stop_event.set()
 
 
@@ -337,7 +345,7 @@ async def evaluate_and_execute(
     executor: Optional[TriangularArbitrageExecutor],
     routes: Sequence[TriangularRoute],
     *,
-    order_book_cache: Dict[str, CachedOrderBook],
+    price_cache: Dict[str, CachedPrice],
     markets: Dict[str, Dict[str, object]],
     fee_lookup: Dict[str, float],
     starting_amount: float,
@@ -345,11 +353,11 @@ async def evaluate_and_execute(
     max_route_length: Optional[int],
     evaluation_interval: float,
     enable_execution: bool,
-    order_book_max_age: float,
+    price_max_age: float,
     trigger_queue: "asyncio.Queue[str]",
     stop_event: asyncio.Event,
 ) -> None:
-    """Evaluate cached order books and execute profitable opportunities."""
+    """Evaluate cached prices and execute profitable opportunities."""
 
     last_execution: Optional[OpportunityExecution] = None
 
@@ -376,26 +384,26 @@ async def evaluate_and_execute(
 
         loop = asyncio.get_running_loop()
         now = loop.time()
-        fresh_order_books: Dict[str, OrderBookSnapshot] = {
+        fresh_prices: Dict[str, PriceSnapshot] = {
             symbol: entry.snapshot
-            for symbol, entry in order_book_cache.items()
-            if now - entry.updated_at <= order_book_max_age
+            for symbol, entry in price_cache.items()
+            if now - entry.updated_at <= price_max_age
         }
 
-        if not fresh_order_books:
+        if not fresh_prices:
             duration = perf_counter() - evaluation_started_at
             logger.info(
-                "Route evaluation (%s) started at %s; skipped in %.3fs due to missing fresh order books (max age %.1fs)",
+                "Route evaluation (%s) started at %s; skipped in %.3fs due to missing fresh prices (max age %.1fs)",
                 reason_summary,
                 evaluation_started_wall_clock,
                 duration,
-                order_book_max_age,
+                price_max_age,
             )
             continue
 
         candidate_routes, evaluable_route_count = select_routes_with_negative_log_sum(
             routes,
-            fresh_order_books,
+            fresh_prices,
             markets,
             fee_lookup,
         )
@@ -418,7 +426,7 @@ async def evaluate_and_execute(
         try:
             opportunities = calculator.find_profitable_routes(
                 candidate_routes,
-                fresh_order_books,
+                fresh_prices,
                 starting_amount=starting_amount,
                 min_profit_percentage=min_profit_percentage,
                 max_route_length=max_route_length,
@@ -509,8 +517,8 @@ async def run_from_args(args: argparse.Namespace) -> None:
     if max_route_length is not None and max_route_length <= 0:
         max_route_length = None
 
-    order_book_refresh_interval = max(args.order_book_refresh_interval, 0.1)
-    order_book_max_age = max(args.order_book_max_age, order_book_refresh_interval)
+    price_refresh_interval = max(args.price_refresh_interval, 0.1)
+    price_max_age = max(args.price_max_age, price_refresh_interval)
 
     trade_log_path: Optional[Path] = None
     if args.trade_log:
@@ -560,7 +568,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
 
     symbols = sorted({symbol for route in routes for symbol in route.symbols})
     fee_lookup = {symbol: float(exchange.get_taker_fee(symbol)) for symbol in symbols}
-    order_book_cache: Dict[str, CachedOrderBook] = {}
+    price_cache: Dict[str, CachedPrice] = {}
     trigger_queue: "asyncio.Queue[str]" = asyncio.Queue()
     stop_event = asyncio.Event()
 
@@ -568,16 +576,17 @@ async def run_from_args(args: argparse.Namespace) -> None:
         loop = asyncio.get_running_loop()
         for symbol in symbols:
             try:
-                snapshot = await asyncio.to_thread(
-                    exchange.get_order_book,
+                ticker = await asyncio.to_thread(
+                    exchange.rest_client.fetch_ticker,
                     symbol,
-                    limit=args.order_book_depth,
                 )
             except Exception:
-                logger.debug("Initial order book fetch failed for %s", symbol, exc_info=True)
+                logger.debug("Initial price fetch failed for %s", symbol, exc_info=True)
             else:
-                order_book_cache[symbol] = CachedOrderBook(snapshot, loop.time())
-        if order_book_cache:
+                snapshot = PriceSnapshot.from_ccxt(symbol, ticker)
+                if snapshot is not None:
+                    price_cache[symbol] = CachedPrice(snapshot, loop.time())
+        if price_cache:
             await trigger_queue.put("initial_snapshot")
 
     market_data_task = asyncio.create_task(
@@ -586,23 +595,23 @@ async def run_from_args(args: argparse.Namespace) -> None:
             symbols,
             poll_interval=args.poll_interval,
             websocket_timeout=args.websocket_timeout,
+            price_cache=price_cache,
             trigger_queue=trigger_queue,
             stop_event=stop_event,
         ),
         name="market-data-watcher",
     )
 
-    order_book_task = asyncio.create_task(
-        maintain_order_books(
+    price_task = asyncio.create_task(
+        maintain_price_cache(
             exchange,
             symbols,
-            limit=args.order_book_depth,
-            refresh_interval=order_book_refresh_interval,
-            cache=order_book_cache,
+            refresh_interval=price_refresh_interval,
+            cache=price_cache,
             trigger_queue=trigger_queue,
             stop_event=stop_event,
         ),
-        name="order-book-maintainer",
+        name="price-maintainer",
     )
 
     evaluator = asyncio.create_task(
@@ -610,7 +619,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             calculator,
             executor,
             routes,
-            order_book_cache=order_book_cache,
+            price_cache=price_cache,
             markets=markets,
             fee_lookup=fee_lookup,
             starting_amount=args.starting_amount,
@@ -618,7 +627,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             max_route_length=max_route_length,
             evaluation_interval=args.evaluation_interval,
             enable_execution=args.enable_execution,
-            order_book_max_age=order_book_max_age,
+            price_max_age=price_max_age,
             trigger_queue=trigger_queue,
             stop_event=stop_event,
         ),
@@ -626,7 +635,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
     )
 
     try:
-        await asyncio.gather(market_data_task, order_book_task, evaluator)
+        await asyncio.gather(market_data_task, price_task, evaluator)
     except asyncio.CancelledError:  # pragma: no cover - cancellation path
         pass
     except KeyboardInterrupt:
@@ -634,9 +643,9 @@ async def run_from_args(args: argparse.Namespace) -> None:
     finally:
         stop_event.set()
         market_data_task.cancel()
-        order_book_task.cancel()
+        price_task.cancel()
         evaluator.cancel()
-        await asyncio.gather(market_data_task, order_book_task, evaluator, return_exceptions=True)
+        await asyncio.gather(market_data_task, price_task, evaluator, return_exceptions=True)
         await exchange.aclose()
 
 
@@ -679,22 +688,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fractional buffer applied after fees to account for slippage (e.g. 0.01 for 1%%).",
     )
     parser.add_argument(
-        "--order-book-depth",
-        type=int,
-        default=10,
-        help="Number of price levels to request for each order book.",
+        "--price-refresh-interval",
+        type=float,
+        default=PRICE_REFRESH_INTERVAL_DEFAULT,
+        help="Target interval in seconds between REST ticker refreshes per symbol.",
     )
     parser.add_argument(
-        "--order-book-refresh-interval",
+        "--price-max-age",
         type=float,
-        default=ORDER_BOOK_REFRESH_INTERVAL_DEFAULT,
-        help="Target interval in seconds between REST order book refreshes per symbol.",
-    )
-    parser.add_argument(
-        "--order-book-max-age",
-        type=float,
-        default=ORDER_BOOK_MAX_AGE_DEFAULT,
-        help="Maximum age in seconds for order book snapshots to be considered fresh.",
+        default=PRICE_MAX_AGE_DEFAULT,
+        help="Maximum age in seconds for cached price snapshots to be considered fresh.",
     )
     parser.add_argument(
         "--poll-interval",
@@ -742,7 +745,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--disable-websocket",
         action=argparse.BooleanOptionalAction,
         default=DISABLE_WEBSOCKET_DEFAULT,
-        help="Disable websocket usage and rely on REST polling for order books.",
+        help="Disable websocket usage and rely on REST polling for price updates.",
     )
     parser.add_argument(
         "--enable-execution",

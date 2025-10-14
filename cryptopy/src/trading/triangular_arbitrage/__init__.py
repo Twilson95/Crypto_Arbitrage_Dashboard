@@ -5,6 +5,7 @@ from .exceptions import InsufficientLiquidityError
 from .executor import TriangularArbitrageExecutor
 from .models import (
     OrderBookSnapshot,
+    PriceSnapshot,
     TriangularOpportunity,
     TriangularRoute,
     TriangularTradeLeg,
@@ -14,6 +15,7 @@ __all__ = [
     "ExchangeConnection",
     "InsufficientLiquidityError",
     "OrderBookSnapshot",
+    "PriceSnapshot",
     "TriangularArbitrageCalculator",
     "TriangularArbitrageExecutor",
     "TriangularOpportunity",

@@ -7,8 +7,52 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass(frozen=True)
+class PriceSnapshot:
+    """Best bid/ask view derived from a ticker payload."""
+
+    symbol: str
+    bid: Optional[float]
+    ask: Optional[float]
+    timestamp: float = field(default_factory=lambda: time.time())
+
+    @classmethod
+    def from_ccxt(cls, symbol: str, ticker: Dict[str, Any]) -> Optional["PriceSnapshot"]:
+        """Create a :class:`PriceSnapshot` from raw CCXT ticker data."""
+
+        if ticker is None:
+            return None
+
+        bid = ticker.get("bid")
+        ask = ticker.get("ask")
+
+        try:
+            bid_value = float(bid) if bid is not None else None
+        except (TypeError, ValueError):  # pragma: no cover - defensive conversion
+            bid_value = None
+
+        try:
+            ask_value = float(ask) if ask is not None else None
+        except (TypeError, ValueError):  # pragma: no cover - defensive conversion
+            ask_value = None
+
+        if bid_value is None and ask_value is None:
+            return None
+
+        timestamp = ticker.get("timestamp")
+        if timestamp is not None:
+            try:
+                timestamp_value = float(timestamp) / 1000.0
+            except (TypeError, ValueError):  # pragma: no cover
+                timestamp_value = time.time()
+        else:
+            timestamp_value = time.time()
+
+        return cls(symbol=symbol, bid=bid_value, ask=ask_value, timestamp=timestamp_value)
+
+
+@dataclass(frozen=True)
 class OrderBookSnapshot:
-    """Normalised order book representation used by the simulator."""
+    """Normalised order book representation kept for backwards compatibility."""
 
     symbol: str
     bids: List[Tuple[float, float]]
@@ -17,7 +61,6 @@ class OrderBookSnapshot:
 
     @classmethod
     def from_ccxt(cls, symbol: str, order_book: Dict[str, Any]) -> "OrderBookSnapshot":
-        """Create an :class:`OrderBookSnapshot` from raw CCXT data."""
         bids = sorted(order_book.get("bids", []), key=lambda level: level[0], reverse=True)
         asks = sorted(order_book.get("asks", []), key=lambda level: level[0])
         timestamp = order_book.get("timestamp")

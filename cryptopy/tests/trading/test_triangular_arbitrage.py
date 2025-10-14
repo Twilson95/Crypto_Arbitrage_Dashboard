@@ -14,7 +14,7 @@ assert spec.loader is not None
 spec.loader.exec_module(triangular_arbitrage)
 
 InsufficientLiquidityError = triangular_arbitrage.InsufficientLiquidityError
-OrderBookSnapshot = triangular_arbitrage.OrderBookSnapshot
+PriceSnapshot = triangular_arbitrage.PriceSnapshot
 TriangularArbitrageCalculator = triangular_arbitrage.TriangularArbitrageCalculator
 TriangularArbitrageExecutor = triangular_arbitrage.TriangularArbitrageExecutor
 TriangularOpportunity = triangular_arbitrage.TriangularOpportunity
@@ -38,8 +38,8 @@ class MockExchange:
         return order
 
 
-def make_order_book(symbol, bids, asks):
-    return OrderBookSnapshot(symbol=symbol, bids=bids, asks=asks)
+def make_price_snapshot(symbol, bid, ask):
+    return PriceSnapshot(symbol=symbol, bid=bid, ask=ask)
 
 
 def test_profitable_route_detected():
@@ -47,13 +47,13 @@ def test_profitable_route_detected():
     calculator = TriangularArbitrageCalculator(exchange)  # type: ignore[arg-type]
     route = TriangularRoute(("BTC/USD", "ETH/BTC", "ETH/USD"), "USD")
 
-    order_books = {
-        "BTC/USD": make_order_book("BTC/USD", bids=[(101.0, 50)], asks=[(100.0, 50)]),
-        "ETH/BTC": make_order_book("ETH/BTC", bids=[(0.55, 3000)], asks=[(0.5, 3000)]),
-        "ETH/USD": make_order_book("ETH/USD", bids=[(0.55, 3000)], asks=[(0.56, 3000)]),
+    prices = {
+        "BTC/USD": make_price_snapshot("BTC/USD", bid=101.0, ask=100.0),
+        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.55, ask=0.5),
+        "ETH/USD": make_price_snapshot("ETH/USD", bid=0.55, ask=0.56),
     }
 
-    opportunity = calculator.evaluate_route(route, order_books, starting_amount=1000.0)
+    opportunity = calculator.evaluate_route(route, prices, starting_amount=1000.0)
 
     assert opportunity is not None
     assert opportunity.final_amount > opportunity.starting_amount
@@ -65,14 +65,14 @@ def test_route_filtered_when_below_threshold():
     calculator = TriangularArbitrageCalculator(exchange)  # type: ignore[arg-type]
     route = TriangularRoute(("BTC/USD", "ETH/BTC", "ETH/USD"), "USD")
 
-    order_books = {
-        "BTC/USD": make_order_book("BTC/USD", bids=[(101.0, 50)], asks=[(100.0, 50)]),
-        "ETH/BTC": make_order_book("ETH/BTC", bids=[(0.5, 3000)], asks=[(0.5, 3000)]),
-        "ETH/USD": make_order_book("ETH/USD", bids=[(0.5, 3000)], asks=[(0.5, 3000)]),
+    prices = {
+        "BTC/USD": make_price_snapshot("BTC/USD", bid=101.0, ask=100.0),
+        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.5, ask=0.5),
+        "ETH/USD": make_price_snapshot("ETH/USD", bid=0.5, ask=0.5),
     }
 
     opportunity = calculator.evaluate_route(
-        route, order_books, starting_amount=1000.0, min_profit_percentage=0.1
+        route, prices, starting_amount=1000.0, min_profit_percentage=0.1
     )
 
     assert opportunity is None
@@ -83,14 +83,14 @@ def test_insufficient_liquidity_raises():
     calculator = TriangularArbitrageCalculator(exchange)  # type: ignore[arg-type]
     route = TriangularRoute(("BTC/USD", "ETH/BTC", "ETH/USD"), "USD")
 
-    order_books = {
-        "BTC/USD": make_order_book("BTC/USD", bids=[(101.0, 1)], asks=[(100.0, 1)]),
-        "ETH/BTC": make_order_book("ETH/BTC", bids=[(0.55, 1)], asks=[(0.5, 1)]),
-        "ETH/USD": make_order_book("ETH/USD", bids=[(0.55, 1)], asks=[(0.56, 1)]),
+    prices = {
+        "BTC/USD": make_price_snapshot("BTC/USD", bid=101.0, ask=None),
+        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.55, ask=0.5),
+        "ETH/USD": make_price_snapshot("ETH/USD", bid=0.55, ask=0.56),
     }
 
     with pytest.raises(InsufficientLiquidityError):
-        calculator.evaluate_route(route, order_books, starting_amount=1000.0)
+        calculator.evaluate_route(route, prices, starting_amount=1000.0)
 
 
 def test_executor_places_orders_in_sequence(tmp_path):
@@ -100,13 +100,13 @@ def test_executor_places_orders_in_sequence(tmp_path):
     executor = TriangularArbitrageExecutor(exchange, dry_run=True, trade_log_path=log_path)  # type: ignore[arg-type]
     route = TriangularRoute(("BTC/USD", "ETH/BTC", "ETH/USD"), "USD")
 
-    order_books = {
-        "BTC/USD": make_order_book("BTC/USD", bids=[(101.0, 50)], asks=[(100.0, 50)]),
-        "ETH/BTC": make_order_book("ETH/BTC", bids=[(0.55, 3000)], asks=[(0.5, 3000)]),
-        "ETH/USD": make_order_book("ETH/USD", bids=[(0.55, 3000)], asks=[(0.56, 3000)]),
+    prices = {
+        "BTC/USD": make_price_snapshot("BTC/USD", bid=101.0, ask=100.0),
+        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.55, ask=0.5),
+        "ETH/USD": make_price_snapshot("ETH/USD", bid=0.55, ask=0.56),
     }
 
-    opportunity = calculator.evaluate_route(route, order_books, starting_amount=100.0)
+    opportunity = calculator.evaluate_route(route, prices, starting_amount=100.0)
     assert opportunity is not None
     orders = executor.execute(opportunity)
 
@@ -132,17 +132,17 @@ def test_find_routes_respects_max_route_length():
     )
     short_route = TriangularRoute(("BTC/USD", "ETH/BTC", "ETH/USD"), "USD")
 
-    order_books = {
-        "BTC/USD": make_order_book("BTC/USD", bids=[(101.0, 50)], asks=[(100.0, 50)]),
-        "ETH/BTC": make_order_book("ETH/BTC", bids=[(0.55, 3000)], asks=[(0.5, 3000)]),
-        "XRP/ETH": make_order_book("XRP/ETH", bids=[(0.002, 100000)], asks=[(0.0018, 100000)]),
-        "XRP/USD": make_order_book("XRP/USD", bids=[(0.55, 100000)], asks=[(0.56, 100000)]),
-        "ETH/USD": make_order_book("ETH/USD", bids=[(0.55, 3000)], asks=[(0.56, 3000)]),
+    prices = {
+        "BTC/USD": make_price_snapshot("BTC/USD", bid=101.0, ask=100.0),
+        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.55, ask=0.5),
+        "XRP/ETH": make_price_snapshot("XRP/ETH", bid=0.002, ask=0.0018),
+        "XRP/USD": make_price_snapshot("XRP/USD", bid=0.55, ask=0.56),
+        "ETH/USD": make_price_snapshot("ETH/USD", bid=0.55, ask=0.56),
     }
 
     opportunities = calculator.find_profitable_routes(
         [long_route, short_route],
-        order_books,
+        prices,
         starting_amount=100.0,
         max_route_length=3,
     )

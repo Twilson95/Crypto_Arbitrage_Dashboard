@@ -5,7 +5,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from .exceptions import InsufficientLiquidityError
 from .models import (
-    OrderBookSnapshot,
+    PriceSnapshot,
     TriangularOpportunity,
     TriangularRoute,
     TriangularTradeLeg,
@@ -13,7 +13,7 @@ from .models import (
 
 
 class TriangularArbitrageCalculator:
-    """Evaluates triangular arbitrage opportunities using order book depth."""
+    """Evaluates triangular arbitrage opportunities using ticker prices."""
 
     def __init__(
         self,
@@ -27,7 +27,7 @@ class TriangularArbitrageCalculator:
     def evaluate_route(
         self,
         route: TriangularRoute,
-        order_books: Dict[str, OrderBookSnapshot],
+        prices: Dict[str, PriceSnapshot],
         *,
         starting_amount: float,
         min_profit_percentage: float = 0.0,
@@ -37,18 +37,18 @@ class TriangularArbitrageCalculator:
         trades: List[TriangularTradeLeg] = []
 
         for symbol in route.symbols:
-            order_book = order_books.get(symbol)
-            if order_book is None:
-                raise KeyError(f"Missing order book for {symbol}")
+            price_snapshot = prices.get(symbol)
+            if price_snapshot is None:
+                raise KeyError(f"Missing price snapshot for {symbol}")
 
             base, quote = symbol.split("/")
             if current_currency == quote:
-                trade = self._simulate_buy(symbol, current_amount, order_book)
+                trade = self._simulate_buy(symbol, current_amount, price_snapshot)
                 current_currency = base
                 current_amount = trade.amount_out
                 trades.append(trade)
             elif current_currency == base:
-                trade = self._simulate_sell(symbol, current_amount, order_book)
+                trade = self._simulate_sell(symbol, current_amount, price_snapshot)
                 current_currency = quote
                 current_amount = trade.amount_out
                 trades.append(trade)
@@ -71,7 +71,7 @@ class TriangularArbitrageCalculator:
     def find_profitable_routes(
         self,
         routes: Iterable[TriangularRoute],
-        order_books: Dict[str, OrderBookSnapshot],
+        prices: Dict[str, PriceSnapshot],
         *,
         starting_amount: float,
         min_profit_percentage: float = 0.0,
@@ -84,7 +84,7 @@ class TriangularArbitrageCalculator:
             try:
                 opportunity = self.evaluate_route(
                     route,
-                    order_books,
+                    prices,
                     starting_amount=starting_amount,
                     min_profit_percentage=min_profit_percentage,
                 )
@@ -99,36 +99,19 @@ class TriangularArbitrageCalculator:
         self,
         symbol: str,
         quote_amount: float,
-        order_book: OrderBookSnapshot,
+        snapshot: PriceSnapshot,
     ) -> TriangularTradeLeg:
         if quote_amount <= 0:
             raise ValueError("quote_amount must be positive")
 
-        remaining_quote = quote_amount
-        acquired_base = 0.0
-        total_quote_used = 0.0
-
-        for price, base_available in order_book.asks:
-            if remaining_quote <= 0:
-                break
-            max_quote_at_level = base_available * price
-            if max_quote_at_level <= remaining_quote:
-                acquired_base += base_available
-                remaining_quote -= max_quote_at_level
-                total_quote_used += max_quote_at_level
-            else:
-                partial_base = remaining_quote / price
-                acquired_base += partial_base
-                total_quote_used += remaining_quote
-                remaining_quote = 0.0
-                break
-
-        if acquired_base == 0 or remaining_quote > 1e-12:
+        ask = snapshot.ask
+        if ask is None or ask <= 0:
             raise InsufficientLiquidityError(
-                f"Not enough liquidity on {symbol} to spend {quote_amount} {symbol.split('/')[1]}"
+                f"No ask price available for {symbol} to spend {quote_amount} {symbol.split('/')[1]}"
             )
 
-        average_price = total_quote_used / acquired_base
+        acquired_base = quote_amount / ask
+        total_quote_used = quote_amount
         fee_rate = self.exchange.get_taker_fee(symbol)
         base_after_fee = acquired_base * (1 - fee_rate)
         fee_paid = acquired_base - base_after_fee
@@ -140,7 +123,7 @@ class TriangularArbitrageCalculator:
             side="buy",
             amount_in=total_quote_used,
             amount_out=base_after_fee,
-            average_price=average_price,
+            average_price=ask,
             fee_paid=fee_paid,
             traded_quantity=acquired_base,
         )
@@ -149,27 +132,18 @@ class TriangularArbitrageCalculator:
         self,
         symbol: str,
         base_amount: float,
-        order_book: OrderBookSnapshot,
+        snapshot: PriceSnapshot,
     ) -> TriangularTradeLeg:
         if base_amount <= 0:
             raise ValueError("base_amount must be positive")
 
-        remaining_base = base_amount
-        quote_acquired = 0.0
-
-        for price, base_available in order_book.bids:
-            if remaining_base <= 0:
-                break
-            trade_amount = min(base_available, remaining_base)
-            quote_acquired += trade_amount * price
-            remaining_base -= trade_amount
-
-        if remaining_base > 1e-12:
+        bid = snapshot.bid
+        if bid is None or bid <= 0:
             raise InsufficientLiquidityError(
-                f"Not enough liquidity on {symbol} to sell {base_amount} {symbol.split('/')[0]}"
+                f"No bid price available for {symbol} to sell {base_amount} {symbol.split('/')[0]}"
             )
 
-        average_price = quote_acquired / base_amount
+        quote_acquired = base_amount * bid
         fee_rate = self.exchange.get_taker_fee(symbol)
         quote_after_fee = quote_acquired * (1 - fee_rate)
         fee_paid = quote_acquired - quote_after_fee
@@ -181,7 +155,7 @@ class TriangularArbitrageCalculator:
             side="sell",
             amount_in=base_amount,
             amount_out=quote_after_fee,
-            average_price=average_price,
+            average_price=bid,
             fee_paid=fee_paid,
             traded_quantity=base_amount,
         )
