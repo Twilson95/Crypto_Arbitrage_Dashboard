@@ -20,6 +20,7 @@ Key options:
 - `--live-trading` switches from simulated test orders to real exchange orders. It requires `--enable-execution`.
 - `--use-testnet` enables the sandbox/testnet for exchanges that provide one.
 - `--trade-log` stores each simulated or live leg in a CSV file for auditing (defaults to the `TRADE_LOG_PATH_DEFAULT` location if left unspecified).
+- `--websocket-timeout` bounds how long the watcher will wait for a streamed order-book update before temporarily polling the REST API instead.
 - `--config` can point at a YAML file (defaults to `config.yaml` in the project root) that contains credentials. For Kraken, the loader expects an entry in the form:
 
   ```yaml
@@ -45,4 +46,4 @@ Some ccxt exchanges expose official sandbox or testnet environments that can be 
 Kraken operates a **Spot Trading Sandbox** at <https://support.kraken.com/hc/en-us/articles/360022839011-Kraken-Spot-Trading-API-Sandbox>, but the ccxt library does not currently expose that sandbox through `set_sandbox_mode`. When you connect to Kraken through this toolkit, ccxt reports that sandbox mode is unsupported and requests fall back to the production API. If you require a sandbox-backed workflow, consider testing with one of the exchanges above. For Kraken, plan to validate with small real-money trades once you are satisfied that the strategy behaves correctly.
 Each evaluation cycle logs the trigger that woke it (market data refresh, periodic fallback, or a post-trade confirmation), the start time, and how long it took to review the available routes. The log message also reports how many of the discovered routes currently have complete order-book data and how many of those satisfy the negative log-sum filter, making it clear why a subset of routes advance to the deeper profitability simulation. This makes it easy to confirm that the runner only reacts when something meaningful happens while still providing an infrequent periodic backstop.
 
-If an exchange's websocket feed becomes unavailable or does not expose order-book streaming, the watcher automatically falls back to REST polling so market data updates continue to trigger evaluations (albeit at the configured polling cadence).
+If an exchange's websocket feed becomes unavailable, stalls for longer than the configured timeout, or does not expose order-book streaming, the watcher automatically falls back to REST polling so market data updates continue to trigger evaluations (albeit at the configured polling cadence). Whenever websocket connectivity resumes, the watcher returns to streaming after the next REST refresh.

@@ -44,6 +44,7 @@ DISABLE_WEBSOCKET_DEFAULT = False
 LOG_LEVEL_DEFAULT = "INFO"
 MAX_ROUTE_LENGTH_DEFAULT: Optional[int] = 3
 EVALUATION_INTERVAL_DEFAULT = 30.0
+WEBSOCKET_TIMEOUT_DEFAULT = 10.0
 
 # Location where executed trades will be persisted when trade logging is enabled.
 TRADE_LOG_PATH_DEFAULT: Optional[Path] = (
@@ -242,6 +243,7 @@ async def watch_order_books(
     *,
     limit: int,
     poll_interval: float,
+    websocket_timeout: float,
     cache: Dict[str, OrderBookSnapshot],
     trigger_queue: "asyncio.Queue[str]",
     stop_event: asyncio.Event,
@@ -254,6 +256,7 @@ async def watch_order_books(
                 symbol,
                 limit=limit,
                 poll_interval=poll_interval,
+                websocket_timeout=websocket_timeout,
             ):
                 cache[symbol] = snapshot
                 try:
@@ -518,6 +521,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             symbols,
             limit=args.order_book_depth,
             poll_interval=args.poll_interval,
+            websocket_timeout=args.websocket_timeout,
             cache=order_books,
             trigger_queue=trigger_queue,
             stop_event=stop_event,
@@ -607,6 +611,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=2.0,
         help="Fallback polling interval (seconds) when websockets are unavailable.",
+    )
+    parser.add_argument(
+        "--websocket-timeout",
+        type=float,
+        default=WEBSOCKET_TIMEOUT_DEFAULT,
+        help="Maximum time to wait for a websocket order book update before polling via REST.",
     )
     parser.add_argument(
         "--evaluation-interval",
