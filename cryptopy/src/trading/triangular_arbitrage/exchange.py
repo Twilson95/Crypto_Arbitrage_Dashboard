@@ -2,14 +2,22 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, AsyncIterator, Dict, Optional, Sequence
 
 from .models import OrderBookSnapshot
+
+logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - optional dependency
     import ccxt  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover
     ccxt = None  # type: ignore
+
+try:  # pragma: no cover - optional dependency
+    from ccxt.base.errors import NotSupported as CcxtNotSupported  # type: ignore
+except Exception:  # pragma: no cover - fallback if ccxt is missing or outdated
+    CcxtNotSupported = ()  # type: ignore[assignment]
 
 try:  # pragma: no cover - optional dependency
     import ccxt.pro as ccxtpro  # type: ignore
@@ -39,6 +47,8 @@ class ExchangeConnection:
         self.credentials = credentials or {}
         self.make_trades = make_trades
         self._use_testnet = use_testnet
+        self._rest_sandbox_enabled = False
+        self._ws_sandbox_enabled = False
 
         exchange_class = getattr(ccxt, self.exchange_name)
         rest_config = {
@@ -47,8 +57,8 @@ class ExchangeConnection:
         }
         self.rest_client = rest_client or exchange_class(rest_config)
 
-        if hasattr(self.rest_client, "set_sandbox_mode"):
-            self.rest_client.set_sandbox_mode(use_testnet)
+        if use_testnet:
+            self._rest_sandbox_enabled = self._enable_sandbox_mode(self.rest_client, "REST")
 
         self.websocket_client = websocket_client
         if websocket_client is None and enable_websocket and ccxtpro is not None:
@@ -58,8 +68,8 @@ class ExchangeConnection:
                 **self.credentials,
             }
             self.websocket_client = ws_class(ws_config)
-            if hasattr(self.websocket_client, "set_sandbox_mode"):
-                self.websocket_client.set_sandbox_mode(use_testnet)
+            if use_testnet:
+                self._ws_sandbox_enabled = self._enable_sandbox_mode(self.websocket_client, "websocket")
 
         self._market_cache = self.rest_client.load_markets()
         self._default_fee = (
@@ -129,6 +139,41 @@ class ExchangeConnection:
                 "test_order": True,
             }
         return self.rest_client.create_order(symbol, "market", side, amount, params=params)
+
+    @property
+    def sandbox_supported(self) -> bool:
+        """Return ``True`` if ccxt successfully enabled sandbox mode."""
+
+        return self._rest_sandbox_enabled or self._ws_sandbox_enabled
+
+    def _enable_sandbox_mode(self, client: Any, transport: str) -> bool:
+        """Attempt to enable ccxt sandbox mode and log when unsupported."""
+
+        if not hasattr(client, "set_sandbox_mode"):
+            logger.info(
+                "%s sandbox mode is not available for %s connections via ccxt.",
+                self.exchange_name,
+                transport,
+            )
+            return False
+
+        try:
+            client.set_sandbox_mode(True)
+            return True
+        except CcxtNotSupported as exc:  # type: ignore[misc]
+            logger.info(
+                "%s does not provide a ccxt sandbox endpoint; running against production API. (%s)",
+                self.exchange_name,
+                exc,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning(
+                "Failed to enable sandbox mode for %s (%s connection): %s",
+                self.exchange_name,
+                transport,
+                exc,
+            )
+        return False
 
     def close(self) -> None:
         if hasattr(self.rest_client, "close"):

@@ -36,8 +36,8 @@ When the runner starts it queries the exchange metadata to build every distinct 
 
 where `p` is the effective conversion price for a leg (buy uses the best ask while sell uses the inverse of the best bid) and `f` reflects the taker fee. Routes that satisfy this negative log-sum constraint are passed to the simulator for a full depth-aware evaluation, ensuring that only promising opportunities are explored without requiring manual route definitions.
 
-## Kraken testing
+## Sandbox and exchange support
 
-Kraken offers a dedicated **Spot Trading Sandbox** that mirrors the production API with a separate base URL (`https://api.sandbox.kraken.com`). You can sign up for a sandbox account at <https://support.kraken.com/hc/en-us/articles/360022839011-Kraken-Spot-Trading-API-Sandbox> and generate API credentials that are safe for testing. When using ccxt, pass the sandbox API key/secret and enable sandbox mode either via the library or with the `--use-testnet` flag provided by this project.
+Some ccxt exchanges expose official sandbox or testnet environments that can be toggled through `set_sandbox_mode(True)`. Examples include **Binance** (spot and futures testnet), **BitMEX**, **KuCoin**, and **OKX**. These are ideal for rehearsing end-to-end order placement without risking funds—set `USE_TESTNET_DEFAULT = True` or pass `--use-testnet` on the CLI to request the sandbox where it is available.
 
-Keep in mind that some Kraken features—particularly funding and staking—are not available in the sandbox, so final integration tests should still be performed with small real orders once you are confident in the strategy.
+Kraken operates a **Spot Trading Sandbox** at <https://support.kraken.com/hc/en-us/articles/360022839011-Kraken-Spot-Trading-API-Sandbox>, but the ccxt library does not currently expose that sandbox through `set_sandbox_mode`. When you connect to Kraken through this toolkit, ccxt reports that sandbox mode is unsupported and requests fall back to the production API. If you require a sandbox-backed workflow, consider testing with one of the exchanges above. For Kraken, plan to validate with small real-money trades once you are satisfied that the strategy behaves correctly.

@@ -360,6 +360,12 @@ async def run_from_args(args: argparse.Namespace) -> None:
         make_trades=args.live_trading,
     )
 
+    if args.use_testnet and not exchange.sandbox_supported:
+        logger.warning(
+            "Sandbox mode is not available for %s via ccxt; requests will hit the production API.",
+            exchange_name,
+        )
+
     markets = exchange.get_markets()
     routes = generate_triangular_routes(markets)
     if not routes:
