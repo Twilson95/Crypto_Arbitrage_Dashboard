@@ -12,6 +12,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from asyncio import QueueEmpty
+
 import yaml
 
 from cryptopy.src.trading.triangular_arbitrage import (
@@ -41,6 +43,7 @@ USE_TESTNET_DEFAULT = True
 DISABLE_WEBSOCKET_DEFAULT = False
 LOG_LEVEL_DEFAULT = "INFO"
 MAX_ROUTE_LENGTH_DEFAULT: Optional[int] = 3
+EVALUATION_INTERVAL_DEFAULT = 30.0
 
 # Location where executed trades will be persisted when trade logging is enabled.
 TRADE_LOG_PATH_DEFAULT: Optional[Path] = (
@@ -234,7 +237,7 @@ async def watch_order_books(
     limit: int,
     poll_interval: float,
     cache: Dict[str, OrderBookSnapshot],
-    wake_event: asyncio.Event,
+    trigger_queue: "asyncio.Queue[str]",
     stop_event: asyncio.Event,
 ) -> None:
     """Continuously populate ``cache`` with the latest order book snapshots."""
@@ -247,7 +250,10 @@ async def watch_order_books(
                 poll_interval=poll_interval,
             ):
                 cache[symbol] = snapshot
-                wake_event.set()
+                try:
+                    trigger_queue.put_nowait("market_data")
+                except asyncio.QueueFull:  # pragma: no cover - unbounded by default
+                    logger.debug("Trigger queue full; dropping market_data notification")
                 if stop_event.is_set():
                     break
         except asyncio.CancelledError:
@@ -279,7 +285,7 @@ async def evaluate_and_execute(
     max_route_length: Optional[int],
     evaluation_interval: float,
     enable_execution: bool,
-    wake_event: asyncio.Event,
+    trigger_queue: "asyncio.Queue[str]",
     stop_event: asyncio.Event,
 ) -> None:
     """Evaluate cached order books and execute profitable opportunities."""
@@ -287,19 +293,35 @@ async def evaluate_and_execute(
     last_execution: Optional[OpportunityExecution] = None
 
     while not stop_event.is_set():
+        reasons: List[str]
         try:
-            await asyncio.wait_for(wake_event.wait(), timeout=evaluation_interval)
+            reason = await asyncio.wait_for(trigger_queue.get(), timeout=evaluation_interval)
         except asyncio.TimeoutError:
-            pass
-        wake_event.clear()
+            reasons = ["periodic"]
+        else:
+            reasons = [reason]
+            while True:
+                try:
+                    reasons.append(trigger_queue.get_nowait())
+                except QueueEmpty:
+                    break
 
         if stop_event.is_set():
             break
-        if not order_books:
-            continue
 
         evaluation_started_wall_clock = datetime.now().isoformat()
         evaluation_started_at = perf_counter()
+        reason_summary = ",".join(sorted(set(reasons)))
+
+        if not order_books:
+            duration = perf_counter() - evaluation_started_at
+            logger.info(
+                "Route evaluation (%s) started at %s; skipped in %.3fs due to missing order books",
+                reason_summary,
+                evaluation_started_wall_clock,
+                duration,
+            )
+            continue
 
         candidate_routes = select_routes_with_negative_log_sum(
             routes,
@@ -311,7 +333,8 @@ async def evaluate_and_execute(
         if candidate_count == 0:
             duration = perf_counter() - evaluation_started_at
             logger.info(
-                "Route evaluation started at %s; evaluated %d candidate routes in %.3fs",
+                "Route evaluation (%s) started at %s; evaluated %d candidate routes in %.3fs",
+                reason_summary,
                 evaluation_started_wall_clock,
                 candidate_count,
                 duration,
@@ -330,7 +353,8 @@ async def evaluate_and_execute(
         except (InsufficientLiquidityError, KeyError, ValueError) as exc:
             duration = perf_counter() - evaluation_started_at
             logger.info(
-                "Route evaluation started at %s; evaluated %d candidate routes in %.3fs",
+                "Route evaluation (%s) started at %s; evaluated %d candidate routes in %.3fs",
+                reason_summary,
                 evaluation_started_wall_clock,
                 candidate_count,
                 duration,
@@ -340,7 +364,8 @@ async def evaluate_and_execute(
 
         duration = perf_counter() - evaluation_started_at
         logger.info(
-            "Route evaluation started at %s; evaluated %d candidate routes in %.3fs",
+            "Route evaluation (%s) started at %s; evaluated %d candidate routes in %.3fs",
+            reason_summary,
             evaluation_started_wall_clock,
             candidate_count,
             duration,
@@ -380,6 +405,10 @@ async def evaluate_and_execute(
         last_execution = OpportunityExecution(best.route, profit_signature)
         if orders:
             logger.info("Placed %d order(s) for opportunity.", len(orders))
+            try:
+                trigger_queue.put_nowait("post_trade")
+            except asyncio.QueueFull:  # pragma: no cover - unbounded by default
+                logger.debug("Trigger queue full; dropping post_trade notification")
 
 
 async def run_from_args(args: argparse.Namespace) -> None:
@@ -452,7 +481,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
     symbols = sorted({symbol for route in routes for symbol in route.symbols})
     fee_lookup = {symbol: float(exchange.get_taker_fee(symbol)) for symbol in symbols}
     order_books: Dict[str, OrderBookSnapshot] = {}
-    wake_event = asyncio.Event()
+    trigger_queue: "asyncio.Queue[str]" = asyncio.Queue()
     stop_event = asyncio.Event()
 
     if symbols:
@@ -468,7 +497,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             else:
                 order_books[symbol] = snapshot
         if order_books:
-            wake_event.set()
+            await trigger_queue.put("initial_snapshot")
 
     watcher = asyncio.create_task(
         watch_order_books(
@@ -477,7 +506,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             limit=args.order_book_depth,
             poll_interval=args.poll_interval,
             cache=order_books,
-            wake_event=wake_event,
+            trigger_queue=trigger_queue,
             stop_event=stop_event,
         ),
         name="order-book-watcher",
@@ -496,7 +525,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             max_route_length=max_route_length,
             evaluation_interval=args.evaluation_interval,
             enable_execution=args.enable_execution,
-            wake_event=wake_event,
+            trigger_queue=trigger_queue,
             stop_event=stop_event,
         ),
         name="arbitrage-evaluator",
@@ -569,7 +598,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--evaluation-interval",
         type=float,
-        default=1.0,
+        default=EVALUATION_INTERVAL_DEFAULT,
         help="Minimum interval in seconds between opportunity evaluations.",
     )
     parser.add_argument(
