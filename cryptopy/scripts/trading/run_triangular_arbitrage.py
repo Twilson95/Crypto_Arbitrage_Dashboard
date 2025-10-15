@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from asyncio import QueueEmpty
 
@@ -77,6 +77,15 @@ MARKET_FILTER_REASON_DESCRIPTIONS = {
         "Exchange metadata flags the market as derivative-only, indicating non-spot behaviour."
     ),
 }
+
+
+def _chunked(sequence: Sequence[str], size: int) -> Iterable[Sequence[str]]:
+    """Yield ``sequence`` slices of ``size`` elements (best-effort for the last chunk)."""
+
+    if size <= 0:
+        size = len(sequence) or 1
+    for index in range(0, len(sequence), size):
+        yield sequence[index : index + size]
 
 
 def generate_triangular_routes(
@@ -468,6 +477,77 @@ async def refresh_prices_via_rest(
         stop_event.set()
 
 
+async def prime_price_cache(
+    exchange: ExchangeConnection,
+    symbols: Sequence[str],
+    *,
+    price_cache: Dict[str, CachedPrice],
+) -> int:
+    """Populate ``price_cache`` with initial ticker data and return insert count."""
+
+    if not symbols:
+        return 0
+
+    loop = asyncio.get_running_loop()
+    inserted = 0
+    client = exchange.market_data_client
+
+    client_has = getattr(client, "has", {})
+    if isinstance(client_has, dict):
+        has_fetch_tickers = bool(client_has.get("fetchTickers"))
+    else:  # pragma: no cover - defensive branch for exotic client implementations
+        getter = getattr(client_has, "get", lambda *_args, **_kwargs: False)
+        has_fetch_tickers = bool(getter("fetchTickers"))
+
+    def _store_snapshot(symbol: str, payload: Optional[Dict[str, Any]]) -> None:
+        nonlocal inserted
+        if not payload:
+            return
+        snapshot = PriceSnapshot.from_ccxt(symbol, payload)
+        if snapshot is None:
+            return
+        price_cache[symbol] = CachedPrice(snapshot, loop.time())
+        inserted += 1
+
+    fetched: Dict[str, Dict[str, Any]] = {}
+    if has_fetch_tickers:
+        try:
+            fetched_payload = await asyncio.to_thread(client.fetch_tickers, symbols)
+        except TypeError:
+            try:
+                fetched_payload = await asyncio.to_thread(client.fetch_tickers)
+            except Exception:
+                logger.debug("Initial bulk fetch_tickers call failed", exc_info=True)
+                fetched_payload = None
+        except Exception:
+            logger.debug("Initial fetch_tickers call failed", exc_info=True)
+            fetched_payload = None
+        else:
+            fetched = {symbol: fetched_payload.get(symbol) for symbol in symbols if fetched_payload}
+
+    for symbol, payload in fetched.items():
+        _store_snapshot(symbol, payload)
+
+    missing = [symbol for symbol in symbols if symbol not in price_cache]
+    if not missing:
+        return inserted
+
+    chunk_size = max(min(20, len(missing)), 1)
+    for chunk in _chunked(missing, chunk_size):
+        tasks = [
+            asyncio.to_thread(client.fetch_ticker, symbol)
+            for symbol in chunk
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for symbol, result in zip(chunk, results):
+            if isinstance(result, Exception):
+                logger.debug(f"Initial price fetch failed for {symbol}: {result}")
+                continue
+            _store_snapshot(symbol, result)
+
+    return inserted
+
+
 async def evaluate_and_execute(
     calculator: TriangularArbitrageCalculator,
     executor: Optional[TriangularArbitrageExecutor],
@@ -714,23 +794,16 @@ async def run_from_args(args: argparse.Namespace) -> None:
     stop_event = asyncio.Event()
 
     if symbols:
-        loop = asyncio.get_running_loop()
-        for symbol in symbols:
-            try:
-                ticker = await asyncio.to_thread(
-                    exchange.market_data_client.fetch_ticker,
-                    symbol,
-                )
-            except Exception:
-                logger.debug(
-                    f"Initial price fetch failed for {symbol}", exc_info=True
-                )
-            else:
-                snapshot = PriceSnapshot.from_ccxt(symbol, ticker)
-                if snapshot is not None:
-                    price_cache[symbol] = CachedPrice(snapshot, loop.time())
-        if price_cache:
+        initial_loaded = await prime_price_cache(
+            exchange,
+            symbols,
+            price_cache=price_cache,
+        )
+        if initial_loaded:
             await trigger_queue.put("initial_snapshot")
+            logger.debug(
+                f"Primed price cache with {initial_loaded} snapshot(s) prior to evaluation"
+            )
 
     market_data_task = asyncio.create_task(
         watch_realtime_prices(
