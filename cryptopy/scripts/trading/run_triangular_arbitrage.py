@@ -50,11 +50,6 @@ PRICE_REFRESH_INTERVAL_DEFAULT = 30.0
 PRICE_MAX_AGE_DEFAULT = 60.0
 ASSET_FILTER_DEFAULT: Sequence[str] = ()
 
-REQUIRED_LIVE_CREDENTIALS = {
-    "apiKey": "API key",
-    "secret": "API secret",
-}
-
 # Location where executed trades will be persisted when trade logging is enabled.
 TRADE_LOG_PATH_DEFAULT: Optional[Path] = (
     Path(__file__).resolve().parents[3] / "logs" / "triangular_trades.csv"
@@ -862,26 +857,6 @@ async def run_from_args(args: argparse.Namespace) -> None:
         logger.debug(f"Using credential set for {exchange_name}: {masked}")
     else:
         logger.debug(f"No credentials available for {exchange_name} after config/CLI merge")
-
-    missing_credential_labels = [
-        label
-        for key, label in REQUIRED_LIVE_CREDENTIALS.items()
-        if not credentials.get(key)
-    ]
-    if args.enable_execution:
-        if args.live_trading and missing_credential_labels:
-            missing_list = ", ".join(missing_credential_labels)
-            raise SystemExit(
-                "Live trading requires credentials for"
-                f" {exchange_name}. Missing: {missing_list}. Provide them via --api-key/--secret or"
-                " a config.yaml entry."
-            )
-        if missing_credential_labels:
-            missing_list = ", ".join(missing_credential_labels)
-            logger.info(
-                "Execution will run in dry-run mode because the following credentials are missing"
-                f" for {exchange_name}: {missing_list}."
-            )
 
     starting_currency = (args.starting_currency or STARTING_CURRENCY_DEFAULT).upper()
     asset_filter_entries = args.asset_filter or list(ASSET_FILTER_DEFAULT)
