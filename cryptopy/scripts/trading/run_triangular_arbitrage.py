@@ -461,7 +461,43 @@ def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> D
     if not section_name:
         return {}
 
-    section = data.get(section_name) or {}
+    def _casefold(value: str) -> str:
+        return value.strip().lower()
+
+    section: Dict[str, Any] = {}
+    if isinstance(data, dict):
+        for key, candidate in data.items():
+            if isinstance(key, str) and _casefold(key) == _casefold(section_name):
+                section = candidate or {}
+                break
+
+    if not section:
+        logger.debug(
+            f"Config section {section_name} not found at the top level of {config_file}; "
+            "searching nested mappings."
+        )
+
+        def _find_section(mapping: Any) -> Optional[Dict[str, Any]]:
+            if isinstance(mapping, dict):
+                for key, value in mapping.items():
+                    if isinstance(key, str) and _casefold(key) == _casefold(section_name):
+                        if isinstance(value, dict):
+                            return value
+                        return {}
+                    nested = _find_section(value)
+                    if nested is not None:
+                        return nested
+            elif isinstance(mapping, (list, tuple)):
+                for item in mapping:
+                    nested = _find_section(item)
+                    if nested is not None:
+                        return nested
+            return None
+
+        nested_section = _find_section(data)
+        if nested_section is not None:
+            section = nested_section
+
     credentials = _normalise_credential_keys(section)
     if credentials:
         masked = ", ".join(
