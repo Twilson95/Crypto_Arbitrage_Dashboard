@@ -93,7 +93,9 @@ class TriangularTradeLeg:
     side: str
     amount_in: float
     amount_out: float
+    amount_out_without_fee: float
     average_price: float
+    fee_rate: float
     fee_paid: float
     traded_quantity: float
 
@@ -105,6 +107,7 @@ class TriangularOpportunity:
     route: TriangularRoute
     starting_amount: float
     final_amount: float
+    final_amount_without_fees: float
     trades: List[TriangularTradeLeg]
 
     @property
@@ -116,6 +119,16 @@ class TriangularOpportunity:
         if self.starting_amount == 0:
             return 0.0
         return (self.final_amount / self.starting_amount - 1.0) * 100.0
+
+    @property
+    def profit_without_fees(self) -> float:
+        return self.final_amount_without_fees - self.starting_amount
+
+    @property
+    def fee_impact(self) -> float:
+        """Return how much value (in starting currency) was lost to fees."""
+
+        return self.final_amount_without_fees - self.final_amount
 
 
 @dataclass(frozen=True)

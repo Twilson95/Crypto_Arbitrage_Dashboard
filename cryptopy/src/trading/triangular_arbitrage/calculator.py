@@ -38,6 +38,7 @@ class TriangularArbitrageCalculator:
     ) -> Optional[TriangularOpportunity]:
         current_currency = route.starting_currency
         current_amount = starting_amount
+        current_amount_without_fees = starting_amount
         trades: List[TriangularTradeLeg] = []
 
         for symbol in route.symbols:
@@ -47,14 +48,30 @@ class TriangularArbitrageCalculator:
 
             base, quote = symbol.split("/")
             if current_currency == quote:
-                trade = self._simulate_buy(symbol, current_amount, price_snapshot)
+                (
+                    trade,
+                    current_amount,
+                    current_amount_without_fees,
+                ) = self._simulate_buy(
+                    symbol,
+                    current_amount,
+                    current_amount_without_fees,
+                    price_snapshot,
+                )
                 current_currency = base
-                current_amount = trade.amount_out
                 trades.append(trade)
             elif current_currency == base:
-                trade = self._simulate_sell(symbol, current_amount, price_snapshot)
+                (
+                    trade,
+                    current_amount,
+                    current_amount_without_fees,
+                ) = self._simulate_sell(
+                    symbol,
+                    current_amount,
+                    current_amount_without_fees,
+                    price_snapshot,
+                )
                 current_currency = quote
-                current_amount = trade.amount_out
                 trades.append(trade)
             else:
                 raise ValueError(
@@ -65,6 +82,7 @@ class TriangularArbitrageCalculator:
             route=route,
             starting_amount=starting_amount,
             final_amount=current_amount,
+            final_amount_without_fees=current_amount_without_fees,
             trades=trades,
         )
 
@@ -137,8 +155,9 @@ class TriangularArbitrageCalculator:
         self,
         symbol: str,
         quote_amount: float,
+        quote_amount_without_fees: float,
         snapshot: PriceSnapshot,
-    ) -> TriangularTradeLeg:
+    ) -> Tuple[TriangularTradeLeg, float, float]:
         if quote_amount <= 0:
             raise ValueError("quote_amount must be positive")
 
@@ -148,30 +167,38 @@ class TriangularArbitrageCalculator:
                 f"No ask price available for {symbol} to spend {quote_amount} {symbol.split('/')[1]}"
             )
 
+        slippage_factor = 1.0 - self.slippage_buffer if self.slippage_buffer else 1.0
         acquired_base = quote_amount / ask
-        total_quote_used = quote_amount
         fee_rate = self.exchange.get_taker_fee(symbol)
         base_after_fee = acquired_base * (1 - fee_rate)
         fee_paid = acquired_base - base_after_fee
-        if self.slippage_buffer:
-            base_after_fee *= (1 - self.slippage_buffer)
+        base_after_slippage = base_after_fee * slippage_factor
+        base_without_fee_actual = acquired_base * slippage_factor
 
-        return TriangularTradeLeg(
+        acquired_base_without_fees = quote_amount_without_fees / ask
+        base_without_fee_flow = acquired_base_without_fees * slippage_factor
+
+        trade = TriangularTradeLeg(
             symbol=symbol,
             side="buy",
-            amount_in=total_quote_used,
-            amount_out=base_after_fee,
+            amount_in=quote_amount,
+            amount_out=base_after_slippage,
+            amount_out_without_fee=base_without_fee_actual,
             average_price=ask,
+            fee_rate=fee_rate,
             fee_paid=fee_paid,
             traded_quantity=acquired_base,
         )
+
+        return trade, base_after_slippage, base_without_fee_flow
 
     def _simulate_sell(
         self,
         symbol: str,
         base_amount: float,
+        base_amount_without_fees: float,
         snapshot: PriceSnapshot,
-    ) -> TriangularTradeLeg:
+    ) -> Tuple[TriangularTradeLeg, float, float]:
         if base_amount <= 0:
             raise ValueError("base_amount must be positive")
 
@@ -181,19 +208,27 @@ class TriangularArbitrageCalculator:
                 f"No bid price available for {symbol} to sell {base_amount} {symbol.split('/')[0]}"
             )
 
+        slippage_factor = 1.0 - self.slippage_buffer if self.slippage_buffer else 1.0
         quote_acquired = base_amount * bid
         fee_rate = self.exchange.get_taker_fee(symbol)
         quote_after_fee = quote_acquired * (1 - fee_rate)
         fee_paid = quote_acquired - quote_after_fee
-        if self.slippage_buffer:
-            quote_after_fee *= (1 - self.slippage_buffer)
+        quote_after_slippage = quote_after_fee * slippage_factor
+        quote_without_fee_actual = quote_acquired * slippage_factor
 
-        return TriangularTradeLeg(
+        quote_acquired_without_fees = base_amount_without_fees * bid
+        quote_without_fee_flow = quote_acquired_without_fees * slippage_factor
+
+        trade = TriangularTradeLeg(
             symbol=symbol,
             side="sell",
             amount_in=base_amount,
-            amount_out=quote_after_fee,
+            amount_out=quote_after_slippage,
+            amount_out_without_fee=quote_without_fee_actual,
             average_price=bid,
+            fee_rate=fee_rate,
             fee_paid=fee_paid,
             traded_quantity=base_amount,
         )
+
+        return trade, quote_after_slippage, quote_without_fee_flow

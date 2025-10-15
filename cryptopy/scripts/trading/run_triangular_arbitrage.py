@@ -149,6 +149,17 @@ def generate_triangular_routes(
                     seen.add(key)
                     routes.append(TriangularRoute(route_symbols, start_currency_key))
 
+    additional_routes: List[TriangularRoute] = []
+    for route in list(routes):
+        reversed_symbols = tuple(reversed(route.symbols))
+        key = (route.starting_currency, reversed_symbols)
+        if key in seen:
+            continue
+        seen.add(key)
+        additional_routes.append(TriangularRoute(reversed_symbols, route.starting_currency))
+
+    routes.extend(additional_routes)
+
     routes.sort(key=lambda route: (route.starting_currency, route.symbols))
     return routes
 
@@ -702,6 +713,11 @@ async def evaluate_and_execute(
                             f"estimated profit={closest_opportunity.profit:.6f} "
                             f"({closest_opportunity.profit_percentage:.4f}%)"
                         )
+                        message_parts.append(
+                            f"profit_without_fees={closest_opportunity.profit_without_fees:.6f}; "
+                            f"fee_impact={closest_opportunity.fee_impact:.6f} "
+                            f"{closest_opportunity.route.starting_currency}"
+                        )
                 logger.info("; ".join(message_parts))
             continue
 
@@ -749,14 +765,19 @@ async def evaluate_and_execute(
                 logger.info(
                     f"Closest opportunity: route={' -> '.join(stats.best_opportunity.route.symbols)} "
                     f"profit={stats.best_opportunity.profit:.6f} "
-                    f"({stats.best_opportunity.profit_percentage:.4f}%)"
+                    f"({stats.best_opportunity.profit_percentage:.4f}%) "
+                    f"profit_without_fees={stats.best_opportunity.profit_without_fees:.6f} "
+                    f"fee_impact={stats.best_opportunity.fee_impact:.6f} "
+                    f"{stats.best_opportunity.route.starting_currency}"
                 )
             continue
 
         best = opportunities[0]
         logger.info(
             f"Best opportunity: route={' -> '.join(best.route.symbols)} "
-            f"profit={best.profit:.6f} ({best.profit_percentage:.4f}%)"
+            f"profit={best.profit:.6f} ({best.profit_percentage:.4f}%) "
+            f"profit_without_fees={best.profit_without_fees:.6f} "
+            f"fee_impact={best.fee_impact:.6f} {best.route.starting_currency}"
         )
 
         profit_signature = (round(best.final_amount, 8), round(best.profit_percentage, 4))
@@ -767,7 +788,8 @@ async def evaluate_and_execute(
         if not enable_execution or executor is None:
             logger.info(
                 f"Execution disabled. Opportunity would yield {best.profit:.6f} "
-                f"({best.profit_percentage:.4f}%) if executed."
+                f"({best.profit_percentage:.4f}%) if executed (fees consumed {best.fee_impact:.6f} "
+                f"{best.route.starting_currency})."
             )
             last_execution = OpportunityExecution(best.route, profit_signature)
             continue
@@ -905,6 +927,19 @@ async def run_from_args(args: argparse.Namespace) -> None:
 
     symbols = sorted({symbol for route in routes for symbol in route.symbols})
     fee_lookup = {symbol: float(exchange.get_taker_fee(symbol)) for symbol in symbols}
+    if fee_lookup:
+        min_fee = min(fee_lookup.values())
+        max_fee = max(fee_lookup.values())
+        avg_fee = sum(fee_lookup.values()) / len(fee_lookup)
+        fee_sources = exchange.get_fee_sources()
+        source_counts = Counter(fee_sources.get(symbol, "default") for symbol in symbols)
+        source_summary = ", ".join(
+            f"{source}:{count}" for source, count in sorted(source_counts.items(), key=lambda item: item[1], reverse=True)
+        )
+        logger.info(
+            f"Taker fee snapshot across {len(fee_lookup)} symbols: "
+            f"min={min_fee:.4%}, max={max_fee:.4%}, avg={avg_fee:.4%} (sources: {source_summary})"
+        )
     price_cache: Dict[str, CachedPrice] = {}
     trigger_queue: "asyncio.Queue[str]" = asyncio.Queue()
     stop_event = asyncio.Event()

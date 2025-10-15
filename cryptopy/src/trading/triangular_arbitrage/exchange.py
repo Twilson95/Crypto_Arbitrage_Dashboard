@@ -132,6 +132,27 @@ class ExchangeConnection:
         self._default_fee = (
             self.rest_client.fees.get("trading", {}).get("taker") if hasattr(self.rest_client, "fees") else None
         )
+        try:
+            self._default_fee = float(self._default_fee) if self._default_fee is not None else None
+        except (TypeError, ValueError):  # pragma: no cover - defensive cast
+            self._default_fee = None
+
+        self._trading_fee_cache: Dict[str, float] = {}
+        self._fee_source: Dict[str, str] = {}
+        self._fee_fetch_failures: set[str] = set()
+
+        for symbol, market in self._market_cache.items():
+            taker = market.get("taker") if isinstance(market, dict) else None
+            if taker is None:
+                continue
+            try:
+                rate = float(taker)
+            except (TypeError, ValueError):  # pragma: no cover - defensive cast
+                continue
+            self._trading_fee_cache[symbol] = rate
+            self._fee_source[symbol] = "market"
+
+        self._prime_trading_fee_cache()
 
     def get_markets(self) -> Dict[str, Any]:
         """Return the cached market metadata loaded during initialisation."""
@@ -144,11 +165,85 @@ class ExchangeConnection:
         return list(self._market_cache.keys())
 
     def get_taker_fee(self, symbol: str) -> float:
+        cached = self._trading_fee_cache.get(symbol)
+        if cached is not None:
+            return cached
+
         market = self._market_cache.get(symbol, {})
-        fee = market.get("taker")
-        if fee is None:
-            return float(self._default_fee or 0.0)
-        return float(fee)
+        fee = market.get("taker") if isinstance(market, dict) else None
+        if fee is not None:
+            try:
+                rate = float(fee)
+            except (TypeError, ValueError):  # pragma: no cover - defensive cast
+                rate = 0.0
+            self._trading_fee_cache[symbol] = rate
+            self._fee_source.setdefault(symbol, "market")
+            return rate
+
+        if symbol not in self._fee_fetch_failures:
+            client_has = getattr(self.rest_client, "has", {})
+            has_single = bool(client_has.get("fetchTradingFee")) if isinstance(client_has, dict) else False
+            if not has_single and hasattr(client_has, "get"):
+                has_single = bool(client_has.get("fetchTradingFee"))  # type: ignore[arg-type]
+            if has_single:
+                try:
+                    payload = self.rest_client.fetch_trading_fee(symbol)
+                except Exception:  # pragma: no cover - network dependent
+                    self._fee_fetch_failures.add(symbol)
+                    logger.debug(
+                        f"Failed to fetch taker fee for {symbol} via fetch_trading_fee", exc_info=True
+                    )
+                else:
+                    taker_fee = payload.get("taker") if isinstance(payload, dict) else None
+                    if taker_fee is not None:
+                        try:
+                            rate = float(taker_fee)
+                        except (TypeError, ValueError):  # pragma: no cover
+                            rate = 0.0
+                        self._trading_fee_cache[symbol] = rate
+                        self._fee_source[symbol] = "fetchTradingFee"
+                        return rate
+
+        rate = float(self._default_fee or 0.0)
+        self._trading_fee_cache[symbol] = rate
+        self._fee_source.setdefault(symbol, "default")
+        return rate
+
+    def get_fee_sources(self) -> Dict[str, str]:
+        """Return a mapping of symbols to the source of their taker fee."""
+
+        return dict(self._fee_source)
+
+    def _prime_trading_fee_cache(self) -> None:
+        """Attempt to populate the taker fee cache using exchange endpoints."""
+
+        client_has = getattr(self.rest_client, "has", {})
+        has_bulk = bool(client_has.get("fetchTradingFees")) if isinstance(client_has, dict) else False
+        if not has_bulk and hasattr(client_has, "get"):
+            has_bulk = bool(client_has.get("fetchTradingFees"))  # type: ignore[arg-type]
+
+        if not has_bulk:
+            return
+
+        try:
+            payload = self.rest_client.fetch_trading_fees()
+        except Exception:  # pragma: no cover - network dependent
+            logger.debug("fetch_trading_fees call failed", exc_info=True)
+            return
+
+        if not isinstance(payload, dict):
+            return
+
+        for symbol, info in payload.items():
+            taker_fee = info.get("taker") if isinstance(info, dict) else None
+            if taker_fee is None:
+                continue
+            try:
+                rate = float(taker_fee)
+            except (TypeError, ValueError):  # pragma: no cover - defensive cast
+                continue
+            self._trading_fee_cache[symbol] = rate
+            self._fee_source[symbol] = "fetchTradingFees"
 
     def get_order_book(self, symbol: str, *, limit: int = 10) -> OrderBookSnapshot:
         order_book = self.market_data_client.fetch_order_book(symbol, limit)

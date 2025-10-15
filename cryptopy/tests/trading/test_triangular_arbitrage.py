@@ -78,6 +78,11 @@ def test_profitable_route_detected():
     assert opportunity is not None
     assert opportunity.final_amount > opportunity.starting_amount
     assert pytest.approx(opportunity.profit_percentage, rel=1e-3) > 5.0
+    assert opportunity.final_amount_without_fees >= opportunity.final_amount
+    assert pytest.approx(opportunity.fee_impact, rel=1e-9) == pytest.approx(
+        opportunity.profit_without_fees - opportunity.profit, rel=1e-9
+    )
+    assert pytest.approx(opportunity.trades[0].fee_rate, rel=1e-9) == exchange.fee
 
 
 def test_route_filtered_when_below_threshold():
@@ -141,6 +146,11 @@ def test_executor_places_orders_in_sequence(tmp_path):
     assert len(rows) == 3
     assert {row["symbol"] for row in rows} == {"BTC/USD", "ETH/BTC", "ETH/USD"}
     assert all(row["dry_run"] == "True" for row in rows)
+    assert all("fee_rate" in row for row in rows)
+    assert all(
+        pytest.approx(float(row["fee_rate"]), rel=1e-9) == exchange.fee for row in rows
+    )
+    assert all(float(row["fee_impact"]) >= 0 for row in rows)
 
 
 def test_find_routes_respects_max_route_length():
@@ -326,3 +336,16 @@ def test_generate_routes_respects_asset_filter():
 
     assert any(route.symbols == ("BTC/USD", "ETH/BTC", "ETH/USD") for route in all_routes)
     assert filtered_routes == []
+
+
+def test_generate_routes_include_reverse_cycles():
+    markets = {
+        "BTC/USD": {"active": True, "base": "BTC", "quote": "USD"},
+        "ETH/BTC": {"active": True, "base": "ETH", "quote": "BTC"},
+        "ETH/USD": {"active": True, "base": "ETH", "quote": "USD"},
+    }
+
+    routes = generate_triangular_routes(markets, starting_currencies=["USD"])
+
+    assert any(route.symbols == ("BTC/USD", "ETH/BTC", "ETH/USD") for route in routes)
+    assert any(route.symbols == ("ETH/USD", "ETH/BTC", "BTC/USD") for route in routes)
