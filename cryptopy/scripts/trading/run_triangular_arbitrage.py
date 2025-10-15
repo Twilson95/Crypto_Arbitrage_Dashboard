@@ -406,19 +406,27 @@ def filter_markets_for_triangular_routes(
 def _normalise_credential_keys(section: Dict[str, Any]) -> Dict[str, str]:
     """Return a ccxt-compatible credential map from a config section."""
 
-    key_variants = {
-        "apiKey": ("apiKey", "api_key", "apikey", "key"),
-        "secret": ("secret", "api_secret", "apisecret", "secret_key"),
-        "password": ("password", "passphrase"),
-    }
+    if not isinstance(section, dict):
+        return {}
+
+    def _iter_key_values(data: Dict[str, Any]) -> Iterable[Tuple[str, Any]]:
+        for key, value in data.items():
+            if isinstance(value, dict):
+                yield from _iter_key_values(value)
+            else:
+                yield str(key), value
 
     credentials: Dict[str, str] = {}
-    for target_key, options in key_variants.items():
-        for option in options:
-            value = section.get(option)
-            if value:
-                credentials[target_key] = str(value)
-                break
+    for raw_key, raw_value in _iter_key_values(section):
+        if raw_value in (None, ""):
+            continue
+        key = str(raw_key).strip().lower().replace("-", "").replace("_", "")
+        if key in {"apikey", "key"} and "apiKey" not in credentials:
+            credentials["apiKey"] = str(raw_value)
+        elif key in {"secret", "apisecret", "secretkey"} and "secret" not in credentials:
+            credentials["secret"] = str(raw_value)
+        elif key in {"password", "passphrase"} and "password" not in credentials:
+            credentials["password"] = str(raw_value)
     return credentials
 
 
@@ -438,6 +446,7 @@ def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> D
         config_file = Path(config_file)
 
     if not config_file.exists():
+        logger.debug(f"Config path {config_file} does not exist; skipping credential load")
         return {}
 
     try:

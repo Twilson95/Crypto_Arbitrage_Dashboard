@@ -349,3 +349,36 @@ def test_generate_routes_include_reverse_cycles():
 
     assert any(route.symbols == ("BTC/USD", "ETH/BTC", "ETH/USD") for route in routes)
     assert any(route.symbols == ("ETH/USD", "ETH/BTC", "BTC/USD") for route in routes)
+
+
+def test_load_credentials_from_config_supports_snake_case(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        """
+kraken_websocket:
+  api_key: KEY123
+  api_secret: SECRET456
+        """.strip()
+    )
+
+    credentials = runner_module.load_credentials_from_config("kraken", str(config))
+
+    assert credentials["apiKey"] == "KEY123"
+    assert credentials["secret"] == "SECRET456"
+
+
+def test_load_credentials_from_config_handles_nested_keys(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        """
+kraken_websocket:
+  credentials:
+    API_KEY: KEY789
+    apiSecret: SECRET999
+        """.strip()
+    )
+
+    credentials = runner_module.load_credentials_from_config("kraken", str(config))
+
+    assert credentials["apiKey"] == "KEY789"
+    assert credentials["secret"] == "SECRET999"
