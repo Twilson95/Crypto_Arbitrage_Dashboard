@@ -48,6 +48,7 @@ EVALUATION_INTERVAL_DEFAULT = 30.0
 WEBSOCKET_TIMEOUT_DEFAULT = 10.0
 PRICE_REFRESH_INTERVAL_DEFAULT = 30.0
 PRICE_MAX_AGE_DEFAULT = 60.0
+ASSET_FILTER_DEFAULT: Sequence[str] = ()
 
 # Location where executed trades will be persisted when trade logging is enabled.
 TRADE_LOG_PATH_DEFAULT: Optional[Path] = (
@@ -76,6 +77,10 @@ MARKET_FILTER_REASON_DESCRIPTIONS = {
     "derivative_flag": (
         "Exchange metadata flags the market as derivative-only, indicating non-spot behaviour."
     ),
+    "asset_filter": (
+        "Base or quote currency falls outside the configured asset filter, so the market was "
+        "excluded from discovery."
+    ),
 }
 
 
@@ -92,10 +97,14 @@ def generate_triangular_routes(
     markets: Dict[str, Dict[str, object]],
     *,
     starting_currencies: Optional[Sequence[str]] = None,
+    allowed_assets: Optional[Sequence[str]] = None,
 ) -> List[TriangularRoute]:
     """Construct all distinct three-leg triangular routes from exchange markets."""
 
     currency_graph: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+    allowed_assets_set: Optional[set[str]] = None
+    if allowed_assets:
+        allowed_assets_set = {str(asset).upper() for asset in allowed_assets}
     for symbol, metadata in markets.items():
         if not isinstance(metadata, dict):
             continue
@@ -105,8 +114,13 @@ def generate_triangular_routes(
         quote = metadata.get("quote")
         if not base or not quote:
             continue
-        currency_graph[str(quote)].append((symbol, str(base)))
-        currency_graph[str(base)].append((symbol, str(quote)))
+        base_str = str(base)
+        quote_str = str(quote)
+        if allowed_assets_set is not None:
+            if base_str.upper() not in allowed_assets_set or quote_str.upper() not in allowed_assets_set:
+                continue
+        currency_graph[quote_str].append((symbol, base_str))
+        currency_graph[base_str].append((symbol, quote_str))
 
     allowed_currencies: Optional[set[str]] = None
     if starting_currencies:
@@ -256,6 +270,7 @@ def filter_markets_for_triangular_routes(
     markets: Dict[str, Dict[str, object]],
     *,
     starting_currencies: Optional[Sequence[str]] = None,
+    asset_filter: Optional[Sequence[str]] = None,
 ) -> Tuple[Dict[str, Dict[str, object]], MarketFilterStats]:
     """Remove inactive or derivative markets that cannot seed triangular routes."""
 
@@ -266,6 +281,11 @@ def filter_markets_for_triangular_routes(
         {currency.upper() for currency in starting_currencies}
         if starting_currencies
         else set()
+    )
+    allowed_assets = (
+        {asset.upper() for asset in asset_filter}
+        if asset_filter
+        else None
     )
 
     for symbol, metadata in markets.items():
@@ -291,6 +311,11 @@ def filter_markets_for_triangular_routes(
         if base_suffix or quote_suffix:
             skipped["synthetic_currency"] += 1
             continue
+
+        if allowed_assets is not None:
+            if base_main.upper() not in allowed_assets or quote_main.upper() not in allowed_assets:
+                skipped["asset_filter"] += 1
+                continue
 
         settle_value = metadata.get("settle")
         if settle_value:
@@ -717,6 +742,25 @@ async def run_from_args(args: argparse.Namespace) -> None:
         credentials["password"] = args.password
 
     starting_currency = (args.starting_currency or STARTING_CURRENCY_DEFAULT).upper()
+    asset_filter_entries = args.asset_filter or list(ASSET_FILTER_DEFAULT)
+    asset_filter: List[str] = []
+    for entry in asset_filter_entries:
+        if entry is None:
+            continue
+        for part in str(entry).replace(",", " ").split():
+            if part:
+                asset_filter.append(part.upper())
+    if asset_filter and starting_currency not in asset_filter:
+        asset_filter.append(starting_currency)
+    # Deduplicate while preserving order
+    seen_assets: set[str] = set()
+    deduped_assets: List[str] = []
+    for asset in asset_filter:
+        if asset in seen_assets:
+            continue
+        seen_assets.add(asset)
+        deduped_assets.append(asset)
+    asset_filter = deduped_assets
     max_route_length = args.max_route_length
     if max_route_length is not None and max_route_length <= 0:
         max_route_length = None
@@ -741,10 +785,14 @@ async def run_from_args(args: argparse.Namespace) -> None:
             f"Sandbox mode is not available for {exchange_name} via ccxt; requests will hit the production API."
         )
 
+    if asset_filter:
+        logger.info(f"Restricting discovery to assets: {', '.join(asset_filter)}")
+
     markets = exchange.get_markets()
     markets, market_filter_stats = filter_markets_for_triangular_routes(
         markets,
         starting_currencies=[starting_currency],
+        asset_filter=asset_filter or None,
     )
     if market_filter_stats.skipped:
         sorted_reasons = sorted(
@@ -766,6 +814,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
     routes = generate_triangular_routes(
         markets,
         starting_currencies=[starting_currency],
+        allowed_assets=asset_filter or None,
     )
     if not routes:
         raise SystemExit(f"No triangular routes discovered for {exchange_name}.")
@@ -878,6 +927,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--starting-currency",
         default=STARTING_CURRENCY_DEFAULT,
         help="Currency used to seed and settle each arbitrage route.",
+    )
+    parser.add_argument(
+        "--asset-filter",
+        action="append",
+        default=list(ASSET_FILTER_DEFAULT),
+        metavar="ASSET",
+        help=(
+            "Restrict discovery to markets whose base/quote currencies appear in this list. "
+            "Provide multiple times or comma-separated values; leave unset to include all assets."
+        ),
     )
     parser.add_argument(
         "--starting-amount",

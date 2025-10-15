@@ -38,6 +38,7 @@ TriangularRoute = triangular_arbitrage.TriangularRoute
 filter_markets_for_triangular_routes = (
     runner_module.filter_markets_for_triangular_routes
 )
+generate_triangular_routes = runner_module.generate_triangular_routes
 
 
 @dataclass
@@ -244,3 +245,58 @@ def test_market_filter_rejects_unmatched_settle_currency():
 
     assert "ETH/USD" in filtered_btc
     assert stats_btc.retained == 1
+
+
+def test_market_filter_respects_asset_filter():
+    markets = {
+        "ETH/USD": {
+            "active": True,
+            "base": "ETH",
+            "quote": "USD",
+        },
+        "ETH/BTC": {
+            "active": True,
+            "base": "ETH",
+            "quote": "BTC",
+        },
+        "LTC/USD": {
+            "active": True,
+            "base": "LTC",
+            "quote": "USD",
+        },
+    }
+
+    filtered, stats = filter_markets_for_triangular_routes(
+        markets,
+        starting_currencies=["USD"],
+        asset_filter=["USD", "ETH"],
+    )
+
+    assert "ETH/USD" in filtered
+    assert "ETH/BTC" not in filtered
+    assert "LTC/USD" not in filtered
+    assert stats.retained == 1
+    assert stats.skipped_by_reason.get("asset_filter") == 2
+
+
+def test_generate_routes_respects_asset_filter():
+    markets = {
+        "BTC/USD": {"active": True, "base": "BTC", "quote": "USD"},
+        "ETH/BTC": {"active": True, "base": "ETH", "quote": "BTC"},
+        "ETH/USD": {"active": True, "base": "ETH", "quote": "USD"},
+        "LTC/USD": {"active": True, "base": "LTC", "quote": "USD"},
+    }
+
+    all_routes = generate_triangular_routes(
+        markets,
+        starting_currencies=["USD"],
+    )
+
+    filtered_routes = generate_triangular_routes(
+        markets,
+        starting_currencies=["USD"],
+        allowed_assets=["USD", "ETH"],
+    )
+
+    assert any(route.symbols == ("BTC/USD", "ETH/BTC", "ETH/USD") for route in all_routes)
+    assert filtered_routes == []
