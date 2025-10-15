@@ -64,6 +64,7 @@ class ExchangeConnection:
             **self.credentials,
         }
         self.rest_client = rest_client or exchange_class(rest_config)
+        self._apply_credentials(self.rest_client)
 
         if use_testnet:
             self._rest_sandbox_enabled = self._enable_sandbox_mode(self.rest_client, "REST trading")
@@ -82,6 +83,8 @@ class ExchangeConnection:
             )
         else:
             self.market_data_client = self.rest_client
+        if self.market_data_client is not self.rest_client:
+            self._apply_credentials(self.market_data_client)
 
         if (
             use_testnet
@@ -103,8 +106,14 @@ class ExchangeConnection:
                 **self.credentials,
             }
             self.websocket_client = ws_class(ws_config)
+            self._apply_credentials(self.websocket_client)
 
         self.market_data_websocket_client = market_data_websocket_client or self.websocket_client
+        if (
+            self.market_data_websocket_client is not None
+            and self.market_data_websocket_client is not self.websocket_client
+        ):
+            self._apply_credentials(self.market_data_websocket_client)
 
         if self.market_data_websocket_client is not None and use_testnet:
             if self.exchange_name in SANDBOX_MARKET_DATA_UNAVAILABLE:
@@ -158,6 +167,20 @@ class ExchangeConnection:
         """Return the cached market metadata loaded during initialisation."""
 
         return self._market_cache
+
+    def _apply_credentials(self, client: Any) -> None:
+        """Set credential attributes on ``client`` for ccxt compatibility."""
+
+        if not self.credentials or client is None:
+            return
+        for key, value in self.credentials.items():
+            attr = key
+            if key.lower() == "apikey":
+                attr = "apiKey"
+            setattr(client, attr, value)
+        if hasattr(client, "options") and isinstance(client.options, dict):
+            client.options.setdefault("apiKey", self.credentials.get("apiKey"))
+            client.options.setdefault("secret", self.credentials.get("secret"))
 
     def list_symbols(self) -> Sequence[str]:
         """Return the list of symbols supported by the exchange."""

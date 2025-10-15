@@ -403,6 +403,25 @@ def filter_markets_for_triangular_routes(
     return filtered, stats
 
 
+def _normalise_credential_keys(section: Dict[str, Any]) -> Dict[str, str]:
+    """Return a ccxt-compatible credential map from a config section."""
+
+    key_variants = {
+        "apiKey": ("apiKey", "api_key", "apikey", "key"),
+        "secret": ("secret", "api_secret", "apisecret", "secret_key"),
+        "password": ("password", "passphrase"),
+    }
+
+    credentials: Dict[str, str] = {}
+    for target_key, options in key_variants.items():
+        for option in options:
+            value = section.get(option)
+            if value:
+                credentials[target_key] = str(value)
+                break
+    return credentials
+
+
 def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> Dict[str, str]:
     """Load API credentials for ``exchange`` from a YAML configuration file."""
 
@@ -434,13 +453,15 @@ def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> D
         return {}
 
     section = data.get(section_name) or {}
-    credentials: Dict[str, str] = {}
-    api_key = section.get("api_key")
-    api_secret = section.get("api_secret")
-    if api_key:
-        credentials["apiKey"] = api_key
-    if api_secret:
-        credentials["secret"] = api_secret
+    credentials = _normalise_credential_keys(section)
+    if credentials:
+        masked = ", ".join(
+            f"{key}={'***' if key != 'password' else '***'}"
+            for key in sorted(credentials)
+        )
+        logger.debug(f"Loaded credentials for {exchange} from {config_file}: {masked}")
+    else:
+        logger.debug(f"No credentials found for {exchange} in {config_file}")
     return credentials
 
 
@@ -829,6 +850,14 @@ async def run_from_args(args: argparse.Namespace) -> None:
         credentials["secret"] = args.secret
     if args.password:
         credentials["password"] = args.password
+
+    if credentials:
+        masked = ", ".join(
+            f"{key}={'***' if key != 'password' else '***'}" for key in sorted(credentials)
+        )
+        logger.debug(f"Using credential set for {exchange_name}: {masked}")
+    else:
+        logger.debug(f"No credentials available for {exchange_name} after config/CLI merge")
 
     missing_credential_labels = [
         label
