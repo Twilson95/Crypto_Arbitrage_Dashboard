@@ -128,3 +128,4 @@ class RouteEvaluationStats:
     evaluation_errors: int
     rejected_by_profit: int
     evaluation_error_reasons: Dict[str, int]
+    best_opportunity: Optional[TriangularOpportunity] = None

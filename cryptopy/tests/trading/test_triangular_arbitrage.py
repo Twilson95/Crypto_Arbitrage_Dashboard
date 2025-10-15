@@ -172,6 +172,7 @@ def test_find_routes_respects_max_route_length():
     assert stats.filtered_by_length == 1
     assert stats.considered == 1
     assert stats.evaluation_error_reasons == {}
+    assert stats.best_opportunity is not None
 
 
 def test_error_reasons_tracked_for_missing_prices():
@@ -197,6 +198,31 @@ def test_error_reasons_tracked_for_missing_prices():
     assert stats.evaluation_error_reasons == {
         "KeyError: Missing price snapshot for ETH/BTC": 1
     }
+    assert stats.best_opportunity is None
+
+
+def test_best_opportunity_reported_when_below_threshold():
+    exchange = MockExchange()
+    calculator = TriangularArbitrageCalculator(exchange)  # type: ignore[arg-type]
+    route = TriangularRoute(("BTC/USD", "ETH/BTC", "ETH/USD"), "USD")
+
+    prices = {
+        "BTC/USD": make_price_snapshot("BTC/USD", bid=101.0, ask=100.0),
+        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.55, ask=0.5),
+        "ETH/USD": make_price_snapshot("ETH/USD", bid=0.55, ask=0.56),
+    }
+
+    opportunities, stats = calculator.find_profitable_routes(
+        [route],
+        prices,
+        starting_amount=1000.0,
+        min_profit_percentage=0.1,
+    )
+
+    assert opportunities == []
+    assert stats.rejected_by_profit == 1
+    assert stats.best_opportunity is not None
+    assert stats.best_opportunity.route == route
 
 
 def test_market_filter_allows_matching_settle_currency():

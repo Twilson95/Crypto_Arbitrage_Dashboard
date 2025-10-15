@@ -231,23 +231,31 @@ def select_routes_with_negative_log_sum(
     prices: Dict[str, PriceSnapshot],
     markets: Dict[str, Dict[str, object]],
     fee_lookup: Dict[str, float],
-) -> Tuple[List[TriangularRoute], int]:
-    """Return only the routes whose cumulative log cost is negative.
+) -> Tuple[List[TriangularRoute], int, Optional[Tuple[TriangularRoute, float]]]:
+    """Return routes whose cumulative log cost is negative along with the closest candidate.
 
     The integer in the returned tuple represents how many routes had sufficient
-    market data to be evaluated (i.e. their log cost could be computed).
+    market data to be evaluated (i.e. their log cost could be computed). The
+    optional tuple provides the route with the lowest log cost (most negative or
+    closest to zero) even if it was not arbitrage-positive.
     """
 
     selected: List[TriangularRoute] = []
     evaluable_routes = 0
+    best_route: Optional[TriangularRoute] = None
+    best_log_cost: Optional[float] = None
     for route in routes:
         log_cost = compute_route_log_cost(route, prices, markets, fee_lookup)
         if log_cost is None:
             continue
         evaluable_routes += 1
+        if best_log_cost is None or log_cost < best_log_cost:
+            best_log_cost = log_cost
+            best_route = route
         if log_cost < 0:
             selected.append(route)
-    return selected, evaluable_routes
+    closest = (best_route, best_log_cost) if best_route is not None and best_log_cost is not None else None
+    return selected, evaluable_routes, closest
 
 
 @dataclass
@@ -653,7 +661,11 @@ async def evaluate_and_execute(
             )
             continue
 
-        candidate_routes, evaluable_route_count = select_routes_with_negative_log_sum(
+        (
+            candidate_routes,
+            evaluable_route_count,
+            closest_log_sum,
+        ) = select_routes_with_negative_log_sum(
             routes,
             fresh_prices,
             markets,
@@ -669,6 +681,28 @@ async def evaluate_and_execute(
                 f"(from {discovered_count} discovered) in {duration:.3f}s"
             )
             logger.debug("No routes satisfied the negative log-sum arbitrage condition.")
+            if closest_log_sum:
+                closest_route, log_sum = closest_log_sum
+                message_parts = [
+                    f"Closest route by log-sum: route={' -> '.join(closest_route.symbols)}",
+                    f"log_sum={log_sum:.6f}",
+                ]
+                try:
+                    closest_opportunity = calculator.evaluate_route(
+                        closest_route,
+                        fresh_prices,
+                        starting_amount=starting_amount,
+                        min_profit_percentage=float("-inf"),
+                    )
+                except (InsufficientLiquidityError, KeyError, ValueError) as exc:
+                    message_parts.append(f"evaluation failed: {exc}")
+                else:
+                    if closest_opportunity is not None:
+                        message_parts.append(
+                            f"estimated profit={closest_opportunity.profit:.6f} "
+                            f"({closest_opportunity.profit_percentage:.4f}%)"
+                        )
+                logger.info("; ".join(message_parts))
             continue
 
         try:
@@ -711,6 +745,12 @@ async def evaluate_and_execute(
                     f"{reason} ({count})" for reason, count in sorted_reasons
                 )
                 logger.info(f"Route error breakdown: {formatted_reasons}")
+            if stats.best_opportunity:
+                logger.info(
+                    f"Closest opportunity: route={' -> '.join(stats.best_opportunity.route.symbols)} "
+                    f"profit={stats.best_opportunity.profit:.6f} "
+                    f"({stats.best_opportunity.profit_percentage:.4f}%)"
+                )
             continue
 
         best = opportunities[0]

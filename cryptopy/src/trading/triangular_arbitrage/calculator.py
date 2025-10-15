@@ -88,6 +88,7 @@ class TriangularArbitrageCalculator:
         evaluation_errors = 0
         rejected_by_profit = 0
         error_reasons: Counter[str] = Counter()
+        best_opportunity: Optional[TriangularOpportunity] = None
         for route in routes:
             total_routes += 1
             if max_route_length is not None and len(route.symbols) > max_route_length:
@@ -99,7 +100,7 @@ class TriangularArbitrageCalculator:
                     route,
                     prices,
                     starting_amount=starting_amount,
-                    min_profit_percentage=min_profit_percentage,
+                    min_profit_percentage=float("-inf"),
                 )
             except (InsufficientLiquidityError, KeyError, ValueError) as exc:
                 evaluation_errors += 1
@@ -108,9 +109,18 @@ class TriangularArbitrageCalculator:
                 error_reasons[error_message] += 1
                 continue
             if opportunity is not None:
-                opportunities.append(opportunity)
-            else:
+                if (
+                    best_opportunity is None
+                    or opportunity.profit_percentage > best_opportunity.profit_percentage
+                ):
+                    best_opportunity = opportunity
+            if (
+                opportunity is None
+                or opportunity.profit_percentage < min_profit_percentage
+            ):
                 rejected_by_profit += 1
+                continue
+            opportunities.append(opportunity)
         opportunities.sort(key=lambda opp: opp.profit_percentage, reverse=True)
         stats = RouteEvaluationStats(
             total_routes=total_routes,
@@ -119,6 +129,7 @@ class TriangularArbitrageCalculator:
             evaluation_errors=evaluation_errors,
             rejected_by_profit=rejected_by_profit,
             evaluation_error_reasons=dict(error_reasons),
+            best_opportunity=best_opportunity,
         )
         return opportunities, stats
 
