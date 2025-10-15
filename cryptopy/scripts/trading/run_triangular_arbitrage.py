@@ -153,6 +153,28 @@ def generate_triangular_routes(
     return routes
 
 
+def collect_available_assets(markets: Dict[str, Dict[str, object]]) -> List[str]:
+    """Return sorted unique asset codes derived from exchange market metadata."""
+
+    assets: set[str] = set()
+    for metadata in markets.values():
+        if not isinstance(metadata, dict):
+            continue
+        base = metadata.get("base")
+        quote = metadata.get("quote")
+        if base:
+            base_main, _ = _split_currency_parts(str(base))
+            assets.add(base_main.upper())
+        if quote:
+            quote_main, _ = _split_currency_parts(str(quote))
+            assets.add(quote_main.upper())
+        settle = metadata.get("settle")
+        if settle:
+            settle_main, settle_suffix = _split_currency_parts(str(settle))
+            assets.add((settle_suffix or settle_main).upper())
+    return sorted(assets)
+
+
 def compute_route_log_cost(
     route: TriangularRoute,
     prices: Dict[str, PriceSnapshot],
@@ -789,6 +811,11 @@ async def run_from_args(args: argparse.Namespace) -> None:
         logger.info(f"Restricting discovery to assets: {', '.join(asset_filter)}")
 
     markets = exchange.get_markets()
+    available_assets = collect_available_assets(markets)
+    if available_assets:
+        logger.info(
+            f"Available assets on {exchange_name}: {', '.join(available_assets)}"
+        )
     markets, market_filter_stats = filter_markets_for_triangular_routes(
         markets,
         starting_currencies=[starting_currency],
