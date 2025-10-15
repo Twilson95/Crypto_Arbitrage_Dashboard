@@ -443,7 +443,7 @@ async def refresh_prices_via_rest(
             if needs_refresh:
                 try:
                     ticker = await asyncio.to_thread(
-                        exchange.rest_client.fetch_ticker,
+                        exchange.market_data_client.fetch_ticker,
                         symbol,
                     )
                 except Exception:
@@ -718,7 +718,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
         for symbol in symbols:
             try:
                 ticker = await asyncio.to_thread(
-                    exchange.rest_client.fetch_ticker,
+                    exchange.market_data_client.fetch_ticker,
                     symbol,
                 )
             except Exception:

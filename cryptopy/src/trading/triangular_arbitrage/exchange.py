@@ -25,6 +25,11 @@ except Exception:  # pragma: no cover - gracefully degrade if ccxt.pro is not av
     ccxtpro = None  # type: ignore
 
 
+SANDBOX_MARKET_DATA_UNAVAILABLE = {
+    "kraken",
+}
+
+
 class ExchangeConnection:
     """Encapsulates exchange specific functionality for data and trading."""
 
@@ -38,6 +43,8 @@ class ExchangeConnection:
         make_trades: bool = False,
         rest_client: Optional[Any] = None,
         websocket_client: Optional[Any] = None,
+        market_data_rest_client: Optional[Any] = None,
+        market_data_websocket_client: Optional[Any] = None,
     ) -> None:
         if ccxt is None:  # pragma: no cover - dependency not installed
             raise ModuleNotFoundError(
@@ -48,6 +55,7 @@ class ExchangeConnection:
         self.make_trades = make_trades
         self._use_testnet = use_testnet
         self._rest_sandbox_enabled = False
+        self._market_data_rest_sandbox_enabled = False
         self._ws_sandbox_enabled = False
 
         exchange_class = getattr(ccxt, self.exchange_name)
@@ -58,7 +66,34 @@ class ExchangeConnection:
         self.rest_client = rest_client or exchange_class(rest_config)
 
         if use_testnet:
-            self._rest_sandbox_enabled = self._enable_sandbox_mode(self.rest_client, "REST")
+            self._rest_sandbox_enabled = self._enable_sandbox_mode(self.rest_client, "REST trading")
+
+        market_data_config = {
+            "enableRateLimit": True,
+            **self.credentials,
+        }
+
+        if market_data_rest_client is not None:
+            self.market_data_client = market_data_rest_client
+        elif use_testnet and self.exchange_name in SANDBOX_MARKET_DATA_UNAVAILABLE:
+            self.market_data_client = exchange_class(market_data_config)
+            logger.info(
+                f"{self.exchange_name} does not expose sandbox market data; using production REST endpoints for price feeds."
+            )
+        else:
+            self.market_data_client = self.rest_client
+
+        if (
+            use_testnet
+            and self.market_data_client is not self.rest_client
+            and self.exchange_name not in SANDBOX_MARKET_DATA_UNAVAILABLE
+        ):
+            self._market_data_rest_sandbox_enabled = self._enable_sandbox_mode(
+                self.market_data_client,
+                "REST market data",
+            )
+        elif self.market_data_client is self.rest_client:
+            self._market_data_rest_sandbox_enabled = self._rest_sandbox_enabled
 
         self.websocket_client = websocket_client
         if websocket_client is None and enable_websocket and ccxtpro is not None:
@@ -68,10 +103,32 @@ class ExchangeConnection:
                 **self.credentials,
             }
             self.websocket_client = ws_class(ws_config)
-            if use_testnet:
-                self._ws_sandbox_enabled = self._enable_sandbox_mode(self.websocket_client, "websocket")
 
-        self._market_cache = self.rest_client.load_markets()
+        self.market_data_websocket_client = market_data_websocket_client or self.websocket_client
+
+        if self.market_data_websocket_client is not None and use_testnet:
+            if self.exchange_name in SANDBOX_MARKET_DATA_UNAVAILABLE:
+                self._ws_sandbox_enabled = False
+                logger.info(
+                    f"{self.exchange_name} websocket sandbox feeds are unavailable; using production market data stream."
+                )
+            else:
+                self._ws_sandbox_enabled = self._enable_sandbox_mode(
+                    self.market_data_websocket_client,
+                    "websocket",
+                )
+        else:
+            self._ws_sandbox_enabled = False
+
+        self._market_cache = self.market_data_client.load_markets()
+        if self.market_data_client is not self.rest_client:
+            try:
+                self.rest_client.load_markets()
+            except Exception:
+                logger.debug(
+                    f"Failed to load markets on trading client for {self.exchange_name}",
+                    exc_info=True,
+                )
         self._default_fee = (
             self.rest_client.fees.get("trading", {}).get("taker") if hasattr(self.rest_client, "fees") else None
         )
@@ -94,7 +151,7 @@ class ExchangeConnection:
         return float(fee)
 
     def get_order_book(self, symbol: str, *, limit: int = 10) -> OrderBookSnapshot:
-        order_book = self.rest_client.fetch_order_book(symbol, limit)
+        order_book = self.market_data_client.fetch_order_book(symbol, limit)
         return OrderBookSnapshot.from_ccxt(symbol, order_book)
 
     async def watch_order_book(
@@ -107,24 +164,32 @@ class ExchangeConnection:
     ) -> AsyncIterator[OrderBookSnapshot]:
         async def _poll_rest() -> AsyncIterator[OrderBookSnapshot]:
             while True:
-                order_book = await asyncio.to_thread(self.rest_client.fetch_order_book, symbol, limit)
+                order_book = await asyncio.to_thread(
+                    self.market_data_client.fetch_order_book,
+                    symbol,
+                    limit,
+                )
                 yield OrderBookSnapshot.from_ccxt(symbol, order_book)
                 await asyncio.sleep(poll_interval)
 
-        use_websocket = self.websocket_client is not None
+        use_websocket = self.market_data_websocket_client is not None
         websocket_failed = False
         websocket_permanently_unavailable = False
 
         while True:
-            if use_websocket and self.websocket_client is not None and not websocket_permanently_unavailable:
+            if (
+                use_websocket
+                and self.market_data_websocket_client is not None
+                and not websocket_permanently_unavailable
+            ):
                 try:
                     if websocket_timeout and websocket_timeout > 0:
                         order_book = await asyncio.wait_for(
-                            self.websocket_client.watch_order_book(symbol, limit),
+                            self.market_data_websocket_client.watch_order_book(symbol, limit),
                             timeout=websocket_timeout,
                         )
                     else:
-                        order_book = await self.websocket_client.watch_order_book(symbol, limit)
+                        order_book = await self.market_data_websocket_client.watch_order_book(symbol, limit)
                 except (CcxtNotSupported, AttributeError):  # type: ignore[misc]
                     if not websocket_failed:
                         logger.info(
@@ -166,7 +231,7 @@ class ExchangeConnection:
             async for snapshot in _poll_rest():
                 yield snapshot
                 if (
-                    self.websocket_client is not None
+                    self.market_data_websocket_client is not None
                     and websocket_failed
                     and not websocket_permanently_unavailable
                 ):
@@ -221,7 +286,10 @@ class ExchangeConnection:
             while True:
                 tickers: Dict[str, Any] = {}
                 try:
-                    fetched = await asyncio.to_thread(self.rest_client.fetch_tickers, symbol_list)
+                    fetched = await asyncio.to_thread(
+                        self.market_data_client.fetch_tickers,
+                        symbol_list,
+                    )
                 except TypeError:
                     fetched = None
                 except Exception as exc:  # pragma: no cover - network failure path
@@ -235,7 +303,10 @@ class ExchangeConnection:
                 if not tickers:
                     for symbol in symbol_list:
                         try:
-                            ticker = await asyncio.to_thread(self.rest_client.fetch_ticker, symbol)
+                            ticker = await asyncio.to_thread(
+                                self.market_data_client.fetch_ticker,
+                                symbol,
+                            )
                         except Exception:
                             continue
                         else:
@@ -246,20 +317,20 @@ class ExchangeConnection:
 
                 await asyncio.sleep(max(poll_interval, 0.1))
 
-        use_websocket = self.websocket_client is not None
+        use_websocket = self.market_data_websocket_client is not None
         websocket_failed = False
 
         while True:
-            if use_websocket and self.websocket_client is not None:
+            if use_websocket and self.market_data_websocket_client is not None:
                 try:
-                    if hasattr(self.websocket_client, "watch_tickers"):
+                    if hasattr(self.market_data_websocket_client, "watch_tickers"):
                         if websocket_timeout and websocket_timeout > 0:
                             payload = await asyncio.wait_for(
-                                self.websocket_client.watch_tickers(symbol_list),
+                                self.market_data_websocket_client.watch_tickers(symbol_list),
                                 timeout=websocket_timeout,
                             )
                         else:
-                            payload = await self.websocket_client.watch_tickers(symbol_list)
+                            payload = await self.market_data_websocket_client.watch_tickers(symbol_list)
                         tickers = {
                             symbol: payload.get(symbol)
                             for symbol in symbol_list
@@ -269,15 +340,15 @@ class ExchangeConnection:
                             websocket_failed = False
                             yield tickers
                             continue
-                    elif len(symbol_list) == 1 and hasattr(self.websocket_client, "watch_ticker"):
+                    elif len(symbol_list) == 1 and hasattr(self.market_data_websocket_client, "watch_ticker"):
                         symbol = symbol_list[0]
                         if websocket_timeout and websocket_timeout > 0:
                             ticker = await asyncio.wait_for(
-                                self.websocket_client.watch_ticker(symbol),
+                                self.market_data_websocket_client.watch_ticker(symbol),
                                 timeout=websocket_timeout,
                             )
                         else:
-                            ticker = await self.websocket_client.watch_ticker(symbol)
+                            ticker = await self.market_data_websocket_client.watch_ticker(symbol)
                         if ticker:
                             websocket_failed = False
                             yield {symbol: ticker}
@@ -311,7 +382,7 @@ class ExchangeConnection:
 
             async for tickers in _rest_poll():
                 yield tickers
-                if self.websocket_client is not None and websocket_failed:
+                if self.market_data_websocket_client is not None and websocket_failed:
                     # Periodically attempt to resume websocket streaming when available again.
                     use_websocket = True
                     break
@@ -320,7 +391,11 @@ class ExchangeConnection:
     def sandbox_supported(self) -> bool:
         """Return ``True`` if ccxt successfully enabled sandbox mode."""
 
-        return self._rest_sandbox_enabled or self._ws_sandbox_enabled
+        return (
+            self._rest_sandbox_enabled
+            or self._market_data_rest_sandbox_enabled
+            or self._ws_sandbox_enabled
+        )
 
     def _enable_sandbox_mode(self, client: Any, transport: str) -> bool:
         """Attempt to enable ccxt sandbox mode and log when unsupported."""
@@ -350,7 +425,31 @@ class ExchangeConnection:
                 self.rest_client.close()
             except Exception:
                 pass
-        if self.websocket_client and hasattr(self.websocket_client, "close"):
+        if self.market_data_client is not self.rest_client and hasattr(self.market_data_client, "close"):
+            try:
+                self.market_data_client.close()
+            except Exception:
+                pass
+        websocket_to_close = self.market_data_websocket_client
+        if websocket_to_close and hasattr(websocket_to_close, "close"):
+            try:
+                loop = None
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    pass
+                close_coro = websocket_to_close.close()
+                if loop and loop.is_running():
+                    loop.create_task(close_coro)
+                else:
+                    asyncio.run(close_coro)
+            except Exception:
+                pass
+        if (
+            self.websocket_client
+            and self.websocket_client is not self.market_data_websocket_client
+            and hasattr(self.websocket_client, "close")
+        ):
             try:
                 loop = None
                 try:
@@ -371,7 +470,22 @@ class ExchangeConnection:
                 self.rest_client.close()
             except Exception:
                 pass
-        if self.websocket_client and hasattr(self.websocket_client, "close"):
+        if self.market_data_client is not self.rest_client and hasattr(self.market_data_client, "close"):
+            try:
+                self.market_data_client.close()
+            except Exception:
+                pass
+        websocket_to_close = self.market_data_websocket_client
+        if websocket_to_close and hasattr(websocket_to_close, "close"):
+            try:
+                await websocket_to_close.close()
+            except Exception:
+                pass
+        if (
+            self.websocket_client
+            and self.websocket_client is not self.market_data_websocket_client
+            and hasattr(self.websocket_client, "close")
+        ):
             try:
                 await self.websocket_client.close()
             except Exception:
