@@ -366,37 +366,3 @@ kraken_websocket:
     assert credentials["apiKey"] == "KEY123"
     assert credentials["secret"] == "SECRET456"
 
-
-def test_load_credentials_from_config_handles_nested_keys(tmp_path):
-    config = tmp_path / "config.yaml"
-    config.write_text(
-        """
-kraken_websocket:
-  credentials:
-    API_KEY: KEY789
-    apiSecret: SECRET999
-        """.strip()
-    )
-
-    credentials = runner_module.load_credentials_from_config("kraken", str(config))
-
-    assert credentials["apiKey"] == "KEY789"
-    assert credentials["secret"] == "SECRET999"
-
-
-def test_load_credentials_from_config_finds_nested_section(tmp_path):
-    config = tmp_path / "config.yaml"
-    config.write_text(
-        """
-profiles:
-  paper:
-    kraken_websocket:
-      api_key: KEY111
-      api_secret: SECRET222
-        """.strip()
-    )
-
-    credentials = runner_module.load_credentials_from_config("kraken", str(config))
-
-    assert credentials["apiKey"] == "KEY111"
-    assert credentials["secret"] == "SECRET222"

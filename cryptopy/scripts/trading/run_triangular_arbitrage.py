@@ -403,33 +403,6 @@ def filter_markets_for_triangular_routes(
     return filtered, stats
 
 
-def _normalise_credential_keys(section: Dict[str, Any]) -> Dict[str, str]:
-    """Return a ccxt-compatible credential map from a config section."""
-
-    if not isinstance(section, dict):
-        return {}
-
-    def _iter_key_values(data: Dict[str, Any]) -> Iterable[Tuple[str, Any]]:
-        for key, value in data.items():
-            if isinstance(value, dict):
-                yield from _iter_key_values(value)
-            else:
-                yield str(key), value
-
-    credentials: Dict[str, str] = {}
-    for raw_key, raw_value in _iter_key_values(section):
-        if raw_value in (None, ""):
-            continue
-        key = str(raw_key).strip().lower().replace("-", "").replace("_", "")
-        if key in {"apikey", "key"} and "apiKey" not in credentials:
-            credentials["apiKey"] = str(raw_value)
-        elif key in {"secret", "apisecret", "secretkey"} and "secret" not in credentials:
-            credentials["secret"] = str(raw_value)
-        elif key in {"password", "passphrase"} and "password" not in credentials:
-            credentials["password"] = str(raw_value)
-    return credentials
-
-
 def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> Dict[str, str]:
     """Load API credentials for ``exchange`` from a YAML configuration file."""
 
@@ -461,52 +434,38 @@ def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> D
     if not section_name:
         return {}
 
-    def _casefold(value: str) -> str:
-        return value.strip().lower()
-
     section: Dict[str, Any] = {}
     if isinstance(data, dict):
         for key, candidate in data.items():
-            if isinstance(key, str) and _casefold(key) == _casefold(section_name):
+            if isinstance(key, str) and key.lower() == section_name.lower():
                 section = candidate or {}
                 break
 
-    if not section:
-        logger.debug(
-            f"Config section {section_name} not found at the top level of {config_file}; "
-            "searching nested mappings."
-        )
-
-        def _find_section(mapping: Any) -> Optional[Dict[str, Any]]:
-            if isinstance(mapping, dict):
-                for key, value in mapping.items():
-                    if isinstance(key, str) and _casefold(key) == _casefold(section_name):
-                        if isinstance(value, dict):
-                            return value
-                        return {}
-                    nested = _find_section(value)
-                    if nested is not None:
-                        return nested
-            elif isinstance(mapping, (list, tuple)):
-                for item in mapping:
-                    nested = _find_section(item)
-                    if nested is not None:
-                        return nested
-            return None
-
-        nested_section = _find_section(data)
-        if nested_section is not None:
-            section = nested_section
-
-    credentials = _normalise_credential_keys(section)
-    if credentials:
-        masked = ", ".join(
-            f"{key}={'***' if key != 'password' else '***'}"
-            for key in sorted(credentials)
-        )
-        logger.debug(f"Loaded credentials for {exchange} from {config_file}: {masked}")
-    else:
+    if not isinstance(section, dict) or not section:
         logger.debug(f"No credentials found for {exchange} in {config_file}")
+        return {}
+
+    credentials: Dict[str, str] = {}
+    for raw_key, raw_value in section.items():
+        if raw_value in (None, ""):
+            continue
+        key = str(raw_key).strip().lower()
+        if key in {"apikey", "api_key", "key"} and "apiKey" not in credentials:
+            credentials["apiKey"] = str(raw_value)
+        elif key in {"secret", "api_secret", "secretkey"} and "secret" not in credentials:
+            credentials["secret"] = str(raw_value)
+        elif key in {"password", "passphrase"} and "password" not in credentials:
+            credentials["password"] = str(raw_value)
+
+    if not credentials:
+        logger.debug(f"No credentials found for {exchange} in {config_file}")
+        return {}
+
+    masked = ", ".join(
+        f"{key}={'***' if key != 'password' else '***'}"
+        for key in sorted(credentials)
+    )
+    logger.debug(f"Loaded credentials for {exchange} from {config_file}: {masked}")
     return credentials
 
 
