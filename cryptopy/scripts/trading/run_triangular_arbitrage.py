@@ -862,6 +862,8 @@ async def run_from_args(args: argparse.Namespace) -> None:
     if args.password:
         credentials["password"] = args.password
 
+    credentials = ExchangeConnection._normalise_credentials(credentials)
+
     if credentials:
         masked = ", ".join(
             f"{key}={'***' if key != 'password' else '***'}" for key in sorted(credentials)

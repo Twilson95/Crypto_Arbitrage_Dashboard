@@ -118,7 +118,7 @@ def merge_credentials(
         credentials["secret"] = cli_secret
     if cli_password:
         credentials["password"] = cli_password
-    return credentials
+    return ExchangeConnection._normalise_credentials(credentials)
 
 
 def parse_order_params(raw_params: Optional[list[str]]) -> Dict[str, Any]:
