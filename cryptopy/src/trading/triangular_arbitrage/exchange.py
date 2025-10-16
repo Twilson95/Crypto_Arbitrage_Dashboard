@@ -51,7 +51,7 @@ class ExchangeConnection:
                 "ccxt is required to use ExchangeConnection. Install ccxt or provide a custom client."
             )
         self.exchange_name = exchange_name.lower()
-        self.credentials = credentials or {}
+        self.credentials = self._normalise_credentials(credentials)
         self.make_trades = make_trades
         self._use_testnet = use_testnet
         self._rest_sandbox_enabled = False
@@ -168,6 +168,30 @@ class ExchangeConnection:
 
         return self._market_cache
 
+    @staticmethod
+    def _normalise_credentials(credentials: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        """Return a ccxt-compatible credential mapping."""
+
+        if not credentials:
+            return {}
+
+        normalised: Dict[str, str] = {}
+        for raw_key, raw_value in credentials.items():
+            if raw_value in (None, ""):
+                continue
+            key = str(raw_key)
+            value = str(raw_value)
+            lower = key.lower()
+            if lower in {"apikey", "api_key", "key"}:
+                normalised["apiKey"] = value
+            elif lower in {"secret", "api_secret", "secretkey"}:
+                normalised["secret"] = value
+            elif lower in {"password", "passphrase"}:
+                normalised["password"] = value
+            else:
+                normalised[key] = value
+        return normalised
+
     def _apply_credentials(self, client: Any) -> None:
         """Set credential attributes on ``client`` for ccxt compatibility."""
 
@@ -175,9 +199,16 @@ class ExchangeConnection:
             return
         for key, value in self.credentials.items():
             attr = key
-            if key.lower() == "apikey":
+            lower = key.lower()
+            if lower in {"apikey", "api_key"}:
                 attr = "apiKey"
+            elif lower in {"secret", "api_secret"}:
+                attr = "secret"
             setattr(client, attr, value)
+            if attr == "apiKey":
+                setattr(client, "api_key", value)
+            if attr == "secret":
+                setattr(client, "secretKey", value)
         if hasattr(client, "options") and isinstance(client.options, dict):
             client.options.setdefault("apiKey", self.credentials.get("apiKey"))
             client.options.setdefault("secret", self.credentials.get("secret"))
@@ -377,6 +408,7 @@ class ExchangeConnection:
                 "params": params,
                 "test_order": True,
             }
+        self._apply_credentials(self.rest_client)
         return self.rest_client.create_order(symbol, "market", side, amount, params=params)
 
     async def watch_tickers(

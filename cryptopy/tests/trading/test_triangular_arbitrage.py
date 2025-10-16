@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import importlib.util
 import pathlib
 import sys
+from types import SimpleNamespace
 
 import csv
 import pytest
@@ -365,4 +366,61 @@ kraken_websocket:
 
     assert credentials["apiKey"] == "KEY123"
     assert credentials["secret"] == "SECRET456"
+
+
+def test_exchange_connection_applies_credentials_for_orders(monkeypatch):
+    from cryptopy.src.trading.triangular_arbitrage import exchange as exchange_module
+
+    class DummyExchange:
+        def __init__(self, config):
+            self.config = config
+            self.apiKey = config.get("apiKey")
+            self.secret = config.get("secret")
+            self.options = {}
+            self.has = {"fetchTradingFees": False, "fetchTradingFee": False}
+            self.fees = {"trading": {"taker": 0.001}}
+            self.last_order = None
+
+        def load_markets(self):
+            return {}
+
+        def fetch_trading_fees(self):
+            return {}
+
+        def create_order(self, symbol, order_type, side, amount, params=None):
+            if not getattr(self, "apiKey", None):
+                raise AssertionError("apiKey not set on client")
+            if not getattr(self, "secret", None):
+                raise AssertionError("secret not set on client")
+            self.last_order = {
+                "symbol": symbol,
+                "type": order_type,
+                "side": side,
+                "amount": amount,
+                "apiKey": self.apiKey,
+                "secret": self.secret,
+            }
+            return {"id": "dummy-order"}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(exchange_module, "ccxt", SimpleNamespace(dummy=DummyExchange))
+    monkeypatch.setattr(exchange_module, "ccxtpro", None)
+    monkeypatch.setattr(exchange_module, "CcxtNotSupported", Exception)
+
+    connection = exchange_module.ExchangeConnection(
+        "dummy",
+        credentials={"apiKey": "KEY123", "secret": "SECRET456"},
+        use_testnet=False,
+        enable_websocket=False,
+        make_trades=True,
+    )
+
+    result = connection.create_market_order("BTC/USD", "buy", 1.0)
+
+    assert result == {"id": "dummy-order"}
+    assert connection.rest_client.last_order is not None
+    assert connection.rest_client.last_order["apiKey"] == "KEY123"
+    assert connection.rest_client.last_order["secret"] == "SECRET456"
 
