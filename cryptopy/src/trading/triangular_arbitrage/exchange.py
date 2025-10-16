@@ -222,18 +222,36 @@ class ExchangeConnection:
                 except AttributeError:
                     # Some ccxt clients use slots; ignore attributes that cannot be set.
                     pass
+            if hasattr(client, "config") and isinstance(client.config, dict):
+                for key in ("apiKey", "api_key", "key"):
+                    client.config[key] = api_key
+            headers = getattr(client, "headers", None)
+            if isinstance(headers, dict):
+                headers.setdefault("API-Key", api_key)
+                headers.setdefault("apiKey", api_key)
+            elif headers is None and hasattr(client, "headers"):
+                try:
+                    client.headers = {"API-Key": api_key}
+                except AttributeError:
+                    pass
         if secret:
             for attr in ("secret", "secretKey", "secret_key"):
                 try:
                     setattr(client, attr, secret)
                 except AttributeError:
                     pass
+            if hasattr(client, "config") and isinstance(client.config, dict):
+                for key in ("secret", "secretKey", "secret_key"):
+                    client.config[key] = secret
         if password:
             for attr in ("password", "passphrase"):
                 try:
                     setattr(client, attr, password)
                 except AttributeError:
                     pass
+            if hasattr(client, "config") and isinstance(client.config, dict):
+                for key in ("password", "passphrase"):
+                    client.config[key] = password
 
         if hasattr(client, "options") and isinstance(client.options, dict):
             if api_key:
@@ -268,6 +286,33 @@ class ExchangeConnection:
                     except AttributeError:
                         pass
 
+    def _ensure_required_credentials(self, client: Any) -> None:
+        """Ensure ccxt required credentials are populated on ``client``."""
+
+        if not self.credentials or client is None:
+            return
+
+        check_required = getattr(client, "check_required_credentials", None)
+        if not callable(check_required):
+            return
+
+        # Reapply credentials immediately beforehand in case ccxt reset them.
+        self._apply_credentials(client)
+
+        try:
+            check_required()
+        except CcxtAuthenticationError as exc:  # type: ignore[misc]
+            raise CcxtAuthenticationError(  # type: ignore[call-arg]
+                f"Missing required credentials for {self.exchange_name}: {exc}"
+            ) from exc
+        except Exception:
+            # If ccxt raises for other reasons (e.g. partially implemented exchanges),
+            # surface the original behaviour without interrupting execution.
+            logger.debug(
+                f"check_required_credentials failed for {self.exchange_name}",
+                exc_info=True,
+            )
+
     def _verify_authenticated_access(self) -> None:
         """Call a private endpoint to surface credential issues early."""
 
@@ -276,6 +321,8 @@ class ExchangeConnection:
 
         private_checks: list[tuple[str, Callable[[], Any]]] = []
         client = self.rest_client
+
+        self._ensure_required_credentials(client)
 
         fetch_balance = getattr(client, "fetch_balance", None)
         if callable(fetch_balance):
@@ -515,6 +562,7 @@ class ExchangeConnection:
                 "test_order": True,
             }
         self._apply_credentials(self.rest_client)
+        self._ensure_required_credentials(self.rest_client)
         return self.rest_client.create_order(symbol, "market", side, amount, params=params)
 
     async def watch_tickers(
