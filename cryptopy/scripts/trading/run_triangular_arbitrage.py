@@ -44,6 +44,7 @@ USE_TESTNET_DEFAULT = True
 DISABLE_WEBSOCKET_DEFAULT = False
 LOG_LEVEL_DEFAULT = "DEBUG"
 MAX_ROUTE_LENGTH_DEFAULT: Optional[int] = 3
+MAX_EXECUTIONS_DEFAULT: Optional[int] = None
 EVALUATION_INTERVAL_DEFAULT = 30.0
 WEBSOCKET_TIMEOUT_DEFAULT = 10.0
 PRICE_REFRESH_INTERVAL_DEFAULT = 30.0
@@ -664,6 +665,7 @@ async def evaluate_and_execute(
     starting_amount: float,
     min_profit_percentage: float,
     max_route_length: Optional[int],
+    max_executions: Optional[int],
     evaluation_interval: float,
     enable_execution: bool,
     price_max_age: float,
@@ -673,6 +675,10 @@ async def evaluate_and_execute(
     """Evaluate cached prices and execute profitable opportunities."""
 
     last_execution: Optional[OpportunityExecution] = None
+    execution_limit: Optional[int] = None
+    if max_executions is not None and max_executions > 0:
+        execution_limit = int(max_executions)
+    executed_routes = 0
 
     while not stop_event.is_set():
         reasons: List[str]
@@ -846,6 +852,16 @@ async def evaluate_and_execute(
                 trigger_queue.put_nowait("post_trade")
             except asyncio.QueueFull:  # pragma: no cover - unbounded by default
                 logger.debug("Trigger queue full; dropping post_trade notification")
+        else:
+            logger.info("Execution completed without order details from the exchange response.")
+
+        executed_routes += 1
+        if execution_limit is not None and executed_routes >= execution_limit:
+            logger.info(
+                f"Reached configured execution limit of {execution_limit} route(s); stopping runner for review."
+            )
+            stop_event.set()
+            break
 
 
 async def run_from_args(args: argparse.Namespace) -> None:
@@ -897,6 +913,9 @@ async def run_from_args(args: argparse.Namespace) -> None:
     max_route_length = args.max_route_length
     if max_route_length is not None and max_route_length <= 0:
         max_route_length = None
+    max_executions = args.max_executions
+    if max_executions is not None and max_executions <= 0:
+        max_executions = None
 
     price_refresh_interval = max(args.price_refresh_interval, 0.1)
     price_max_age = max(args.price_max_age, price_refresh_interval)
@@ -1041,6 +1060,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             starting_amount=args.starting_amount,
             min_profit_percentage=args.min_profit_percentage,
             max_route_length=max_route_length,
+            max_executions=max_executions,
             evaluation_interval=args.evaluation_interval,
             enable_execution=args.enable_execution,
             price_max_age=price_max_age,
@@ -1106,6 +1126,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=MAX_ROUTE_LENGTH_DEFAULT,
         help="Optional maximum number of legs per route to evaluate.",
+    )
+    parser.add_argument(
+        "--max-executions",
+        type=int,
+        default=MAX_EXECUTIONS_DEFAULT,
+        help=(
+            "Stop the runner after this many opportunities have been executed. "
+            "Leave unset for no limit."
+        ),
     )
     parser.add_argument(
         "--slippage-buffer",

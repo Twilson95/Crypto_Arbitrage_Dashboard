@@ -2,7 +2,7 @@
 
 The `run_triangular_arbitrage.py` script monitors real-time ticker prices and evaluates triangular routes that it discovers automatically from the exchange markets. By default it only reports opportunities and does **not** attempt to place any orders.
 
-At the top of the script you will find a handful of boolean defaults (for example `ENABLE_EXECUTION_DEFAULT`, `LIVE_TRADING_DEFAULT`, and `USE_TESTNET_DEFAULT`) along with `EXCHANGE_DEFAULT`. New helpers such as `STARTING_CURRENCY_DEFAULT`, `MAX_ROUTE_LENGTH_DEFAULT`, `EVALUATION_INTERVAL_DEFAULT`, and `TRADE_LOG_PATH_DEFAULT` make it easy to pin the seed currency to USD, control the longest route to evaluate, choose how infrequently the periodic safety check should run, and decide where executed legs should be logged. Toggle these values to quickly change the runner's behaviour without modifying your command line each time. CLI arguments still override the inline defaults when explicitly supplied.
+At the top of the script you will find a handful of boolean defaults (for example `ENABLE_EXECUTION_DEFAULT`, `LIVE_TRADING_DEFAULT`, and `USE_TESTNET_DEFAULT`) along with `EXCHANGE_DEFAULT`. New helpers such as `STARTING_CURRENCY_DEFAULT`, `MAX_ROUTE_LENGTH_DEFAULT`, `MAX_EXECUTIONS_DEFAULT`, `EVALUATION_INTERVAL_DEFAULT`, and `TRADE_LOG_PATH_DEFAULT` make it easy to pin the seed currency to USD, control the longest route to evaluate, stop automatically after a certain number of executed opportunities, choose how infrequently the periodic safety check should run, and decide where executed legs should be logged. Toggle these values to quickly change the runner's behaviour without modifying your command line each time. CLI arguments still override the inline defaults when explicitly supplied.
 
 ## Usage
 
@@ -19,6 +19,7 @@ Key options:
 - `--enable-execution` toggles order placement. Omit the flag to keep execution disabled and simply review the logs.
 - `--live-trading` switches from simulated test orders to real exchange orders. It requires `--enable-execution`.
 - `--use-testnet` enables the sandbox/testnet for exchanges that provide one.
+- `--max-executions` stops the runner after it successfully executes the requested number of opportunities so you can review the results before continuing.
 - `--trade-log` stores each simulated or live leg in a CSV file for auditing (defaults to the `TRADE_LOG_PATH_DEFAULT` location if left unspecified).
 - `--websocket-timeout` bounds how long the watcher will wait for a streamed ticker update before temporarily polling the REST API instead.
 - `--price-refresh-interval` sets the target cadence (per symbol) for REST ticker refreshes so rate limits stay under control even on large markets.
