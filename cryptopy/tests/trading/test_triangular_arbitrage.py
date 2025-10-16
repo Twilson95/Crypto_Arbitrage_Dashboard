@@ -380,12 +380,17 @@ def test_exchange_connection_applies_credentials_for_orders(monkeypatch):
             self.has = {"fetchTradingFees": False, "fetchTradingFee": False}
             self.fees = {"trading": {"taker": 0.001}}
             self.last_order = None
+            self.balance_calls = 0
 
         def load_markets(self):
             return {}
 
         def fetch_trading_fees(self):
             return {}
+
+        def fetch_balance(self):
+            self.balance_calls += 1
+            return {"total": {}}
 
         def create_order(self, symbol, order_type, side, amount, params=None):
             if not getattr(self, "apiKey", None):
@@ -423,4 +428,44 @@ def test_exchange_connection_applies_credentials_for_orders(monkeypatch):
     assert connection.rest_client.last_order is not None
     assert connection.rest_client.last_order["apiKey"] == "KEY123"
     assert connection.rest_client.last_order["secret"] == "SECRET456"
+    assert connection.rest_client.balance_calls == 1
+
+
+def test_exchange_connection_raises_when_credentials_invalid(monkeypatch):
+    from cryptopy.src.trading.triangular_arbitrage import exchange as exchange_module
+
+    class DummyAuthError(Exception):
+        pass
+
+    class DummyExchange:
+        def __init__(self, config):
+            self.config = config
+            self.apiKey = config.get("apiKey")
+            self.secret = config.get("secret")
+            self.options = {}
+            self.has = {"fetchTradingFees": False, "fetchTradingFee": False}
+            self.fees = {"trading": {"taker": 0.001}}
+
+        def load_markets(self):
+            return {}
+
+        def fetch_trading_fees(self):
+            return {}
+
+        def fetch_balance(self):
+            raise DummyAuthError("invalid credentials")
+
+    monkeypatch.setattr(exchange_module, "ccxt", SimpleNamespace(dummy=DummyExchange))
+    monkeypatch.setattr(exchange_module, "ccxtpro", None)
+    monkeypatch.setattr(exchange_module, "CcxtNotSupported", Exception)
+    monkeypatch.setattr(exchange_module, "CcxtAuthenticationError", DummyAuthError)
+
+    with pytest.raises(DummyAuthError, match="Authentication failed when calling fetch_balance"):
+        exchange_module.ExchangeConnection(
+            "dummy",
+            credentials={"apiKey": "BAD", "secret": "CREDENTIALS"},
+            use_testnet=False,
+            enable_websocket=False,
+            make_trades=True,
+        )
 

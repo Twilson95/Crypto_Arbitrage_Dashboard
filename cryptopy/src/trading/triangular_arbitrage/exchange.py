@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, AsyncIterator, Dict, Optional, Sequence
+from typing import Any, AsyncIterator, Callable, Dict, Optional, Sequence
 
 from cryptopy.src.trading.triangular_arbitrage.models import OrderBookSnapshot
 
@@ -18,6 +18,14 @@ try:  # pragma: no cover - optional dependency
     from ccxt.base.errors import NotSupported as CcxtNotSupported  # type: ignore
 except Exception:  # pragma: no cover - fallback if ccxt is missing or outdated
     CcxtNotSupported = ()  # type: ignore[assignment]
+
+try:  # pragma: no cover - optional dependency
+    from ccxt.base.errors import AuthenticationError as CcxtAuthenticationError  # type: ignore
+except Exception:  # pragma: no cover - fallback if ccxt is missing or outdated
+    class _FallbackAuthenticationError(Exception):
+        """Fallback authentication error used when ccxt is unavailable."""
+
+    CcxtAuthenticationError = _FallbackAuthenticationError  # type: ignore[assignment]
 
 try:  # pragma: no cover - optional dependency
     import ccxt.pro as ccxtpro  # type: ignore
@@ -167,6 +175,7 @@ class ExchangeConnection:
             self._fee_source[symbol] = "market"
 
         self._prime_trading_fee_cache()
+        self._verify_authenticated_access()
 
     def get_markets(self) -> Dict[str, Any]:
         """Return the cached market metadata loaded during initialisation."""
@@ -258,6 +267,57 @@ class ExchangeConnection:
                         setattr(client, field, value)
                     except AttributeError:
                         pass
+
+    def _verify_authenticated_access(self) -> None:
+        """Call a private endpoint to surface credential issues early."""
+
+        if not self.credentials:
+            return
+
+        private_checks: list[tuple[str, Callable[[], Any]]] = []
+        client = self.rest_client
+
+        fetch_balance = getattr(client, "fetch_balance", None)
+        if callable(fetch_balance):
+            private_checks.append(("fetch_balance", lambda: fetch_balance()))
+
+        fetch_open_orders = getattr(client, "fetch_open_orders", None)
+        if callable(fetch_open_orders):
+            private_checks.append(("fetch_open_orders", lambda: fetch_open_orders()))
+
+        if not private_checks:
+            if self.make_trades:
+                logger.debug(
+                    f"No private credential checks available for {self.exchange_name}; "
+                    "trading requests may surface authentication errors later."
+                )
+            return
+
+        for name, method in private_checks:
+            try:
+                method()
+            except CcxtAuthenticationError as exc:  # type: ignore[misc]
+                raise CcxtAuthenticationError(  # type: ignore[call-arg]
+                    f"Authentication failed when calling {name} on {self.exchange_name}: {exc}"
+                ) from exc
+            except Exception as exc:  # pragma: no cover - network dependent
+                logger.debug(
+                    f"Credential verification via {name} on {self.exchange_name} failed with "
+                    f"{exc.__class__.__name__}: {exc}",
+                    exc_info=True,
+                )
+                continue
+            else:
+                logger.debug(
+                    f"Verified authenticated access for {self.exchange_name} via {name}."
+                )
+                return
+
+        if self.make_trades:
+            logger.warning(
+                f"Unable to confirm trading credentials for {self.exchange_name}; "
+                "orders may fail with authentication errors."
+            )
 
     def list_symbols(self) -> Sequence[str]:
         """Return the list of symbols supported by the exchange."""
