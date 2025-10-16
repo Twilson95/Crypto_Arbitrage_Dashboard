@@ -68,6 +68,9 @@ class ExchangeConnection:
 
         if use_testnet:
             self._rest_sandbox_enabled = self._enable_sandbox_mode(self.rest_client, "REST trading")
+            # Some exchanges reset credential fields when toggling sandbox mode.
+            # Reapply credentials so subsequent authenticated calls inherit them.
+            self._apply_credentials(self.rest_client)
 
         market_data_config = {
             "enableRateLimit": True,
@@ -95,6 +98,7 @@ class ExchangeConnection:
                 self.market_data_client,
                 "REST market data",
             )
+            self._apply_credentials(self.market_data_client)
         elif self.market_data_client is self.rest_client:
             self._market_data_rest_sandbox_enabled = self._rest_sandbox_enabled
 
@@ -126,6 +130,7 @@ class ExchangeConnection:
                     self.market_data_websocket_client,
                     "websocket",
                 )
+                self._apply_credentials(self.market_data_websocket_client)
         else:
             self._ws_sandbox_enabled = False
 
@@ -197,21 +202,62 @@ class ExchangeConnection:
 
         if not self.credentials or client is None:
             return
-        for key, value in self.credentials.items():
-            attr = key
-            lower = key.lower()
-            if lower in {"apikey", "api_key"}:
-                attr = "apiKey"
-            elif lower in {"secret", "api_secret"}:
-                attr = "secret"
-            setattr(client, attr, value)
-            if attr == "apiKey":
-                setattr(client, "api_key", value)
-            if attr == "secret":
-                setattr(client, "secretKey", value)
+        api_key = self.credentials.get("apiKey")
+        secret = self.credentials.get("secret")
+        password = self.credentials.get("password")
+
+        if api_key:
+            for attr in ("apiKey", "api_key", "key"):
+                try:
+                    setattr(client, attr, api_key)
+                except AttributeError:
+                    # Some ccxt clients use slots; ignore attributes that cannot be set.
+                    pass
+        if secret:
+            for attr in ("secret", "secretKey", "secret_key"):
+                try:
+                    setattr(client, attr, secret)
+                except AttributeError:
+                    pass
+        if password:
+            for attr in ("password", "passphrase"):
+                try:
+                    setattr(client, attr, password)
+                except AttributeError:
+                    pass
+
         if hasattr(client, "options") and isinstance(client.options, dict):
-            client.options.setdefault("apiKey", self.credentials.get("apiKey"))
-            client.options.setdefault("secret", self.credentials.get("secret"))
+            if api_key:
+                for key in ("apiKey", "api_key", "key"):
+                    client.options[key] = api_key
+            if secret:
+                for key in ("secret", "secretKey", "secret_key"):
+                    client.options[key] = secret
+            if password:
+                for key in ("password", "passphrase"):
+                    client.options[key] = password
+
+        required = getattr(client, "requiredCredentials", None)
+        if isinstance(required, dict):
+            for field, needed in required.items():
+                if not needed:
+                    continue
+                if getattr(client, field, None):
+                    continue
+                value = None
+                if field == "apiKey":
+                    value = api_key
+                elif field == "secret":
+                    value = secret
+                elif field in {"password", "passphrase"}:
+                    value = password
+                else:
+                    value = self.credentials.get(field)
+                if value:
+                    try:
+                        setattr(client, field, value)
+                    except AttributeError:
+                        pass
 
     def list_symbols(self) -> Sequence[str]:
         """Return the list of symbols supported by the exchange."""
