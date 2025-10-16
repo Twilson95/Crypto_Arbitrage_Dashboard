@@ -16,7 +16,9 @@ from cryptopy.src.trading.triangular_arbitrage.exchange import (
 
 # Defaults mirror the triangular arbitrage runner so operators can reuse configs.
 EXCHANGE_DEFAULT = "kraken"
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config.yaml"
+DEFAULT_CONFIG_PATH = (
+    Path(__file__).resolve().parents[3] / "config" / "exchange_config.yaml"
+)
 CONFIG_SECTION_BY_EXCHANGE = {
     "kraken": "kraken_websocket",
 }
@@ -26,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> Dict[str, str]:
-    """Load API credentials for ``exchange`` from ``config.yaml`` style files."""
+    """Load API credentials for ``exchange`` from ``exchange_config.yaml`` style files."""
 
     candidate_paths: list[Path] = []
     if config_path:
@@ -40,7 +42,7 @@ def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> D
     else:
         default_path = DEFAULT_CONFIG_PATH
         candidate_paths.append(default_path)
-        cwd_candidate = Path.cwd() / "config.yaml"
+        cwd_candidate = Path.cwd() / "config" / "exchange_config.yaml"
         if cwd_candidate != default_path:
             candidate_paths.append(cwd_candidate)
 
@@ -160,7 +162,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--config",
         default=None,
-        help=f"Path to config.yaml containing credentials (default: {DEFAULT_CONFIG_PATH})",
+        help=(
+            f"Path to exchange_config.yaml containing credentials (default: {DEFAULT_CONFIG_PATH})"
+        ),
     )
     parser.add_argument("--api-key", dest="api_key", default=None, help="Override API key")
     parser.add_argument("--secret", dest="secret", default=None, help="Override API secret")

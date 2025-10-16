@@ -56,7 +56,9 @@ TRADE_LOG_PATH_DEFAULT: Optional[Path] = (
 )
 
 # Optional configuration file used to source API credentials when present.
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config.yaml"
+DEFAULT_CONFIG_PATH = (
+    Path(__file__).resolve().parents[3] / "config" / "exchange_config.yaml"
+)
 CONFIG_SECTION_BY_EXCHANGE = {
     "kraken": "kraken_websocket",
 }
@@ -413,7 +415,7 @@ def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> D
     else:
         default_path = DEFAULT_CONFIG_PATH
         candidate_paths.append(default_path)
-        cwd_candidate = Path.cwd() / "config.yaml"
+        cwd_candidate = Path.cwd() / "config" / "exchange_config.yaml"
         if cwd_candidate != default_path:
             candidate_paths.append(cwd_candidate)
 
@@ -1157,7 +1159,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--config",
         default=None,
-        help="Optional path to a YAML file containing API credentials.",
+        help=(
+            "Optional path to an exchange_config.yaml file containing API credentials."
+        ),
     )
     parser.add_argument(
         "--use-testnet",

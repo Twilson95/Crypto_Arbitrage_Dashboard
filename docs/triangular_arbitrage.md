@@ -23,7 +23,7 @@ Key options:
 - `--websocket-timeout` bounds how long the watcher will wait for a streamed ticker update before temporarily polling the REST API instead.
 - `--price-refresh-interval` sets the target cadence (per symbol) for REST ticker refreshes so rate limits stay under control even on large markets.
 - `--price-max-age` determines how long cached price snapshots remain valid before the evaluator ignores them.
-- `--config` can point at a YAML file (defaults to `config.yaml` in the project root) that contains credentials. For Kraken, the loader expects an entry in the form:
+- `--config` can point at a YAML file (defaults to `config/exchange_config.yaml` in the project root) that contains credentials. For Kraken, the loader expects an entry in the form:
 
   ```yaml
   kraken_websocket:
@@ -56,8 +56,8 @@ Live market triggers now come from lightweight ticker streams (or REST price pol
 
 Use `python -m cryptopy.scripts.trading.test_authenticated_order` when you want to
 confirm that your API credentials work for private endpoints before letting the
-full runner place trades. The helper loads the same `config.yaml` credentials as
-the arbitrage script, verifies access to private endpoints such as
+full runner place trades. The helper loads the same `config/exchange_config.yaml`
+credentials as the arbitrage script, verifies access to private endpoints such as
 `fetch_balance`, optionally lists open orders, and can submit a minimal market
 order when you pass `--execute-order --symbol BTC/USD --amount 0.001`. Omit
 `--execute-order` to review the payload without placing the trade. This makes it

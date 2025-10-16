@@ -369,7 +369,9 @@ kraken_websocket:
 
 
 def test_load_credentials_from_config_falls_back_to_cwd(monkeypatch, tmp_path):
-    config = tmp_path / "config.yaml"
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config = config_dir / "exchange_config.yaml"
     config.write_text(
         """
 kraken_websocket:
