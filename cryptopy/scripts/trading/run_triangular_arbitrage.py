@@ -401,20 +401,32 @@ def filter_markets_for_triangular_routes(
 def load_credentials_from_config(exchange: str, config_path: Optional[str]) -> Dict[str, str]:
     """Load API credentials for ``exchange`` from a YAML configuration file."""
 
-    raw_path = config_path if config_path else DEFAULT_CONFIG_PATH
-    try:
-        config_file = Path(raw_path).expanduser()
-    except TypeError:
-        logger.warning(
-            f"Invalid config path {raw_path!r} supplied; skipping credential load."
-        )
-        return {}
+    candidate_paths: List[Path] = []
+    if config_path:
+        try:
+            candidate_paths.append(Path(config_path).expanduser())
+        except TypeError:
+            logger.warning(
+                f"Invalid config path {config_path!r} supplied; skipping credential load."
+            )
+            return {}
+    else:
+        default_path = DEFAULT_CONFIG_PATH
+        candidate_paths.append(default_path)
+        cwd_candidate = Path.cwd() / "config.yaml"
+        if cwd_candidate != default_path:
+            candidate_paths.append(cwd_candidate)
 
-    if isinstance(config_file, str):  # pragma: no cover - defensive for unexpected types
-        config_file = Path(config_file)
+    config_file: Optional[Path] = None
+    for path in candidate_paths:
+        if isinstance(path, str):  # pragma: no cover - defensive for unexpected types
+            path = Path(path)
+        if path.exists():
+            config_file = path
+            break
+        logger.debug(f"Config path {path} does not exist; skipping credential load")
 
-    if not config_file.exists():
-        logger.debug(f"Config path {config_file} does not exist; skipping credential load")
+    if config_file is None:
         return {}
 
     try:

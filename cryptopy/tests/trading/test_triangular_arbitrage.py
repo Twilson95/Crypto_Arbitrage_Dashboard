@@ -368,6 +368,24 @@ kraken_websocket:
     assert credentials["secret"] == "SECRET456"
 
 
+def test_load_credentials_from_config_falls_back_to_cwd(monkeypatch, tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        """
+kraken_websocket:
+  api_key: ALTKEY
+  api_secret: ALTSECRET
+        """.strip()
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    credentials = runner_module.load_credentials_from_config("kraken", None)
+
+    assert credentials["apiKey"] == "ALTKEY"
+    assert credentials["secret"] == "ALTSECRET"
+
+
 def test_exchange_connection_applies_credentials_for_orders(monkeypatch):
     from cryptopy.src.trading.triangular_arbitrage import exchange as exchange_module
 
