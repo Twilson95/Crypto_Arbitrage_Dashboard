@@ -51,3 +51,15 @@ Kraken operates a **Spot Trading Sandbox** at <https://support.kraken.com/hc/en-
 Each evaluation cycle logs the trigger that woke it (market data refresh, periodic fallback, or a post-trade confirmation), the start time, and how long it took to review the available routes. The log message also reports how many of the discovered routes currently have complete price data and how many of those satisfy the negative log-sum filter, making it clear why a subset of routes advance to the profitability simulation. This makes it easy to confirm that the runner only reacts when something meaningful happens while still providing an infrequent periodic backstop.
 
 Live market triggers now come from lightweight ticker streams (or REST price polling when websockets are absent) while a separate maintainer refreshes cached tickers sequentially at the configured cadence. This keeps bid/ask snapshots fresh for the simulator without hammering the exchange with full depth subscriptions. When websockets for tickers are unavailable or time out, the watcher automatically falls back to REST polling and resumes streaming once updates begin to flow again.
+
+## Authenticated order smoke testing
+
+Use `python -m cryptopy.scripts.trading.test_authenticated_order` when you want to
+confirm that your API credentials work for private endpoints before letting the
+full runner place trades. The helper loads the same `config.yaml` credentials as
+the arbitrage script, verifies access to private endpoints such as
+`fetch_balance`, optionally lists open orders, and can submit a minimal market
+order when you pass `--execute-order --symbol BTC/USD --amount 0.001`. Omit
+`--execute-order` to review the payload without placing the trade. This makes it
+straightforward to troubleshoot authentication issues (for example, missing
+Kraken API keys) without running the entire arbitrage workflow.
