@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, AsyncIterator, Callable, Dict, Optional, Sequence
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Sequence
 
 from cryptopy.src.trading.triangular_arbitrage.models import OrderBookSnapshot
 
@@ -564,6 +564,25 @@ class ExchangeConnection:
         self._apply_credentials(self.rest_client)
         self._ensure_required_credentials(self.rest_client)
         return self.rest_client.create_order(symbol, "market", side, amount, params=params)
+
+    def fetch_order(self, order_id: str, symbol: str) -> Dict[str, Any]:
+        """Fetch a specific order from the exchange."""
+
+        self._apply_credentials(self.rest_client)
+        self._ensure_required_credentials(self.rest_client)
+        return self.rest_client.fetch_order(order_id, symbol)
+
+    def fetch_my_trades(
+        self,
+        symbol: Optional[str] = None,
+        since: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetch recent trades for the authenticated account."""
+
+        self._apply_credentials(self.rest_client)
+        self._ensure_required_credentials(self.rest_client)
+        return self.rest_client.fetch_my_trades(symbol, since=since, limit=limit)
 
     async def watch_tickers(
         self,

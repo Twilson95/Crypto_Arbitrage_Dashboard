@@ -47,17 +47,32 @@ generate_triangular_routes = runner_module.generate_triangular_routes
 class MockExchange:
     fee: float = 0.001
     orders: list = None
+    trades: list = None
 
     def __post_init__(self):
         self.orders = []
+        self.trades = []
 
     def get_taker_fee(self, symbol: str) -> float:
         return self.fee
 
     def create_market_order(self, symbol, side, amount, **kwargs):
-        order = {"symbol": symbol, "side": side, "amount": amount, **kwargs}
+        order_id = f"order-{len(self.orders) + 1}"
+        order = {"id": order_id, "symbol": symbol, "side": side, "amount": amount, **kwargs}
         self.orders.append(order)
         return order
+
+    def fetch_order(self, order_id, symbol):  # noqa: D401 - simple passthrough
+        for order in reversed(self.orders):
+            if str(order.get("id")) == str(order_id) and order.get("symbol") == symbol:
+                return order
+        raise ValueError(f"Order {order_id} not found for {symbol}")
+
+    def fetch_my_trades(self, symbol=None, since=None, limit=None):  # noqa: D401 - simple passthrough
+        trades = [trade for trade in self.trades if symbol in (None, trade.get("symbol"))]
+        if limit is not None:
+            return trades[-limit:]
+        return trades
 
 
 @dataclass
@@ -76,7 +91,9 @@ class AdaptiveMockExchange(MockExchange):
         price = self.price_map.get((symbol, side), 1.0)
         fee_rate = self.fee_overrides.get((symbol, side), self.fee)
         base, quote = symbol.split("/")
+        order_id = f"order-{len(self.orders) + 1}"
         order = {
+            "id": order_id,
             "symbol": symbol,
             "side": side,
             "amount": amount,
@@ -92,6 +109,15 @@ class AdaptiveMockExchange(MockExchange):
             order["cost"] = amount * price
             order["fees"] = [{"currency": quote, "cost": amount * price * fee_rate}]
         self.orders.append(order)
+        trade = {
+            "id": f"trade-{len(self.trades) + 1}",
+            "order": order_id,
+            "symbol": symbol,
+            "amount": amount,
+            "cost": order["cost"],
+            "fee": order["fees"][0],
+        }
+        self.trades.append(trade)
         return order
 
 

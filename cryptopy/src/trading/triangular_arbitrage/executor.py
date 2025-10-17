@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
@@ -19,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 class TriangularArbitrageExecutor:
     """Executes arbitrage opportunities by placing orders on the exchange."""
+
+    _ORDER_STATUS_ATTEMPTS = 5
+    _ORDER_STATUS_DELAY = 0.2
+    _TRADE_HISTORY_LIMIT = 10
 
     def __init__(
         self,
@@ -52,6 +57,8 @@ class TriangularArbitrageExecutor:
                 amount,
                 test_order=self.dry_run,
             )
+            if not self.dry_run:
+                order = self._resolve_order_payload(order, leg)
             orders.append(order)
 
             if self.dry_run:
@@ -248,6 +255,134 @@ class TriangularArbitrageExecutor:
         )
         realised = max(cost - quote_fee, 0.0)
         return realised
+
+    def _resolve_order_payload(
+        self,
+        order: Dict[str, Any],
+        leg: TriangularTradeLeg,
+    ) -> Dict[str, Any]:
+        """Enrich an order payload with realised execution details when missing."""
+
+        if self._extract_realised_amount(order, leg) is not None:
+            return order
+
+        order_id = self._extract_order_id(order)
+        if not order_id:
+            logger.debug(
+                "Order payload for %s leg %s lacks an id; unable to refresh execution details",
+                leg.side,
+                leg.symbol,
+            )
+            return order
+
+        refreshed = order
+        for attempt in range(self._ORDER_STATUS_ATTEMPTS):
+            try:
+                latest = self.exchange.fetch_order(order_id, leg.symbol)
+            except Exception as exc:  # pragma: no cover - ccxt/network failure
+                logger.debug(
+                    "Unable to fetch order %s for %s on attempt %s: %s",
+                    order_id,
+                    leg.symbol,
+                    attempt + 1,
+                    exc,
+                )
+                break
+            if latest:
+                refreshed = {**refreshed, **latest}
+            if self._extract_realised_amount(refreshed, leg) is not None:
+                return refreshed
+            time.sleep(self._ORDER_STATUS_DELAY)
+
+        try:
+            trades = self.exchange.fetch_my_trades(
+                leg.symbol,
+                limit=self._TRADE_HISTORY_LIMIT,
+            )
+        except Exception as exc:  # pragma: no cover - ccxt/network failure
+            logger.debug(
+                "Unable to fetch trades for %s when resolving order %s: %s",
+                leg.symbol,
+                order_id,
+                exc,
+            )
+            return refreshed
+
+        matched_trades = [
+            trade
+            for trade in trades
+            if self._extract_order_id(trade) == order_id or trade.get("order") == order_id
+        ]
+        if not matched_trades:
+            return refreshed
+
+        augmented = self._augment_order_with_trades(refreshed, matched_trades, leg)
+        if self._extract_realised_amount(augmented, leg) is None:
+            logger.debug(
+                "Trades for %s order %s did not expose realised amounts; falling back to simulation",
+                leg.symbol,
+                order_id,
+            )
+            return refreshed
+        return augmented
+
+    def _augment_order_with_trades(
+        self,
+        order: Dict[str, Any],
+        trades: Sequence[Dict[str, Any]],
+        leg: TriangularTradeLeg,
+    ) -> Dict[str, Any]:
+        total_filled = sum(self._safe_float(trade.get("amount")) or 0.0 for trade in trades)
+        total_cost = sum(self._safe_float(trade.get("cost")) or 0.0 for trade in trades)
+
+        fees: List[Dict[str, Any]] = []
+        for trade in trades:
+            fee_field = trade.get("fee")
+            if isinstance(fee_field, dict):
+                fees.append(fee_field)
+            elif isinstance(fee_field, list):
+                fees.extend(f for f in fee_field if isinstance(f, dict))
+
+        existing_fees = list(self._normalised_fees(order))
+        augmented: Dict[str, Any] = {**order}
+        if total_filled and not self._safe_float(augmented.get("filled")):
+            augmented["filled"] = total_filled
+        if total_cost and not self._safe_float(augmented.get("cost")):
+            augmented["cost"] = total_cost
+
+        if fees:
+            merged_fees = list(existing_fees)
+            for fee in fees:
+                if fee not in merged_fees:
+                    merged_fees.append(fee)
+            if len(merged_fees) == 1:
+                augmented["fee"] = merged_fees[0]
+                augmented.pop("fees", None)
+            else:
+                augmented["fees"] = merged_fees
+
+        augmented.setdefault("trades", trades)
+
+        # When trades expose the quantities in the quote currency for buy orders,
+        # ensure ``amount`` mirrors the filled base asset volume.
+        if leg.side == "buy" and total_filled:
+            augmented.setdefault("amount", total_filled)
+        elif leg.side == "sell" and total_filled:
+            augmented.setdefault("amount", total_filled)
+
+        return augmented
+
+    @staticmethod
+    def _extract_order_id(payload: Dict[str, Any]) -> Optional[str]:
+        order_id = payload.get("id") or payload.get("order")
+        if order_id:
+            return str(order_id)
+        info = payload.get("info")
+        if isinstance(info, dict):
+            nested_id = info.get("id") or info.get("orderId") or info.get("order_id")
+            if nested_id:
+                return str(nested_id)
+        return None
 
     @staticmethod
     def _normalised_fees(order: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
