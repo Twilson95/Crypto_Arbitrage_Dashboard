@@ -10,7 +10,7 @@ At the top of the script you will find a handful of boolean defaults (for exampl
 python -m cryptopy.scripts.trading.run_triangular_arbitrage \
   --starting-currency USD \
   --starting-amount 100 \
-  --min-profit-percentage 0.2
+  --min-profit-percentage 0.1
 ```
 
 Key options:
@@ -19,6 +19,7 @@ Key options:
 - `--enable-execution` toggles order placement. Omit the flag to keep execution disabled and simply review the logs.
 - `--live-trading` switches from simulated test orders to real exchange orders. It requires `--enable-execution`.
 - `--use-testnet` enables the sandbox/testnet for exchanges that provide one.
+- `--min-profit-percentage` defaults to `0.1` so trades require at least a 0.1% projected gain before execution; increase it to stay conservative.
 - `--max-executions` stops the runner after it successfully executes the requested number of opportunities so you can review the results before continuing.
 - `--trade-log` stores each simulated or live leg in a CSV file for auditing (defaults to the `TRADE_LOG_PATH_DEFAULT` location if left unspecified).
 - `--websocket-timeout` bounds how long the watcher will wait for a streamed ticker update before temporarily polling the REST API instead.

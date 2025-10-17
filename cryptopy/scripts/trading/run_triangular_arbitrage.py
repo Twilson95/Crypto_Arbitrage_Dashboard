@@ -45,6 +45,7 @@ DISABLE_WEBSOCKET_DEFAULT = False
 LOG_LEVEL_DEFAULT = "DEBUG"
 MAX_ROUTE_LENGTH_DEFAULT: Optional[int] = 3
 MAX_EXECUTIONS_DEFAULT: Optional[int] = None
+MIN_PROFIT_PERCENTAGE_DEFAULT = 0.1
 EVALUATION_INTERVAL_DEFAULT = 30.0
 WEBSOCKET_TIMEOUT_DEFAULT = 10.0
 PRICE_REFRESH_INTERVAL_DEFAULT = 30.0
@@ -1118,7 +1119,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--min-profit-percentage",
         type=float,
-        default=0.0,
+        default=MIN_PROFIT_PERCENTAGE_DEFAULT,
         help="Minimum profit percentage required before executing an opportunity.",
     )
     parser.add_argument(
