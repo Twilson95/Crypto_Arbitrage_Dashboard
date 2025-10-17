@@ -3,6 +3,7 @@ import importlib.util
 import pathlib
 import sys
 from types import SimpleNamespace
+from typing import Dict
 
 import csv
 import pytest
@@ -55,6 +56,41 @@ class MockExchange:
 
     def create_market_order(self, symbol, side, amount, **kwargs):
         order = {"symbol": symbol, "side": side, "amount": amount, **kwargs}
+        self.orders.append(order)
+        return order
+
+
+@dataclass
+class AdaptiveMockExchange(MockExchange):
+    price_map: Dict[tuple, float] = None  # type: ignore[assignment]
+    fee_overrides: Dict[tuple, float] = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.price_map is None:
+            self.price_map = {}
+        if self.fee_overrides is None:
+            self.fee_overrides = {}
+
+    def create_market_order(self, symbol, side, amount, **kwargs):
+        price = self.price_map.get((symbol, side), 1.0)
+        fee_rate = self.fee_overrides.get((symbol, side), self.fee)
+        base, quote = symbol.split("/")
+        order = {
+            "symbol": symbol,
+            "side": side,
+            "amount": amount,
+            "filled": amount,
+            "price": price,
+            "average": price,
+            **kwargs,
+        }
+        if side == "buy":
+            order["cost"] = amount * price
+            order["fees"] = [{"currency": base, "cost": amount * fee_rate}]
+        else:
+            order["cost"] = amount * price
+            order["fees"] = [{"currency": quote, "cost": amount * price * fee_rate}]
         self.orders.append(order)
         return order
 
@@ -152,6 +188,47 @@ def test_executor_places_orders_in_sequence(tmp_path):
         pytest.approx(float(row["fee_rate"]), rel=1e-9) == exchange.fee for row in rows
     )
     assert all(float(row["fee_impact"]) >= 0 for row in rows)
+
+
+def test_executor_uses_realised_amounts_to_size_orders():
+    price_map = {
+        ("BTC/USD", "buy"): 100.0,
+        ("BTC/ETH", "sell"): 0.05,
+        ("ETH/USD", "sell"): 2000.0,
+    }
+    fee_overrides = {("BTC/USD", "buy"): 0.01}
+    exchange = AdaptiveMockExchange(price_map=price_map, fee_overrides=fee_overrides)
+    calculator = TriangularArbitrageCalculator(exchange)  # type: ignore[arg-type]
+    executor = TriangularArbitrageExecutor(exchange, dry_run=False)  # type: ignore[arg-type]
+    route = TriangularRoute(("BTC/USD", "BTC/ETH", "ETH/USD"), "USD")
+
+    prices = {
+        "BTC/USD": make_price_snapshot("BTC/USD", bid=99.5, ask=100.0),
+        "BTC/ETH": make_price_snapshot("BTC/ETH", bid=0.05, ask=0.051),
+        "ETH/USD": make_price_snapshot("ETH/USD", bid=1995.0, ask=2000.0),
+    }
+
+    opportunity = calculator.evaluate_route(route, prices, starting_amount=100.0)
+    assert opportunity is not None
+
+    executor.execute(opportunity)
+
+    assert len(exchange.orders) == 3
+    first_order, second_order, third_order = exchange.orders
+
+    # The buy leg used the requested amount.
+    assert pytest.approx(first_order["amount"], rel=1e-9) == opportunity.trades[0].traded_quantity
+
+    # Because additional fees were charged in the base currency, the sell leg
+    # should shrink to the realised balance instead of the original simulation.
+    assert second_order["amount"] < opportunity.trades[1].traded_quantity
+
+    realised_after_buy = first_order["filled"] - first_order["fees"][0]["cost"]
+    assert pytest.approx(second_order["amount"], rel=1e-9) == pytest.approx(realised_after_buy, rel=1e-9)
+
+    # The final leg should operate on the proceeds of the second leg.
+    expected_usd = second_order["cost"] - second_order["fees"][0]["cost"]
+    assert pytest.approx(third_order["cost"] - third_order["fees"][0]["cost"], rel=1e-9) == pytest.approx(expected_usd, rel=1e-9)
 
 
 def test_find_routes_respects_max_route_length():
