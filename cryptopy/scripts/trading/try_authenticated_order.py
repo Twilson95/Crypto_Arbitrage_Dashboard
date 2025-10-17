@@ -16,9 +16,7 @@ from cryptopy.src.trading.triangular_arbitrage.exchange import (
 
 # Defaults mirror the triangular arbitrage runner so operators can reuse configs.
 EXCHANGE_DEFAULT = "kraken"
-DEFAULT_CONFIG_PATH = (
-    Path(__file__).resolve().parents[3] / "config" / "exchange_config.yaml"
-)
+DEFAULT_CONFIG_PATH = "../../config/exchange_config.yaml"
 CONFIG_SECTION_BY_EXCHANGE = {
     "kraken": "kraken_websocket",
 }

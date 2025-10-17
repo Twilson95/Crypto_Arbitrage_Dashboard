@@ -29,7 +29,6 @@ from cryptopy.src.trading.triangular_arbitrage import (
 
 logger = logging.getLogger(__name__)
 
-
 # ---------------------------------------------------------------------------
 # Runtime defaults
 # ---------------------------------------------------------------------------
@@ -38,31 +37,38 @@ logger = logging.getLogger(__name__)
 # still take precedence when explicitly supplied.
 EXCHANGE_DEFAULT = "kraken"
 STARTING_CURRENCY_DEFAULT = "USD"
-ENABLE_EXECUTION_DEFAULT = False
-LIVE_TRADING_DEFAULT = False
-USE_TESTNET_DEFAULT = True
+ENABLE_EXECUTION_DEFAULT = True
+LIVE_TRADING_DEFAULT = True
+USE_TESTNET_DEFAULT = False
 DISABLE_WEBSOCKET_DEFAULT = False
-LOG_LEVEL_DEFAULT = "DEBUG"
+LOG_LEVEL_DEFAULT = "INFO"
 MAX_ROUTE_LENGTH_DEFAULT: Optional[int] = 3
-MAX_EXECUTIONS_DEFAULT: Optional[int] = None
-MIN_PROFIT_PERCENTAGE_DEFAULT = 0.1
+MAX_EXECUTIONS_DEFAULT: Optional[int] = 1
+MIN_PROFIT_PERCENTAGE_DEFAULT = 0.05
 EVALUATION_INTERVAL_DEFAULT = 30.0
-WEBSOCKET_TIMEOUT_DEFAULT = 10.0
-PRICE_REFRESH_INTERVAL_DEFAULT = 30.0
+WEBSOCKET_TIMEOUT_DEFAULT = 1_000_000.0
+PRICE_REFRESH_INTERVAL_DEFAULT = 3_000_000.0
 PRICE_MAX_AGE_DEFAULT = 60.0
-ASSET_FILTER_DEFAULT: Sequence[str] = ()
+ASSET_FILTER_DEFAULT: Sequence[str] = ("USD",
+                                       "USDC","USDT","USDG",
+                                       "BTC","ETH","SOL","DOGE","ADA","XRP",
+                                       "LTC","BCH","SUI","LINK","SEI","TAO","PEPE","WIF","SHIB",
+                                       "APT","TIA","AAVE","NEAR","DOT","AVAX","ICP","UNI","INJ",
+                                       "FLR","PAXG","TRX","XLM","FIL","ARB","LDO","OP","STRK",
+                                       "ATOM","GRT","ALGO","KAVA","MINA","KSM",
+                                       "ZEC","PAXG","CHF","BNB","SPX","ENA","STBL","ZORA","USELESS",
+                                       "FARTCOIN","AVAX","XPL","PUMP","KAS","CRV","DASH"
+                                       )
 
 # Location where executed trades will be persisted when trade logging is enabled.
-TRADE_LOG_PATH_DEFAULT: Optional[Path] = (
-    Path(__file__).resolve().parents[3] / "logs" / "triangular_trades.csv"
-)
+TRADE_LOG_PATH_DEFAULT: Optional[str] = "../../../data/logs/triangular_trades.csv"
 
 # Optional configuration file used to source API credentials when present.
-DEFAULT_CONFIG_PATH = (
-    Path(__file__).resolve().parents[3] / "config" / "exchange_config.yaml"
-)
+DEFAULT_CONFIG_PATH = "../../config/exchange_config.yaml"
 CONFIG_SECTION_BY_EXCHANGE = {
     "kraken": "kraken_websocket",
+    "bitmex": "Bitmex",
+    "coinbase": "Coinbase"
 }
 
 MARKET_FILTER_REASON_DESCRIPTIONS = {
