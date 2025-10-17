@@ -58,8 +58,30 @@ class MockExchange:
 
     def create_market_order(self, symbol, side, amount, **kwargs):
         order_id = f"order-{len(self.orders) + 1}"
-        order = {"id": order_id, "symbol": symbol, "side": side, "amount": amount, **kwargs}
+        base, quote = symbol.split("/")
+        order = {
+            "id": order_id,
+            "symbol": symbol,
+            "side": side,
+            "amount": amount,
+            "filled": amount,
+            "cost": amount,
+            "average": 1.0,
+            "status": "closed",
+            **kwargs,
+        }
+        fee_currency = base if side == "buy" else quote
+        order["fees"] = [{"currency": fee_currency, "cost": 0.0}]
         self.orders.append(order)
+        trade = {
+            "id": f"trade-{len(self.trades) + 1}",
+            "order": order_id,
+            "symbol": symbol,
+            "amount": amount,
+            "cost": order["cost"],
+            "fee": order["fees"][0],
+        }
+        self.trades.append(trade)
         return order
 
     def fetch_order(self, order_id, symbol):  # noqa: D401 - simple passthrough

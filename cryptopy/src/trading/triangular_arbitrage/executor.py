@@ -23,6 +23,8 @@ class TriangularArbitrageExecutor:
 
     _ORDER_STATUS_ATTEMPTS = 5
     _ORDER_STATUS_DELAY = 0.2
+    _ORDER_COMPLETION_TIMEOUT = 15.0
+    _ORDER_POLL_INTERVAL = 0.5
     _TRADE_HISTORY_LIMIT = 10
 
     def __init__(
@@ -57,28 +59,15 @@ class TriangularArbitrageExecutor:
                 amount,
                 test_order=self.dry_run,
             )
-            if not self.dry_run:
-                order = self._resolve_order_payload(order, leg)
-            orders.append(order)
-
             if self.dry_run:
+                orders.append(order)
                 available_amount = leg.amount_out * scale
                 continue
 
-            realised_amount = self._extract_realised_amount(order, leg)
-            if realised_amount is None:
-                realised_amount = leg.amount_out * scale
-                logger.debug(
-                    "Falling back to simulated amount for %s leg %s due to incomplete order payload",
-                    leg.side,
-                    leg.symbol,
-                )
+            finalised_order, realised_amount = self._finalise_order_execution(order, leg)
+            orders.append(finalised_order)
 
-            if leg.side == "buy":
-                # We spent the previously held currency; the new balance is whatever was acquired.
-                available_amount = realised_amount
-            else:
-                available_amount = realised_amount
+            available_amount = realised_amount
 
         if self.trade_log_path is not None:
             self._log_trades(opportunity, orders)
@@ -256,23 +245,77 @@ class TriangularArbitrageExecutor:
         realised = max(cost - quote_fee, 0.0)
         return realised
 
+    def _finalise_order_execution(
+        self,
+        order: Dict[str, Any],
+        leg: TriangularTradeLeg,
+    ) -> Tuple[Dict[str, Any], float]:
+        """Ensure an order is fully executed and return its realised amount."""
+
+        order_id = self._extract_order_id(order)
+        if not order_id:
+            raise RuntimeError(
+                f"Exchange response for {leg.side} {leg.symbol} order is missing an id"
+            )
+
+        merged_order = {**order}
+        completion = self._wait_for_order_completion(order_id, leg.symbol)
+        if completion:
+            merged_order.update(completion)
+
+        resolved = self._resolve_order_payload(merged_order, leg, order_id)
+        realised_amount = self._extract_realised_amount(resolved, leg)
+        if realised_amount is None:
+            raise RuntimeError(
+                f"Unable to determine realised amount for order {order_id} on {leg.symbol}"
+            )
+
+        return resolved, realised_amount
+
+    def _wait_for_order_completion(self, order_id: str, symbol: str) -> Dict[str, Any]:
+        deadline = time.time() + self._ORDER_COMPLETION_TIMEOUT
+        latest_payload: Dict[str, Any] = {}
+
+        while time.time() < deadline:
+            try:
+                latest = self.exchange.fetch_order(order_id, symbol)
+            except Exception as exc:  # pragma: no cover - ccxt/network failure
+                logger.debug(
+                    "Unable to poll order %s for %s: %s",
+                    order_id,
+                    symbol,
+                    exc,
+                )
+                break
+
+            if latest:
+                latest_payload.update(latest)
+
+            status = str(latest_payload.get("status") or "").lower()
+            filled = self._safe_float(latest_payload.get("filled")) or 0.0
+            remaining = self._safe_float(latest_payload.get("remaining"))
+
+            if status in {"closed", "canceled", "cancelled", "rejected"}:
+                break
+            if remaining is not None and remaining <= 0:
+                break
+            if status == "open" and filled > 0 and remaining is None:
+                # Some exchanges omit ``remaining`` when fully filled.
+                break
+
+            time.sleep(self._ORDER_POLL_INTERVAL)
+
+        return latest_payload
+
     def _resolve_order_payload(
         self,
         order: Dict[str, Any],
         leg: TriangularTradeLeg,
+        order_id: str,
     ) -> Dict[str, Any]:
         """Enrich an order payload with realised execution details when missing."""
 
         if self._extract_realised_amount(order, leg) is not None:
-            return order
-
-        order_id = self._extract_order_id(order)
-        if not order_id:
-            logger.debug(
-                "Order payload for %s leg %s lacks an id; unable to refresh execution details",
-                leg.side,
-                leg.symbol,
-            )
             return order
 
         refreshed = order
@@ -317,13 +360,6 @@ class TriangularArbitrageExecutor:
             return refreshed
 
         augmented = self._augment_order_with_trades(refreshed, matched_trades, leg)
-        if self._extract_realised_amount(augmented, leg) is None:
-            logger.debug(
-                "Trades for %s order %s did not expose realised amounts; falling back to simulation",
-                leg.symbol,
-                order_id,
-            )
-            return refreshed
         return augmented
 
     def _augment_order_with_trades(
