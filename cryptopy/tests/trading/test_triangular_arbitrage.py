@@ -236,6 +236,25 @@ def test_executor_places_orders_in_sequence(tmp_path):
         pytest.approx(float(row["fee_rate"]), rel=1e-9) == exchange.fee for row in rows
     )
     assert all(float(row["fee_impact"]) >= 0 for row in rows)
+    assert all(row["actual_amount_in"] == row["amount_in"] for row in rows)
+    assert all(row["actual_amount_out"] == row["amount_out"] for row in rows)
+    assert all(
+        row["actual_amount_out_without_fee"] == row["amount_out_without_fee"]
+        for row in rows
+    )
+    assert all(row["actual_traded_quantity"] == row["traded_quantity"] for row in rows)
+    assert all(row["actual_final_amount"] == row["final_amount"] for row in rows)
+    assert all(
+        row["actual_final_amount_without_fees"] == row["final_amount_without_fees"]
+        for row in rows
+    )
+    assert all(row["actual_profit"] == row["profit"] for row in rows)
+    assert all(
+        row["actual_profit_without_fees"] == row["profit_without_fees"] for row in rows
+    )
+    assert all(row["actual_fee_impact"] == row["fee_impact"] for row in rows)
+    assert all(row["actual_profit_percentage"] == row["profit_percentage"] for row in rows)
+    assert all(row["actual_fee_breakdown"] == "{}" for row in rows)
 
 
 def test_executor_uses_realised_amounts_to_size_orders():

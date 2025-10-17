@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -43,6 +44,7 @@ class TriangularArbitrageExecutor:
             raise ValueError("Cannot execute an unprofitable opportunity")
 
         orders: List[Dict[str, Any]] = []
+        execution_records: List[Tuple[TriangularTradeLeg, Dict[str, Any], Dict[str, Any]]] = []
         available_amount = opportunity.starting_amount
 
         for leg in opportunity.trades:
@@ -61,16 +63,51 @@ class TriangularArbitrageExecutor:
             )
             if self.dry_run:
                 orders.append(order)
+                metrics = self._planned_execution_metrics(leg)
+                execution_records.append((leg, order, metrics))
                 available_amount = leg.amount_out * scale
                 continue
 
-            finalised_order, realised_amount = self._finalise_order_execution(order, leg)
+            finalised_order, metrics = self._finalise_order_execution(order, leg)
             orders.append(finalised_order)
+            execution_records.append((leg, finalised_order, metrics))
 
-            available_amount = realised_amount
+            available_amount = metrics["amount_out"]
+
+        actual_final_amount = (
+            opportunity.final_amount if self.dry_run else available_amount
+        )
+        actual_final_without_fees = (
+            opportunity.final_amount_without_fees
+            if self.dry_run
+            else (
+                execution_records[-1][2]["amount_out_without_fee"]
+                if execution_records
+                else opportunity.starting_amount
+            )
+        )
+        actual_profit = actual_final_amount - opportunity.starting_amount
+        actual_profit_without_fees = (
+            actual_final_without_fees - opportunity.starting_amount
+        )
+        actual_profit_percentage = (
+            (actual_final_amount / opportunity.starting_amount - 1.0) * 100.0
+            if opportunity.starting_amount
+            else 0.0
+        )
+        actual_fee_impact = actual_final_without_fees - actual_final_amount
 
         if self.trade_log_path is not None:
-            self._log_trades(opportunity, orders)
+            self._log_trades(
+                opportunity,
+                execution_records,
+                actual_final_amount,
+                actual_final_without_fees,
+                actual_profit,
+                actual_profit_without_fees,
+                actual_profit_percentage,
+                actual_fee_impact,
+            )
 
         return orders
 
@@ -80,7 +117,13 @@ class TriangularArbitrageExecutor:
     def _log_trades(
         self,
         opportunity: TriangularOpportunity,
-        orders: Sequence[Dict[str, Any]],
+        execution_records: Sequence[Tuple[TriangularTradeLeg, Dict[str, Any], Dict[str, Any]]],
+        actual_final_amount: float,
+        actual_final_without_fees: float,
+        actual_profit: float,
+        actual_profit_without_fees: float,
+        actual_profit_percentage: float,
+        actual_fee_impact: float,
     ) -> None:
         assert self.trade_log_path is not None
         log_path = self.trade_log_path
@@ -93,10 +136,15 @@ class TriangularArbitrageExecutor:
             "amount_in",
             "amount_out",
             "amount_out_without_fee",
+            "actual_amount_in",
+            "actual_amount_out",
+            "actual_amount_out_without_fee",
             "average_price",
             "fee_rate",
             "fee_paid",
             "traded_quantity",
+            "actual_traded_quantity",
+            "actual_fee_breakdown",
             "starting_amount",
             "final_amount",
             "final_amount_without_fees",
@@ -104,6 +152,12 @@ class TriangularArbitrageExecutor:
             "profit_without_fees",
             "fee_impact",
             "profit_percentage",
+            "actual_final_amount",
+            "actual_final_amount_without_fees",
+            "actual_profit",
+            "actual_profit_without_fees",
+            "actual_fee_impact",
+            "actual_profit_percentage",
             "dry_run",
             "order_id",
         ]
@@ -115,7 +169,7 @@ class TriangularArbitrageExecutor:
             if not file_exists:
                 writer.writeheader()
 
-            for leg, order in zip(opportunity.trades, orders):
+            for leg, order, metrics in execution_records:
                 writer.writerow(
                     {
                         "timestamp": row_time,
@@ -124,10 +178,21 @@ class TriangularArbitrageExecutor:
                         "amount_in": leg.amount_in,
                         "amount_out": leg.amount_out,
                         "amount_out_without_fee": leg.amount_out_without_fee,
+                        "actual_amount_in": metrics.get("amount_in", leg.amount_in),
+                        "actual_amount_out": metrics.get("amount_out", leg.amount_out),
+                        "actual_amount_out_without_fee": metrics.get(
+                            "amount_out_without_fee", leg.amount_out_without_fee
+                        ),
                         "average_price": leg.average_price,
                         "fee_rate": leg.fee_rate,
                         "fee_paid": leg.fee_paid,
                         "traded_quantity": leg.traded_quantity,
+                        "actual_traded_quantity": metrics.get(
+                            "traded_quantity", leg.traded_quantity
+                        ),
+                        "actual_fee_breakdown": json.dumps(
+                            metrics.get("fee_breakdown", {}), sort_keys=True
+                        ),
                         "starting_amount": opportunity.starting_amount,
                         "final_amount": opportunity.final_amount,
                         "final_amount_without_fees": opportunity.final_amount_without_fees,
@@ -135,6 +200,12 @@ class TriangularArbitrageExecutor:
                         "profit_without_fees": opportunity.profit_without_fees,
                         "fee_impact": opportunity.fee_impact,
                         "profit_percentage": opportunity.profit_percentage,
+                        "actual_final_amount": actual_final_amount,
+                        "actual_final_amount_without_fees": actual_final_without_fees,
+                        "actual_profit": actual_profit,
+                        "actual_profit_without_fees": actual_profit_without_fees,
+                        "actual_fee_impact": actual_fee_impact,
+                        "actual_profit_percentage": actual_profit_percentage,
                         "dry_run": self.dry_run,
                         "order_id": order.get("id"),
                     }
@@ -197,6 +268,15 @@ class TriangularArbitrageExecutor:
 
         return desired_amount, 1.0
 
+    @staticmethod
+    def _planned_execution_metrics(leg: TriangularTradeLeg) -> Dict[str, float]:
+        return {
+            "amount_in": float(leg.amount_in),
+            "amount_out": float(leg.amount_out),
+            "amount_out_without_fee": float(leg.amount_out_without_fee),
+            "traded_quantity": float(leg.traded_quantity),
+        }
+
     def _extract_realised_amount(
         self,
         order: Dict[str, Any],
@@ -245,12 +325,68 @@ class TriangularArbitrageExecutor:
         realised = max(cost - quote_fee, 0.0)
         return realised
 
+    def _extract_execution_metrics(
+        self,
+        order: Dict[str, Any],
+        leg: TriangularTradeLeg,
+    ) -> Dict[str, Any]:
+        metrics = self._planned_execution_metrics(leg)
+
+        base, quote = leg.symbol.split("/")
+        filled = self._safe_float(order.get("filled"))
+        if filled is None:
+            filled = self._safe_float(order.get("amount"))
+
+        average_price = self._safe_float(order.get("average") or order.get("price"))
+        cost = self._safe_float(order.get("cost"))
+        if cost is None and filled is not None and average_price is not None:
+            cost = average_price * filled
+
+        fee_totals: Dict[str, float] = {}
+        for fee in self._normalised_fees(order):
+            currency = fee.get("currency")
+            cost_value = self._safe_float(fee.get("cost"))
+            if not currency or cost_value is None:
+                continue
+            currency_code = str(currency).upper()
+            fee_totals[currency_code] = fee_totals.get(currency_code, 0.0) + cost_value
+
+        base_fee = fee_totals.get(base) or fee_totals.get(base.upper(), 0.0)
+        quote_fee = fee_totals.get(quote) or fee_totals.get(quote.upper(), 0.0)
+        base_fee = float(base_fee or 0.0)
+        quote_fee = float(quote_fee or 0.0)
+
+        traded_quantity = filled if filled is not None else metrics["traded_quantity"]
+        if traded_quantity is None:  # pragma: no cover - defensive guard
+            traded_quantity = metrics["traded_quantity"]
+
+        if leg.side == "buy":
+            amount_in = (cost if cost is not None else metrics["amount_in"]) + quote_fee
+            amount_out_without_fee = traded_quantity
+            amount_out = max(traded_quantity - base_fee, 0.0)
+        else:
+            amount_in = traded_quantity + base_fee
+            amount_out_without_fee = cost if cost is not None else metrics["amount_out_without_fee"]
+            amount_out = max(amount_out_without_fee - quote_fee, 0.0)
+
+        metrics.update(
+            {
+                "amount_in": float(amount_in),
+                "amount_out": float(amount_out),
+                "amount_out_without_fee": float(amount_out_without_fee),
+                "traded_quantity": float(traded_quantity),
+                "fee_breakdown": {k: float(v) for k, v in fee_totals.items()},
+            }
+        )
+
+        return metrics
+
     def _finalise_order_execution(
         self,
         order: Dict[str, Any],
         leg: TriangularTradeLeg,
-    ) -> Tuple[Dict[str, Any], float]:
-        """Ensure an order is fully executed and return its realised amount."""
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Ensure an order is fully executed and return its realised metrics."""
 
         order_id = self._extract_order_id(order)
         if not order_id:
@@ -264,13 +400,14 @@ class TriangularArbitrageExecutor:
             merged_order.update(completion)
 
         resolved = self._resolve_order_payload(merged_order, leg, order_id)
-        realised_amount = self._extract_realised_amount(resolved, leg)
+        metrics = self._extract_execution_metrics(resolved, leg)
+        realised_amount = metrics.get("amount_out")
         if realised_amount is None:
             raise RuntimeError(
                 f"Unable to determine realised amount for order {order_id} on {leg.symbol}"
             )
 
-        return resolved, realised_amount
+        return resolved, metrics
 
     def _wait_for_order_completion(self, order_id: str, symbol: str) -> Dict[str, Any]:
         deadline = time.time() + self._ORDER_COMPLETION_TIMEOUT
