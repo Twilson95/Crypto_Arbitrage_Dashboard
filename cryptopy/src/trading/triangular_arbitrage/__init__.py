@@ -11,6 +11,11 @@ from cryptopy.src.trading.triangular_arbitrage.models import (
     TriangularRoute,
     TriangularTradeLeg,
 )
+from cryptopy.src.trading.triangular_arbitrage.slippage import (
+    LegSlippage,
+    SlippageSimulation,
+    simulate_opportunity_with_order_books,
+)
 
 __all__ = [
     "ExchangeConnection",
@@ -23,4 +28,7 @@ __all__ = [
     "TriangularOpportunity",
     "TriangularRoute",
     "TriangularTradeLeg",
+    "LegSlippage",
+    "SlippageSimulation",
+    "simulate_opportunity_with_order_books",
 ]
