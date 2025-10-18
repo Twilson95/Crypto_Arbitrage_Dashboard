@@ -306,6 +306,7 @@ class SlippageDecision:
     total_slippage_pct: float
     scale: float
     max_leg_slippage_pct: float
+    max_leg_output_slippage_pct: float
 
 
 @dataclass(frozen=True)
@@ -891,11 +892,16 @@ async def evaluate_and_execute(
                     (leg.slippage_pct for leg in simulation.legs),
                     default=0.0,
                 )
+                max_output_slippage = max(
+                    (leg.output_slippage_pct for leg in simulation.legs),
+                    default=0.0,
+                )
                 return SlippageDecision(
                     simulation,
                     total_slippage,
                     scale,
                     max_leg_slippage,
+                    max_output_slippage,
                 )
 
             def _decision_within_threshold(
@@ -908,11 +914,13 @@ async def evaluate_and_execute(
                     return (
                         decision.total_slippage_pct <= epsilon
                         and decision.max_leg_slippage_pct <= epsilon
+                        and decision.max_leg_output_slippage_pct <= epsilon
                     )
                 boundary = limit + epsilon
                 return (
                     decision.total_slippage_pct <= boundary
                     and decision.max_leg_slippage_pct <= boundary
+                    and decision.max_leg_output_slippage_pct <= boundary
                 )
 
             initial_decision: Optional[SlippageDecision]
@@ -944,9 +952,10 @@ async def evaluate_and_execute(
                 slippage_decision = initial_decision
             elif slippage_action == "reject":
                 logger.info(
-                    "Skipping opportunity because estimated slippage %.4f%% (max leg %.4f%%) exceeds configured maximum %.4f%%.",
+                    "Skipping opportunity because estimated slippage %.4f%% (max leg price %.4f%% / size %.4f%%) exceeds configured maximum %.4f%%.",
                     initial_decision.total_slippage_pct,
                     initial_decision.max_leg_slippage_pct,
+                    initial_decision.max_leg_output_slippage_pct,
                     threshold,
                 )
                 continue
@@ -983,10 +992,11 @@ async def evaluate_and_execute(
                         low = trial
                     else:
                         logger.debug(
-                            "Rejected scale %.2f%%: total slippage %.4f%%, max leg %.4f%% (threshold %.4f%%)",
+                            "Rejected scale %.2f%%: total slippage %.4f%%, max leg price %.4f%%, max leg size %.4f%% (threshold %.4f%%)",
                             trial * 100.0,
                             candidate.total_slippage_pct,
                             candidate.max_leg_slippage_pct,
+                            candidate.max_leg_output_slippage_pct,
                             threshold,
                         )
                         high = trial
@@ -1011,10 +1021,11 @@ async def evaluate_and_execute(
                         f"insufficient depth ({initial_error})"
                         if initial_decision is None
                         else (
-                            "slippage total %.4f%% / max leg %.4f%% > %.4f%%"
+                            "slippage total %.4f%% / max leg price %.4f%% / size %.4f%% > %.4f%%"
                             % (
                                 initial_decision.total_slippage_pct,
                                 initial_decision.max_leg_slippage_pct,
+                                initial_decision.max_leg_output_slippage_pct,
                                 threshold,
                             )
                         )
@@ -1056,10 +1067,11 @@ async def evaluate_and_execute(
                         continue
                     if not _decision_within_threshold(usage_adjusted, threshold):
                         logger.info(
-                            "Skipping opportunity because usage fraction %.2f%% resulted in slippage %.4f%% (max leg %.4f%%) above the %.4f%% limit.",
+                            "Skipping opportunity because usage fraction %.2f%% resulted in slippage %.4f%% (max leg price %.4f%% / size %.4f%%) above the %.4f%% limit.",
                             usage_fraction * 100.0,
                             usage_adjusted.total_slippage_pct,
                             usage_adjusted.max_leg_slippage_pct,
+                            usage_adjusted.max_leg_output_slippage_pct,
                             threshold,
                         )
                         continue
@@ -1074,13 +1086,14 @@ async def evaluate_and_execute(
                 slippage_decision = final_decision
                 best = final_decision.simulation.opportunity
                 logger.info(
-                    "Slippage-adjusted plan: scale=%.2f%% final_amount=% .6f profit=% .6f (% .4f%%) total_slippage=% .4f%% (max leg %.4f%%)",
+                    "Slippage-adjusted plan: scale=%.2f%% final_amount=% .6f profit=% .6f (% .4f%%) total_slippage=% .4f%% (max leg price %.4f%% / size %.4f%%)",
                     slippage_decision.scale * 100.0,
                     best.final_amount,
                     best.profit,
                     best.profit_percentage,
                     slippage_decision.total_slippage_pct,
                     slippage_decision.max_leg_slippage_pct,
+                    slippage_decision.max_leg_output_slippage_pct,
                 )
                 if not math.isclose(best.starting_amount, raw_best.starting_amount, rel_tol=0.0, abs_tol=1e-9):
                     logger.info(
@@ -1090,7 +1103,10 @@ async def evaluate_and_execute(
                     )
                 if slippage_decision.simulation.legs:
                     leg_details = ", ".join(
-                        f"{leg.symbol}:{leg.slippage_pct:.4f}%"
+                        (
+                            f"{leg.symbol}:price {leg.slippage_pct:.4f}% size {leg.output_slippage_pct:.4f}%"
+                            f" expected_out {leg.expected_amount_out:.10f} -> actual_out {leg.actual_amount_out:.10f}"
+                        )
                         for leg in slippage_decision.simulation.legs
                     )
                     logger.info("Per-leg slippage estimates: %s", leg_details)

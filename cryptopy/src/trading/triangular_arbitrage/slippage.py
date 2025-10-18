@@ -25,6 +25,12 @@ class LegSlippage:
     best_price: float
     vwap_price: float
     slippage_pct: float
+    expected_amount_in: float
+    actual_amount_in: float
+    input_slippage_pct: float
+    expected_amount_out: float
+    actual_amount_out: float
+    output_slippage_pct: float
 
 
 @dataclass(frozen=True)
@@ -161,12 +167,21 @@ def simulate_opportunity_with_order_books(
     adjusted_trades: List[TriangularTradeLeg] = []
     leg_summaries: List[LegSlippage] = []
 
+    plan_scale = (
+        starting_amount / opportunity.starting_amount
+        if opportunity.starting_amount > 0
+        else 1.0
+    )
+
     for symbol, planned_leg in zip(opportunity.route.symbols, opportunity.trades):
         order_book = order_books.get(symbol)
         if order_book is None:
             raise KeyError(f"Missing order book snapshot for {symbol}")
 
         fee_rate = float(planned_leg.fee_rate)
+        expected_amount_in = float(planned_leg.amount_in) * plan_scale
+        expected_amount_out = float(planned_leg.amount_out) * plan_scale
+
         if planned_leg.side == "buy":
             base_acquired, quote_spent, best_price, vwap = _fill_buy_levels(
                 symbol,
@@ -179,6 +194,9 @@ def simulate_opportunity_with_order_books(
             base_without_fee_flow = (
                 quote_without_fees / vwap if vwap > 0 else 0.0
             )
+
+            actual_amount_in = quote_spent
+            actual_amount_out = base_after_fee
 
             adjusted_trades.append(
                 TriangularTradeLeg(
@@ -199,7 +217,7 @@ def simulate_opportunity_with_order_books(
             slippage_pct = (
                 ((vwap - best_price) / best_price) * 100.0 if best_price else 0.0
             )
-        else:
+        elif planned_leg.side == "sell":
             quote_acquired, base_sold, best_price, vwap = _fill_sell_levels(
                 symbol,
                 order_book,
@@ -209,6 +227,9 @@ def simulate_opportunity_with_order_books(
             quote_after_fee = quote_acquired - fee_paid
             base_without_fee = current_amount_without_fees
             quote_without_fee_flow = base_without_fee * vwap
+
+            actual_amount_in = base_sold
+            actual_amount_out = quote_after_fee
 
             adjusted_trades.append(
                 TriangularTradeLeg(
@@ -229,6 +250,8 @@ def simulate_opportunity_with_order_books(
             slippage_pct = (
                 ((best_price - vwap) / best_price) * 100.0 if best_price else 0.0
             )
+        else:
+            raise ValueError(f"Unsupported trade side {planned_leg.side!r} for {symbol}")
 
         leg_summaries.append(
             LegSlippage(
@@ -237,6 +260,20 @@ def simulate_opportunity_with_order_books(
                 best_price=best_price,
                 vwap_price=vwap,
                 slippage_pct=slippage_pct,
+                expected_amount_in=expected_amount_in,
+                actual_amount_in=actual_amount_in,
+                input_slippage_pct=(
+                    ((expected_amount_in - actual_amount_in) / expected_amount_in) * 100.0
+                    if expected_amount_in
+                    else 0.0
+                ),
+                expected_amount_out=expected_amount_out,
+                actual_amount_out=actual_amount_out,
+                output_slippage_pct=(
+                    ((expected_amount_out - actual_amount_out) / expected_amount_out) * 100.0
+                    if expected_amount_out
+                    else 0.0
+                ),
             )
         )
 
