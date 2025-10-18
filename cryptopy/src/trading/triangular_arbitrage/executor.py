@@ -40,6 +40,8 @@ class TriangularArbitrageExecutor:
     _ORDER_COMPLETION_TIMEOUT = 15.0
     _ORDER_POLL_INTERVAL = 0.5
     _TRADE_HISTORY_LIMIT = 10
+    _BALANCE_RESERVE_RATIO = 5e-4
+    _BALANCE_RESERVE_ABSOLUTE = 1e-9
 
     PARTIAL_FILL_BEHAVIOURS = {"wait", "progressive"}
 
@@ -561,7 +563,7 @@ class TriangularArbitrageExecutor:
         output_pct = (output_delta / planned_out * 100.0) if planned_out else 0.0
 
         logger.info(
-            "Slippage effect for %s %s: input %+,.8f (%+.4f%%) output %+,.8f (%+.4f%%)",
+            "Slippage effect for %s %s: input %+0.8f (%+.4f%%) output %+0.8f (%+.4f%%)",
             leg.side.upper(),
             leg.symbol,
             input_delta,
@@ -593,7 +595,7 @@ class TriangularArbitrageExecutor:
         )
 
         logger.info(
-            "Route execution slippage: final %+,.8f (%+.4f%%) without fees %+,.8f (%+.4f%%) profit %+,.4f%%",
+            "Route execution slippage: final %+0.8f (%+.4f%%) without fees %+0.8f (%+.4f%%) profit %+0.4f%%",
             delta_final,
             delta_final_pct,
             delta_wo_fee,
@@ -613,6 +615,34 @@ class TriangularArbitrageExecutor:
         whenever trading is enabled. The calculator's simulated amounts are used as
         a fallback when the exchange response does not expose the realised volume.
         """
+
+        def _reserve_available(amount: float) -> float:
+            if amount <= 0 or self.dry_run:
+                return float(amount)
+
+            buffered = amount * (1.0 - self._BALANCE_RESERVE_RATIO)
+            buffered -= self._BALANCE_RESERVE_ABSOLUTE
+            if buffered <= 0:
+                logger.debug(
+                    "Available balance %.12f for %s depleted after safety reserve.",
+                    amount,
+                    leg.symbol,
+                )
+                return 0.0
+
+            if buffered < amount:
+                logger.debug(
+                    "Applying %.6f%% balance reserve on %s: raw %.12f -> usable %.12f",
+                    self._BALANCE_RESERVE_RATIO * 100.0,
+                    leg.symbol,
+                    amount,
+                    buffered,
+                )
+                return buffered
+
+            return float(amount)
+
+        available_amount = _reserve_available(float(available_amount))
 
         desired_amount = float(leg.traded_quantity)
 
