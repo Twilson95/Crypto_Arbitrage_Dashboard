@@ -5,6 +5,7 @@ import asyncio
 import csv
 import json
 import logging
+import math
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,9 +41,6 @@ class TriangularArbitrageExecutor:
     _ORDER_COMPLETION_TIMEOUT = 15.0
     _ORDER_POLL_INTERVAL = 0.5
     _TRADE_HISTORY_LIMIT = 10
-    _BALANCE_RESERVE_RATIO = 5e-4
-    _BALANCE_RESERVE_ABSOLUTE = 1e-9
-
     PARTIAL_FILL_BEHAVIOURS = {"wait", "progressive"}
 
     def __init__(
@@ -616,33 +614,7 @@ class TriangularArbitrageExecutor:
         a fallback when the exchange response does not expose the realised volume.
         """
 
-        def _reserve_available(amount: float) -> float:
-            if amount <= 0 or self.dry_run:
-                return float(amount)
-
-            buffered = amount * (1.0 - self._BALANCE_RESERVE_RATIO)
-            buffered -= self._BALANCE_RESERVE_ABSOLUTE
-            if buffered <= 0:
-                logger.debug(
-                    "Available balance %.12f for %s depleted after safety reserve.",
-                    amount,
-                    leg.symbol,
-                )
-                return 0.0
-
-            if buffered < amount:
-                logger.debug(
-                    "Applying %.6f%% balance reserve on %s: raw %.12f -> usable %.12f",
-                    self._BALANCE_RESERVE_RATIO * 100.0,
-                    leg.symbol,
-                    amount,
-                    buffered,
-                )
-                return buffered
-
-            return float(amount)
-
-        available_amount = _reserve_available(float(available_amount))
+        available_amount = float(available_amount)
 
         desired_amount = float(leg.traded_quantity)
 
@@ -651,17 +623,30 @@ class TriangularArbitrageExecutor:
 
         def _finalise_amount(amount: float, scale: float) -> Tuple[float, float]:
             precision_fn = getattr(self.exchange, "amount_to_precision", None)
-            quantized = float(amount)
+            raw_amount = float(amount)
+            quantized = raw_amount
             if callable(precision_fn):
                 try:
-                    quantized = float(precision_fn(leg.symbol, float(amount)))
+                    quantized = float(precision_fn(leg.symbol, raw_amount))
                 except Exception:  # pragma: no cover - precision helpers are best-effort
-                    quantized = float(amount)
+                    quantized = raw_amount
+
+                if quantized > raw_amount:
+                    nudged = math.nextafter(raw_amount, 0.0)
+                    try:
+                        quantized_down = float(precision_fn(leg.symbol, nudged))
+                    except Exception:  # pragma: no cover - best-effort fallback
+                        quantized_down = nudged
+                    if quantized_down <= raw_amount:
+                        quantized = quantized_down
+
+            if quantized > raw_amount:
+                quantized = raw_amount
             if quantized <= 0:
                 logger.debug(
                     "Rounded trade amount for %s dropped below precision (raw=%s)",
                     leg.symbol,
-                    amount,
+                    raw_amount,
                 )
                 return 0.0, 0.0
             if desired_amount > 0 and scale > 0:
