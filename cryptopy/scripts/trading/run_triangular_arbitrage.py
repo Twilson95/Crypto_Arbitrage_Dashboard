@@ -51,6 +51,7 @@ EVALUATION_INTERVAL_DEFAULT = 30.0
 WEBSOCKET_TIMEOUT_DEFAULT = 1_000_000.0
 PRICE_REFRESH_INTERVAL_DEFAULT = 3_000_000.0
 PRICE_MAX_AGE_DEFAULT = 60.0
+SLIPPAGE_USAGE_FRACTION_DEFAULT = 1.0
 ASSET_FILTER_DEFAULT: Sequence[str] = ("USD",
                                        "USDC","USDT","USDG",
                                        "BTC","ETH","SOL","DOGE","ADA","XRP",
@@ -1492,7 +1493,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--slippage-usage-fraction",
         type=float,
-        default=1.0,
+        default=SLIPPAGE_USAGE_FRACTION_DEFAULT,
         help=(
             "Fraction of the slippage-adjusted trade size to actually execute to reserve depth for other market "
             "participants (e.g. 0.6 to only use 60%% of the depth that satisfies the slippage constraint)."
