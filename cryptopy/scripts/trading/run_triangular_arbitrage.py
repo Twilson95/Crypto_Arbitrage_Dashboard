@@ -21,9 +21,12 @@ from cryptopy.src.trading.triangular_arbitrage import (
     ExchangeConnection,
     InsufficientLiquidityError,
     PriceSnapshot,
+    PrecisionAdapter,
+    SlippageSimulation,
     TriangularArbitrageCalculator,
     TriangularArbitrageExecutor,
     TriangularRoute,
+    simulate_opportunity_with_order_books,
 )
 
 
@@ -49,6 +52,8 @@ EVALUATION_INTERVAL_DEFAULT = 30.0
 WEBSOCKET_TIMEOUT_DEFAULT = 1_000_000.0
 PRICE_REFRESH_INTERVAL_DEFAULT = 3_000_000.0
 PRICE_MAX_AGE_DEFAULT = 60.0
+SLIPPAGE_USAGE_FRACTION_DEFAULT = 1.0
+PARTIAL_FILL_MODE_DEFAULT = "wait"
 ASSET_FILTER_DEFAULT: Sequence[str] = ("USD",
                                        "USDC","USDT","USDG",
                                        "BTC","ETH","SOL","DOGE","ADA","XRP",
@@ -293,6 +298,17 @@ class CachedPrice:
 
     snapshot: PriceSnapshot
     updated_at: float
+
+
+@dataclass
+class SlippageDecision:
+    """Outcome of replaying an opportunity against live order books."""
+
+    simulation: SlippageSimulation
+    total_slippage_pct: float
+    scale: float
+    max_leg_slippage_pct: float
+    max_leg_output_slippage_pct: float
 
 
 @dataclass(frozen=True)
@@ -664,6 +680,7 @@ async def prime_price_cache(
 async def evaluate_and_execute(
     calculator: TriangularArbitrageCalculator,
     executor: Optional[TriangularArbitrageExecutor],
+    exchange: ExchangeConnection,
     routes: Sequence[TriangularRoute],
     *,
     price_cache: Dict[str, CachedPrice],
@@ -676,6 +693,13 @@ async def evaluate_and_execute(
     evaluation_interval: float,
     enable_execution: bool,
     price_max_age: float,
+    slippage_action: str,
+    max_slippage_percentage: Optional[float],
+    slippage_order_book_depth: int,
+    slippage_min_scale: float,
+    slippage_scale_steps: int,
+    slippage_scale_tolerance: float,
+    slippage_usage_fraction: float,
     trigger_queue: "asyncio.Queue[str]",
     stop_event: asyncio.Event,
 ) -> None:
@@ -824,13 +848,338 @@ async def evaluate_and_execute(
                 )
             continue
 
-        best = opportunities[0]
+        raw_best = opportunities[0]
         logger.info(
-            f"Best opportunity: route={' -> '.join(best.route.symbols)} "
-            f"profit={best.profit:.6f} ({best.profit_percentage:.4f}%) "
-            f"profit_without_fees={best.profit_without_fees:.6f} "
-            f"fee_impact={best.fee_impact:.6f} {best.route.starting_currency}"
+            f"Best opportunity: route={' -> '.join(raw_best.route.symbols)} "
+            f"profit={raw_best.profit:.6f} ({raw_best.profit_percentage:.4f}%) "
+            f"profit_without_fees={raw_best.profit_without_fees:.6f} "
+            f"fee_impact={raw_best.fee_impact:.6f} {raw_best.route.starting_currency}"
         )
+
+        best = raw_best
+        slippage_decision: Optional[SlippageDecision] = None
+
+        if slippage_action != "ignore":
+            precision_adapter = PrecisionAdapter(
+                amount_to_precision=exchange.amount_to_precision,
+                cost_to_precision=exchange.cost_to_precision,
+            )
+            try:
+                order_books = {}
+                depth = max(int(slippage_order_book_depth), 1)
+                for symbol in raw_best.route.symbols:
+                    order_books[symbol] = await asyncio.to_thread(
+                        exchange.get_order_book,
+                        symbol,
+                        limit=depth,
+                    )
+            except Exception as exc:
+                logger.info(
+                    "Skipping opportunity because order book retrieval failed while estimating slippage for %s: %s",
+                    " -> ".join(raw_best.route.symbols),
+                    exc,
+                )
+                continue
+
+            def _simulate_scale(scale: float) -> SlippageDecision:
+                simulation = simulate_opportunity_with_order_books(
+                    raw_best,
+                    order_books,
+                    starting_amount=raw_best.starting_amount * scale,
+                    precision=precision_adapter,
+                )
+                expected_final = raw_best.final_amount * scale
+                actual_final = simulation.opportunity.final_amount
+                total_slippage = (
+                    ((expected_final - actual_final) / expected_final) * 100.0
+                    if expected_final
+                    else 0.0
+                )
+                max_leg_slippage = max(
+                    (leg.slippage_pct for leg in simulation.legs),
+                    default=0.0,
+                )
+                max_output_slippage = max(
+                    (leg.output_slippage_pct for leg in simulation.legs),
+                    default=0.0,
+                )
+                return SlippageDecision(
+                    simulation,
+                    total_slippage,
+                    scale,
+                    max_leg_slippage,
+                    max_output_slippage,
+                )
+
+            def _decision_within_threshold(
+                decision: SlippageDecision,
+                threshold_pct: float,
+            ) -> bool:
+                epsilon = 1e-9
+                limit = max(threshold_pct, 0.0)
+                if limit == 0.0:
+                    return (
+                        decision.total_slippage_pct <= epsilon
+                        and decision.max_leg_slippage_pct <= epsilon
+                        and decision.max_leg_output_slippage_pct <= epsilon
+                    )
+                boundary = limit + epsilon
+                return (
+                    decision.total_slippage_pct <= boundary
+                    and decision.max_leg_slippage_pct <= boundary
+                    and decision.max_leg_output_slippage_pct <= boundary
+                )
+
+            initial_decision: Optional[SlippageDecision]
+            initial_error: Optional[Exception]
+            try:
+                initial_decision = _simulate_scale(1.0)
+            except InsufficientLiquidityError as exc:
+                initial_decision = None
+                initial_error = exc
+            except Exception as exc:
+                logger.info(
+                    "Skipping opportunity after slippage simulation failed for scale 1.0: %s",
+                    exc,
+                )
+                continue
+            else:
+                initial_error = None
+
+            threshold = max_slippage_percentage if max_slippage_percentage is not None else 0.0
+
+            if initial_decision is None:
+                if slippage_action != "scale":
+                    logger.info(
+                        "Skipping opportunity because available depth could not satisfy the planned trade size: %s",
+                        initial_error,
+                    )
+                    continue
+            elif _decision_within_threshold(initial_decision, threshold):
+                slippage_decision = initial_decision
+            elif slippage_action == "reject":
+                logger.info(
+                    "Skipping opportunity because estimated slippage %.4f%% (max leg price %.4f%% / size %.4f%%) exceeds configured maximum %.4f%%.",
+                    initial_decision.total_slippage_pct,
+                    initial_decision.max_leg_slippage_pct,
+                    initial_decision.max_leg_output_slippage_pct,
+                    threshold,
+                )
+                continue
+
+            if slippage_decision is None and slippage_action == "scale":
+                min_scale = max(min(slippage_min_scale, 1.0), 0.0)
+                tolerance = max(slippage_scale_tolerance, 1e-4)
+                steps = max(slippage_scale_steps, 1)
+                low = min_scale
+                high = 1.0
+                best_candidate: Optional[SlippageDecision] = None
+
+                for _ in range(steps):
+                    if high - low <= tolerance:
+                        break
+                    trial = (low + high) / 2.0
+                    if trial <= 0:
+                        break
+                    try:
+                        candidate = _simulate_scale(trial)
+                    except InsufficientLiquidityError:
+                        high = trial
+                        continue
+                    except Exception as exc:
+                        logger.debug(
+                            "Slippage simulation failed for scale %.4f: %s",
+                            trial,
+                            exc,
+                        )
+                        high = trial
+                        continue
+                    if _decision_within_threshold(candidate, threshold):
+                        best_candidate = candidate
+                        low = trial
+                    else:
+                        logger.debug(
+                            "Rejected scale %.2f%%: total slippage %.4f%%, max leg price %.4f%%, max leg size %.4f%% (threshold %.4f%%)",
+                            trial * 100.0,
+                            candidate.total_slippage_pct,
+                            candidate.max_leg_slippage_pct,
+                            candidate.max_leg_output_slippage_pct,
+                            threshold,
+                        )
+                        high = trial
+
+                if best_candidate is None and min_scale > 0.0:
+                    try:
+                        candidate = _simulate_scale(min_scale)
+                    except InsufficientLiquidityError:
+                        candidate = None
+                    except Exception as exc:
+                        logger.debug(
+                            "Slippage simulation failed for minimum scale %.4f: %s",
+                            min_scale,
+                            exc,
+                        )
+                        candidate = None
+                    if candidate and _decision_within_threshold(candidate, threshold):
+                        best_candidate = candidate
+
+                if best_candidate is None:
+                    reason = (
+                        f"insufficient depth ({initial_error})"
+                        if initial_decision is None
+                        else (
+                            "slippage total %.4f%% / max leg price %.4f%% / size %.4f%% > %.4f%%"
+                            % (
+                                initial_decision.total_slippage_pct,
+                                initial_decision.max_leg_slippage_pct,
+                                initial_decision.max_leg_output_slippage_pct,
+                                threshold,
+                            )
+                        )
+                    )
+                    logger.info(
+                        "Skipping opportunity because slippage remained above %.4f%% even after scaling down to %.2f%% of the starting amount (%s).",
+                        threshold,
+                        min_scale * 100,
+                        reason,
+                    )
+                    continue
+
+                slippage_decision = best_candidate
+
+            if slippage_decision is not None:
+                final_decision = slippage_decision
+                worst_leg_slippage = max(
+                    (
+                        leg.output_slippage_pct
+                        for leg in final_decision.simulation.legs
+                    ),
+                    default=0.0,
+                )
+                if worst_leg_slippage > 0.0:
+                    worst_factor = max(0.0, 1.0 - worst_leg_slippage / 100.0)
+                    if worst_factor <= 0.0:
+                        logger.info(
+                            "Skipping opportunity because worst-leg slippage %.4f%% leaves no executable size.",
+                            worst_leg_slippage,
+                        )
+                        continue
+                    worst_scale = final_decision.scale * worst_factor
+                    try:
+                        worst_adjusted = _simulate_scale(worst_scale)
+                    except InsufficientLiquidityError:
+                        logger.info(
+                            "Skipping opportunity because the order book cannot satisfy the worst-leg slippage %.4f%% adjustment.",
+                            worst_leg_slippage,
+                        )
+                        continue
+                    except Exception as exc:
+                        logger.info(
+                            "Skipping opportunity after applying worst-leg slippage %.4f%% scaling: %s",
+                            worst_leg_slippage,
+                            exc,
+                        )
+                        continue
+                    if not _decision_within_threshold(worst_adjusted, threshold):
+                        logger.info(
+                            "Skipping opportunity because worst-leg slippage %.4f%% scaling resulted in total slippage %.4f%% (max leg price %.4f%% / size %.4f%%) above %.4f%%.",
+                            worst_leg_slippage,
+                            worst_adjusted.total_slippage_pct,
+                            worst_adjusted.max_leg_slippage_pct,
+                            worst_adjusted.max_leg_output_slippage_pct,
+                            threshold,
+                        )
+                        continue
+                    if worst_adjusted.scale <= 0.0:
+                        logger.info(
+                            "Skipping opportunity because worst-leg slippage %.4f%% reduced executable size to zero.",
+                            worst_leg_slippage,
+                        )
+                        continue
+                    if worst_adjusted.scale < final_decision.scale - 1e-9:
+                        logger.info(
+                            "Worst-leg slippage %.4f%% reduced executable scale from %.2f%% to %.2f%%.",
+                            worst_leg_slippage,
+                            final_decision.scale * 100.0,
+                            worst_adjusted.scale * 100.0,
+                        )
+                    final_decision = worst_adjusted
+                usage_fraction = max(min(slippage_usage_fraction, 1.0), 0.0)
+                if usage_fraction <= 0.0:
+                    logger.info(
+                        "Skipping opportunity because configured slippage usage fraction is 0%% of the adjusted size.",
+                    )
+                    continue
+                if usage_fraction < 1.0:
+                    final_scale = final_decision.scale * usage_fraction
+                    try:
+                        usage_adjusted = _simulate_scale(final_scale)
+                    except InsufficientLiquidityError:
+                        logger.info(
+                            "Skipping opportunity because the order book cannot satisfy the reserved usage fraction %.2f%%.",
+                            usage_fraction * 100.0,
+                        )
+                        continue
+                    except Exception as exc:
+                        logger.info(
+                            "Skipping opportunity after applying slippage usage fraction %.2f%%: %s",
+                            usage_fraction * 100.0,
+                            exc,
+                        )
+                        continue
+                    if not _decision_within_threshold(usage_adjusted, threshold):
+                        logger.info(
+                            "Skipping opportunity because usage fraction %.2f%% resulted in slippage %.4f%% (max leg price %.4f%% / size %.4f%%) above the %.4f%% limit.",
+                            usage_fraction * 100.0,
+                            usage_adjusted.total_slippage_pct,
+                            usage_adjusted.max_leg_slippage_pct,
+                            usage_adjusted.max_leg_output_slippage_pct,
+                            threshold,
+                        )
+                        continue
+                    logger.info(
+                        "Additional usage reservation reduced executable scale from %.2f%% to %.2f%% (usage fraction %.2f%%).",
+                        final_decision.scale * 100.0,
+                        usage_adjusted.scale * 100.0,
+                        usage_fraction * 100.0,
+                    )
+                    final_decision = usage_adjusted
+
+                slippage_decision = final_decision
+                best = final_decision.simulation.opportunity
+                logger.info(
+                    "Slippage-adjusted plan: scale=%.2f%% final_amount=% .6f profit=% .6f (% .4f%%) total_slippage=% .4f%% (max leg price %.4f%% / size %.4f%%)",
+                    slippage_decision.scale * 100.0,
+                    best.final_amount,
+                    best.profit,
+                    best.profit_percentage,
+                    slippage_decision.total_slippage_pct,
+                    slippage_decision.max_leg_slippage_pct,
+                    slippage_decision.max_leg_output_slippage_pct,
+                )
+                if not math.isclose(best.starting_amount, raw_best.starting_amount, rel_tol=0.0, abs_tol=1e-9):
+                    logger.info(
+                        "Starting amount reduced from %.6f to %.6f due to slippage adjustments.",
+                        raw_best.starting_amount,
+                        best.starting_amount,
+                    )
+                if slippage_decision.simulation.legs:
+                    leg_details = ", ".join(
+                        (
+                            f"{leg.symbol}:price {leg.slippage_pct:.4f}% size {leg.output_slippage_pct:.4f}%"
+                            f" expected_out {leg.expected_amount_out:.10f} -> actual_out {leg.actual_amount_out:.10f}"
+                        )
+                        for leg in slippage_decision.simulation.legs
+                    )
+                    logger.info("Per-leg slippage estimates: %s", leg_details)
+
+        if best.profit_percentage < min_profit_percentage:
+            logger.info(
+                "Opportunity rejected after slippage adjustment; profit %.4f%% below minimum %.4f%%.",
+                best.profit_percentage,
+                min_profit_percentage,
+            )
+            continue
 
         profit_signature = (round(best.final_amount, 8), round(best.profit_percentage, 4))
         if last_execution and last_execution.route == best.route and last_execution.profit_signature == profit_signature:
@@ -924,6 +1273,25 @@ async def run_from_args(args: argparse.Namespace) -> None:
     if max_executions is not None and max_executions <= 0:
         max_executions = None
 
+    if args.slippage_action != "ignore":
+        if args.max_slippage_percentage is None:
+            raise SystemExit(
+                "--max-slippage-percentage must be provided when --slippage-action is not 'ignore'."
+            )
+        if args.max_slippage_percentage < 0:
+            raise SystemExit("--max-slippage-percentage must be non-negative.")
+        if args.slippage_order_book_depth <= 0:
+            raise SystemExit("--slippage-order-book-depth must be positive.")
+        if args.slippage_action == "scale":
+            if not 0 <= args.slippage_scale_min <= 1:
+                raise SystemExit("--slippage-scale-min must be between 0 and 1 (inclusive).")
+            if args.slippage_scale_steps <= 0:
+                raise SystemExit("--slippage-scale-steps must be positive.")
+            if args.slippage_scale_tolerance <= 0:
+                raise SystemExit("--slippage-scale-tolerance must be positive.")
+        if not 0 <= args.slippage_usage_fraction <= 1:
+            raise SystemExit("--slippage-usage-fraction must be between 0 and 1 (inclusive).")
+
     price_refresh_interval = max(args.price_refresh_interval, 0.1)
     price_max_age = max(args.price_max_age, price_refresh_interval)
 
@@ -996,6 +1364,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             exchange,
             dry_run=not args.live_trading,
             trade_log_path=trade_log_path,
+            partial_fill_mode=args.partial_fill_mode,
         )
         if trade_log_path:
             logger.info(f"Logging executed trades to {trade_log_path}")
@@ -1060,6 +1429,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
         evaluate_and_execute(
             calculator,
             executor,
+            exchange,
             routes,
             price_cache=price_cache,
             markets=markets,
@@ -1071,6 +1441,13 @@ async def run_from_args(args: argparse.Namespace) -> None:
             evaluation_interval=args.evaluation_interval,
             enable_execution=args.enable_execution,
             price_max_age=price_max_age,
+            slippage_action=args.slippage_action,
+            max_slippage_percentage=args.max_slippage_percentage,
+            slippage_order_book_depth=args.slippage_order_book_depth,
+            slippage_min_scale=args.slippage_scale_min,
+            slippage_scale_steps=args.slippage_scale_steps,
+            slippage_scale_tolerance=args.slippage_scale_tolerance,
+            slippage_usage_fraction=args.slippage_usage_fraction,
             trigger_queue=trigger_queue,
             stop_event=stop_event,
         ),
@@ -1148,6 +1525,67 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.0,
         help="Fractional buffer applied after fees to account for slippage (e.g. 0.01 for 1%%).",
+    )
+    parser.add_argument(
+        "--slippage-action",
+        choices=["ignore", "reject", "scale"],
+        default="ignore",
+        help=(
+            "Strategy to apply when order book depth indicates slippage: "
+            "'ignore' keeps previous behaviour, 'reject' skips trades over the threshold, "
+            "and 'scale' reduces the trade size until the slippage requirement is met."
+        ),
+    )
+    parser.add_argument(
+        "--max-slippage-percentage",
+        type=float,
+        default=None,
+        help="Maximum acceptable aggregate slippage percentage when evaluating order book depth.",
+    )
+    parser.add_argument(
+        "--slippage-order-book-depth",
+        type=int,
+        default=20,
+        help="Number of order book levels to request when estimating slippage.",
+    )
+    parser.add_argument(
+        "--slippage-scale-min",
+        type=float,
+        default=0.1,
+        help=(
+            "Smallest fraction of the configured starting amount to consider when scaling trades "
+            "to meet the slippage constraint."
+        ),
+    )
+    parser.add_argument(
+        "--slippage-scale-steps",
+        type=int,
+        default=8,
+        help="Maximum iterations to use while searching for an acceptable scaled trade size.",
+    )
+    parser.add_argument(
+        "--slippage-scale-tolerance",
+        type=float,
+        default=0.02,
+        help="Stop scaling once the remaining search range falls below this fraction of the starting amount.",
+    )
+    parser.add_argument(
+        "--slippage-usage-fraction",
+        type=float,
+        default=SLIPPAGE_USAGE_FRACTION_DEFAULT,
+        help=(
+            "Fraction of the slippage-adjusted trade size to actually execute to reserve depth for other market "
+            "participants (e.g. 0.6 to only use 60%% of the depth that satisfies the slippage constraint)."
+        ),
+    )
+    parser.add_argument(
+        "--partial-fill-mode",
+        choices=["wait", "progressive"],
+        default=PARTIAL_FILL_MODE_DEFAULT,
+        help=(
+            "Behaviour when an order leg is only partially filled: 'wait' blocks until the leg completes,"
+            " while 'progressive' forwards each filled chunk through the remaining legs as fills arrive."
+        ),
     )
     parser.add_argument(
         "--price-refresh-interval",

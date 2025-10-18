@@ -182,6 +182,36 @@ class ExchangeConnection:
 
         return self._market_cache
 
+    def _to_precision(self, method_name: str, symbol: str, value: float) -> float:
+        method = getattr(self.rest_client, method_name, None)
+        if method is None:
+            return float(value)
+        try:
+            return float(method(symbol, float(value)))
+        except Exception:  # pragma: no cover - precision helpers should never raise
+            return float(value)
+
+    def amount_to_precision(self, symbol: str, amount: float) -> float:
+        """Round ``amount`` down to the exchange's supported precision."""
+
+        return self._to_precision("amount_to_precision", symbol, amount)
+
+    def price_to_precision(self, symbol: str, price: float) -> float:
+        """Round ``price`` down to the exchange's supported precision."""
+
+        return self._to_precision("price_to_precision", symbol, price)
+
+    def cost_to_precision(self, symbol: str, cost: float) -> float:
+        """Round ``cost`` down to the exchange's supported precision."""
+
+        method = getattr(self.rest_client, "cost_to_precision", None)
+        if method is None:
+            return float(cost)
+        try:
+            return float(method(symbol, float(cost)))
+        except Exception:  # pragma: no cover - precision helpers should never raise
+            return float(cost)
+
     @staticmethod
     def _normalise_credentials(credentials: Optional[Dict[str, Any]]) -> Dict[str, str]:
         """Return a ccxt-compatible credential mapping."""
