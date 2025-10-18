@@ -11,6 +11,7 @@ from cryptopy.src.trading.triangular_arbitrage.models import (
     TriangularTradeLeg,
 )
 from cryptopy.src.trading.triangular_arbitrage.slippage import (
+    PrecisionAdapter,
     simulate_opportunity_with_order_books,
 )
 from cryptopy.src.trading.triangular_arbitrage.exceptions import InsufficientLiquidityError
@@ -154,3 +155,45 @@ def test_simulation_raises_when_depth_insufficient() -> None:
             order_books,
             starting_amount=opportunity.starting_amount,
         )
+
+
+def test_simulation_respects_precision_adapter() -> None:
+    opportunity = _make_opportunity()
+    order_books = {
+        "ETH/USD": OrderBookSnapshot("ETH/USD", bids=[(1999.0, 1.0)], asks=[(2000.0, 1.0)]),
+        "ETH/BTC": OrderBookSnapshot("ETH/BTC", bids=[(0.07, 1.0)], asks=[(0.071, 1.0)]),
+        "BTC/USD": OrderBookSnapshot("BTC/USD", bids=[(30_000.0, 1.0)], asks=[(30_100.0, 1.0)]),
+    }
+
+    amount_decimals = {"ETH/USD": 3, "ETH/BTC": 5, "BTC/USD": 4}
+    cost_decimals = {"ETH/USD": 2, "ETH/BTC": 8, "BTC/USD": 2}
+
+    def _floor(value: float, decimals: int) -> float:
+        factor = 10 ** decimals
+        return math.floor(value * factor) / factor
+
+    precision = PrecisionAdapter(
+        amount_to_precision=lambda symbol, amount: _floor(amount, amount_decimals[symbol]),
+        cost_to_precision=lambda symbol, cost: _floor(cost, cost_decimals[symbol]),
+    )
+
+    scale = 0.3333333
+    simulation = simulate_opportunity_with_order_books(
+        opportunity,
+        order_books,
+        starting_amount=opportunity.starting_amount * scale,
+        precision=precision,
+    )
+
+    for plan_leg, leg in zip(opportunity.trades, simulation.legs):
+        if plan_leg.side == "buy":
+            expected_in = _floor(plan_leg.amount_in * scale, cost_decimals[leg.symbol])
+            expected_out = _floor(plan_leg.amount_out * scale, amount_decimals[leg.symbol])
+        else:
+            expected_in = _floor(plan_leg.amount_in * scale, amount_decimals[leg.symbol])
+            expected_out = _floor(plan_leg.amount_out * scale, cost_decimals[leg.symbol])
+
+        assert math.isclose(leg.expected_amount_in, expected_in, rel_tol=0, abs_tol=1e-12)
+        assert math.isclose(leg.expected_amount_out, expected_out, rel_tol=0, abs_tol=1e-12)
+        assert math.isclose(leg.actual_amount_in, expected_in, rel_tol=0, abs_tol=1e-12)
+        assert math.isclose(leg.actual_amount_out, expected_out, rel_tol=0, abs_tol=1e-12)

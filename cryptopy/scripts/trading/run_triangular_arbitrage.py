@@ -21,6 +21,7 @@ from cryptopy.src.trading.triangular_arbitrage import (
     ExchangeConnection,
     InsufficientLiquidityError,
     PriceSnapshot,
+    PrecisionAdapter,
     SlippageSimulation,
     TriangularArbitrageCalculator,
     TriangularArbitrageExecutor,
@@ -858,6 +859,10 @@ async def evaluate_and_execute(
         slippage_decision: Optional[SlippageDecision] = None
 
         if slippage_action != "ignore":
+            precision_adapter = PrecisionAdapter(
+                amount_to_precision=exchange.amount_to_precision,
+                cost_to_precision=exchange.cost_to_precision,
+            )
             try:
                 order_books = {}
                 depth = max(int(slippage_order_book_depth), 1)
@@ -880,6 +885,7 @@ async def evaluate_and_execute(
                     raw_best,
                     order_books,
                     starting_amount=raw_best.starting_amount * scale,
+                    precision=precision_adapter,
                 )
                 expected_final = raw_best.final_amount * scale
                 actual_final = simulation.opportunity.final_amount

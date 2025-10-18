@@ -8,6 +8,9 @@ class _DummyExchange:
     def create_market_order(self, *args, **kwargs):  # pragma: no cover - not used in tests
         raise AssertionError("create_market_order should not be called during mechanics tests")
 
+    def amount_to_precision(self, symbol: str, amount: float) -> float:
+        return float(amount)
+
 
 def _make_leg(
     *,
@@ -89,3 +92,24 @@ def test_extract_realised_amount_respects_base_fee() -> None:
 
     assert realised is not None
     assert math.isclose(realised, 0.0495, rel_tol=0, abs_tol=1e-12)
+
+
+def test_order_amount_quantised_to_precision() -> None:
+    class _PrecisionExchange(_DummyExchange):
+        def amount_to_precision(self, symbol: str, amount: float) -> float:
+            return math.floor(amount * 1000) / 1000
+
+    exchange = _PrecisionExchange()
+    executor = TriangularArbitrageExecutor(exchange, dry_run=False)
+    leg = _make_leg(
+        symbol="ETH/USD",
+        side="buy",
+        amount_in=100.0,
+        amount_out=0.05,
+        traded_quantity=0.0123456,
+    )
+
+    amount, scale = executor._determine_order_amount(leg, available_amount=100.0)
+
+    assert math.isclose(amount, 0.012, rel_tol=0, abs_tol=1e-12)
+    assert math.isclose(scale, 0.012 / 0.0123456, rel_tol=0, abs_tol=1e-12)

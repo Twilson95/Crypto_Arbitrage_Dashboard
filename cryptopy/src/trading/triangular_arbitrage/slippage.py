@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Mapping, Tuple
+from typing import Callable, List, Mapping, Optional, Tuple
 
 from .exceptions import InsufficientLiquidityError
 from .models import (
@@ -14,6 +14,29 @@ from .models import (
 
 
 _DEFAULT_TOLERANCE = 1e-12
+
+
+@dataclass(frozen=True)
+class PrecisionAdapter:
+    """Helpers to align simulated amounts with exchange precision."""
+
+    amount_to_precision: Callable[[str, float], float]
+    cost_to_precision: Callable[[str, float], float]
+
+    @staticmethod
+    def _quantize(
+        func: Callable[[str, float], float], symbol: str, value: float
+    ) -> float:
+        try:
+            return float(func(symbol, float(value)))
+        except Exception:
+            return float(value)
+
+    def quantize_amount(self, symbol: str, value: float) -> float:
+        return self._quantize(self.amount_to_precision, symbol, value)
+
+    def quantize_cost(self, symbol: str, value: float) -> float:
+        return self._quantize(self.cost_to_precision, symbol, value)
 
 
 @dataclass(frozen=True)
@@ -147,11 +170,14 @@ def simulate_opportunity_with_order_books(
     order_books: Mapping[str, OrderBookSnapshot],
     *,
     starting_amount: float,
+    precision: Optional[PrecisionAdapter] = None,
 ) -> SlippageSimulation:
     """Replay ``opportunity`` using full order book depth.
 
     The returned opportunity reflects the volumes achievable when consuming the
-    supplied order book snapshots. A
+    supplied order book snapshots. When ``precision`` is provided, simulated
+    amounts are rounded down to the exchange precision to avoid overstating
+    fills. A
     :class:`~cryptopy.src.trading.triangular_arbitrage.exceptions.InsufficientLiquidityError`
     is raised when the available depth cannot satisfy a trade leg.
     """
@@ -173,27 +199,62 @@ def simulate_opportunity_with_order_books(
         else 1.0
     )
 
+    def _quantize_amount(symbol: str, value: float) -> float:
+        return precision.quantize_amount(symbol, value) if precision else float(value)
+
+    def _quantize_cost(symbol: str, value: float) -> float:
+        return precision.quantize_cost(symbol, value) if precision else float(value)
+
+    def _ensure_positive(symbol: str, value: float, context: str) -> None:
+        if value <= _DEFAULT_TOLERANCE:
+            raise InsufficientLiquidityError(
+                f"{context} for {symbol} fell below exchange precision"
+            )
+
     for symbol, planned_leg in zip(opportunity.route.symbols, opportunity.trades):
         order_book = order_books.get(symbol)
         if order_book is None:
             raise KeyError(f"Missing order book snapshot for {symbol}")
 
         fee_rate = float(planned_leg.fee_rate)
-        expected_amount_in = float(planned_leg.amount_in) * plan_scale
-        expected_amount_out = float(planned_leg.amount_out) * plan_scale
+        if planned_leg.side == "buy":
+            expected_amount_in = _quantize_cost(
+                symbol, float(planned_leg.amount_in) * plan_scale
+            )
+            expected_amount_out = _quantize_amount(
+                symbol, float(planned_leg.amount_out) * plan_scale
+            )
+        elif planned_leg.side == "sell":
+            expected_amount_in = _quantize_amount(
+                symbol, float(planned_leg.amount_in) * plan_scale
+            )
+            expected_amount_out = _quantize_cost(
+                symbol, float(planned_leg.amount_out) * plan_scale
+            )
+        else:
+            raise ValueError(f"Unsupported trade side {planned_leg.side!r} for {symbol}")
+
+        _ensure_positive(symbol, expected_amount_in, "Trade amount")
+        _ensure_positive(symbol, expected_amount_out, "Trade output")
 
         if planned_leg.side == "buy":
+            current_amount = _quantize_cost(symbol, current_amount)
+            current_amount_without_fees = _quantize_cost(
+                symbol, current_amount_without_fees
+            )
+            _ensure_positive(symbol, current_amount, "Quote available")
             base_acquired, quote_spent, best_price, vwap = _fill_buy_levels(
                 symbol,
                 order_book,
                 current_amount,
             )
-            fee_paid = base_acquired * fee_rate
-            base_after_fee = base_acquired - fee_paid
+            quote_spent = _quantize_cost(symbol, quote_spent)
+            base_acquired = _quantize_amount(symbol, base_acquired)
+            fee_paid = _quantize_amount(symbol, base_acquired * fee_rate)
+            base_after_fee = _quantize_amount(symbol, base_acquired - fee_paid)
             quote_without_fees = current_amount_without_fees
-            base_without_fee_flow = (
-                quote_without_fees / vwap if vwap > 0 else 0.0
-            )
+            base_without_fee_flow = quote_without_fees / vwap if vwap > 0 else 0.0
+            base_without_fee_flow = _quantize_amount(symbol, base_without_fee_flow)
 
             actual_amount_in = quote_spent
             actual_amount_out = base_after_fee
@@ -214,19 +275,28 @@ def simulate_opportunity_with_order_books(
 
             current_amount = base_after_fee
             current_amount_without_fees = base_without_fee_flow
+            _ensure_positive(symbol, current_amount, "Post-fee base amount")
             slippage_pct = (
                 ((vwap - best_price) / best_price) * 100.0 if best_price else 0.0
             )
         elif planned_leg.side == "sell":
+            current_amount = _quantize_amount(symbol, current_amount)
+            current_amount_without_fees = _quantize_amount(
+                symbol, current_amount_without_fees
+            )
+            _ensure_positive(symbol, current_amount, "Base available")
             quote_acquired, base_sold, best_price, vwap = _fill_sell_levels(
                 symbol,
                 order_book,
                 current_amount,
             )
-            fee_paid = quote_acquired * fee_rate
-            quote_after_fee = quote_acquired - fee_paid
+            base_sold = _quantize_amount(symbol, base_sold)
+            quote_acquired = _quantize_cost(symbol, quote_acquired)
+            fee_paid = _quantize_cost(symbol, quote_acquired * fee_rate)
+            quote_after_fee = _quantize_cost(symbol, quote_acquired - fee_paid)
             base_without_fee = current_amount_without_fees
             quote_without_fee_flow = base_without_fee * vwap
+            quote_without_fee_flow = _quantize_cost(symbol, quote_without_fee_flow)
 
             actual_amount_in = base_sold
             actual_amount_out = quote_after_fee
@@ -247,11 +317,10 @@ def simulate_opportunity_with_order_books(
 
             current_amount = quote_after_fee
             current_amount_without_fees = quote_without_fee_flow
+            _ensure_positive(symbol, current_amount, "Post-fee quote amount")
             slippage_pct = (
                 ((best_price - vwap) / best_price) * 100.0 if best_price else 0.0
             )
-        else:
-            raise ValueError(f"Unsupported trade side {planned_leg.side!r} for {symbol}")
 
         leg_summaries.append(
             LegSlippage(

@@ -229,6 +229,27 @@ class TriangularArbitrageExecutor:
         if self.dry_run:
             return desired_amount, 1.0
 
+        def _finalise_amount(amount: float, scale: float) -> Tuple[float, float]:
+            precision_fn = getattr(self.exchange, "amount_to_precision", None)
+            quantized = float(amount)
+            if callable(precision_fn):
+                try:
+                    quantized = float(precision_fn(leg.symbol, float(amount)))
+                except Exception:  # pragma: no cover - precision helpers are best-effort
+                    quantized = float(amount)
+            if quantized <= 0:
+                logger.debug(
+                    "Rounded trade amount for %s dropped below precision (raw=%s)",
+                    leg.symbol,
+                    amount,
+                )
+                return 0.0, 0.0
+            if desired_amount > 0 and scale > 0:
+                scale = min(scale, quantized / desired_amount)
+            elif desired_amount > 0 and scale == 0:
+                scale = quantized / desired_amount
+            return quantized, max(scale, 0.0)
+
         base, quote = leg.symbol.split("/")
         if leg.side == "sell":
             # We are selling the currency currently held (the base asset).
@@ -243,8 +264,8 @@ class TriangularArbitrageExecutor:
                     available_amount,
                 )
                 scale = available_amount / desired_amount if desired_amount else 0.0
-                return available_amount, scale
-            return desired_amount, 1.0
+                return _finalise_amount(available_amount, scale)
+            return _finalise_amount(desired_amount, 1.0)
 
         # Buying the base asset using the currently held quote currency.
         required_quote = float(leg.amount_in)
@@ -252,7 +273,7 @@ class TriangularArbitrageExecutor:
             logger.debug("No %s available to buy %s", quote, leg.symbol)
             return 0.0, 0.0
         if required_quote <= 0:
-            return desired_amount, 1.0
+            return _finalise_amount(desired_amount, 1.0)
 
         if available_amount < required_quote:
             scale = available_amount / required_quote
@@ -264,9 +285,9 @@ class TriangularArbitrageExecutor:
                 adjusted_amount,
                 quote,
             )
-            return adjusted_amount, max(scale, 0.0)
+            return _finalise_amount(adjusted_amount, max(scale, 0.0))
 
-        return desired_amount, 1.0
+        return _finalise_amount(desired_amount, 1.0)
 
     @staticmethod
     def _planned_execution_metrics(leg: TriangularTradeLeg) -> Dict[str, float]:
