@@ -304,6 +304,7 @@ class SlippageDecision:
     simulation: SlippageSimulation
     total_slippage_pct: float
     scale: float
+    max_leg_slippage_pct: float
 
 
 @dataclass(frozen=True)
@@ -694,6 +695,7 @@ async def evaluate_and_execute(
     slippage_min_scale: float,
     slippage_scale_steps: int,
     slippage_scale_tolerance: float,
+    slippage_usage_fraction: float,
     trigger_queue: "asyncio.Queue[str]",
     stop_event: asyncio.Event,
 ) -> None:
@@ -884,7 +886,33 @@ async def evaluate_and_execute(
                     if expected_final
                     else 0.0
                 )
-                return SlippageDecision(simulation, total_slippage, scale)
+                max_leg_slippage = max(
+                    (leg.slippage_pct for leg in simulation.legs),
+                    default=0.0,
+                )
+                return SlippageDecision(
+                    simulation,
+                    total_slippage,
+                    scale,
+                    max_leg_slippage,
+                )
+
+            def _decision_within_threshold(
+                decision: SlippageDecision,
+                threshold_pct: float,
+            ) -> bool:
+                epsilon = 1e-9
+                limit = max(threshold_pct, 0.0)
+                if limit == 0.0:
+                    return (
+                        decision.total_slippage_pct <= epsilon
+                        and decision.max_leg_slippage_pct <= epsilon
+                    )
+                boundary = limit + epsilon
+                return (
+                    decision.total_slippage_pct <= boundary
+                    and decision.max_leg_slippage_pct <= boundary
+                )
 
             initial_decision: Optional[SlippageDecision]
             initial_error: Optional[Exception]
@@ -911,12 +939,13 @@ async def evaluate_and_execute(
                         initial_error,
                     )
                     continue
-            elif initial_decision.total_slippage_pct <= threshold:
+            elif _decision_within_threshold(initial_decision, threshold):
                 slippage_decision = initial_decision
             elif slippage_action == "reject":
                 logger.info(
-                    "Skipping opportunity because estimated slippage %.4f%% exceeds configured maximum %.4f%%.",
+                    "Skipping opportunity because estimated slippage %.4f%% (max leg %.4f%%) exceeds configured maximum %.4f%%.",
                     initial_decision.total_slippage_pct,
+                    initial_decision.max_leg_slippage_pct,
                     threshold,
                 )
                 continue
@@ -948,10 +977,17 @@ async def evaluate_and_execute(
                         )
                         high = trial
                         continue
-                    if threshold == 0.0 or candidate.total_slippage_pct <= threshold:
+                    if _decision_within_threshold(candidate, threshold):
                         best_candidate = candidate
                         low = trial
                     else:
+                        logger.debug(
+                            "Rejected scale %.2f%%: total slippage %.4f%%, max leg %.4f%% (threshold %.4f%%)",
+                            trial * 100.0,
+                            candidate.total_slippage_pct,
+                            candidate.max_leg_slippage_pct,
+                            threshold,
+                        )
                         high = trial
 
                 if best_candidate is None and min_scale > 0.0:
@@ -966,14 +1002,21 @@ async def evaluate_and_execute(
                             exc,
                         )
                         candidate = None
-                    if candidate and (threshold == 0.0 or candidate.total_slippage_pct <= threshold):
+                    if candidate and _decision_within_threshold(candidate, threshold):
                         best_candidate = candidate
 
                 if best_candidate is None:
                     reason = (
                         f"insufficient depth ({initial_error})"
                         if initial_decision is None
-                        else f"slippage > {threshold:.4f}%"
+                        else (
+                            "slippage total %.4f%% / max leg %.4f%% > %.4f%%"
+                            % (
+                                initial_decision.total_slippage_pct,
+                                initial_decision.max_leg_slippage_pct,
+                                threshold,
+                            )
+                        )
                     )
                     logger.info(
                         "Skipping opportunity because slippage remained above %.4f%% even after scaling down to %.2f%% of the starting amount (%s).",
@@ -986,18 +1029,61 @@ async def evaluate_and_execute(
                 slippage_decision = best_candidate
 
             if slippage_decision is not None:
-                best = slippage_decision.simulation.opportunity
+                final_decision = slippage_decision
+                usage_fraction = max(min(slippage_usage_fraction, 1.0), 0.0)
+                if usage_fraction <= 0.0:
+                    logger.info(
+                        "Skipping opportunity because configured slippage usage fraction is 0%% of the adjusted size.",
+                    )
+                    continue
+                if usage_fraction < 1.0:
+                    final_scale = final_decision.scale * usage_fraction
+                    try:
+                        usage_adjusted = _simulate_scale(final_scale)
+                    except InsufficientLiquidityError:
+                        logger.info(
+                            "Skipping opportunity because the order book cannot satisfy the reserved usage fraction %.2f%%.",
+                            usage_fraction * 100.0,
+                        )
+                        continue
+                    except Exception as exc:
+                        logger.info(
+                            "Skipping opportunity after applying slippage usage fraction %.2f%%: %s",
+                            usage_fraction * 100.0,
+                            exc,
+                        )
+                        continue
+                    if not _decision_within_threshold(usage_adjusted, threshold):
+                        logger.info(
+                            "Skipping opportunity because usage fraction %.2f%% resulted in slippage %.4f%% (max leg %.4f%%) above the %.4f%% limit.",
+                            usage_fraction * 100.0,
+                            usage_adjusted.total_slippage_pct,
+                            usage_adjusted.max_leg_slippage_pct,
+                            threshold,
+                        )
+                        continue
+                    logger.info(
+                        "Additional usage reservation reduced executable scale from %.2f%% to %.2f%% (usage fraction %.2f%%).",
+                        final_decision.scale * 100.0,
+                        usage_adjusted.scale * 100.0,
+                        usage_fraction * 100.0,
+                    )
+                    final_decision = usage_adjusted
+
+                slippage_decision = final_decision
+                best = final_decision.simulation.opportunity
                 logger.info(
-                    "Slippage-adjusted plan: scale=%.2f%% final_amount=% .6f profit=% .6f (% .4f%%) total_slippage=% .4f%%",
+                    "Slippage-adjusted plan: scale=%.2f%% final_amount=% .6f profit=% .6f (% .4f%%) total_slippage=% .4f%% (max leg %.4f%%)",
                     slippage_decision.scale * 100.0,
                     best.final_amount,
                     best.profit,
                     best.profit_percentage,
                     slippage_decision.total_slippage_pct,
+                    slippage_decision.max_leg_slippage_pct,
                 )
-                if slippage_decision.scale != 1.0:
+                if not math.isclose(best.starting_amount, raw_best.starting_amount, rel_tol=0.0, abs_tol=1e-9):
                     logger.info(
-                        "Starting amount reduced from %.6f to %.6f due to slippage scaling.",
+                        "Starting amount reduced from %.6f to %.6f due to slippage adjustments.",
                         raw_best.starting_amount,
                         best.starting_amount,
                     )
@@ -1006,7 +1092,7 @@ async def evaluate_and_execute(
                         f"{leg.symbol}:{leg.slippage_pct:.4f}%"
                         for leg in slippage_decision.simulation.legs
                     )
-                    logger.debug("Per-leg slippage estimates: %s", leg_details)
+                    logger.info("Per-leg slippage estimates: %s", leg_details)
 
         if best.profit_percentage < min_profit_percentage:
             logger.info(
@@ -1124,6 +1210,8 @@ async def run_from_args(args: argparse.Namespace) -> None:
                 raise SystemExit("--slippage-scale-steps must be positive.")
             if args.slippage_scale_tolerance <= 0:
                 raise SystemExit("--slippage-scale-tolerance must be positive.")
+        if not 0 <= args.slippage_usage_fraction <= 1:
+            raise SystemExit("--slippage-usage-fraction must be between 0 and 1 (inclusive).")
 
     price_refresh_interval = max(args.price_refresh_interval, 0.1)
     price_max_age = max(args.price_max_age, price_refresh_interval)
@@ -1279,6 +1367,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             slippage_min_scale=args.slippage_scale_min,
             slippage_scale_steps=args.slippage_scale_steps,
             slippage_scale_tolerance=args.slippage_scale_tolerance,
+            slippage_usage_fraction=args.slippage_usage_fraction,
             trigger_queue=trigger_queue,
             stop_event=stop_event,
         ),
@@ -1399,6 +1488,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.02,
         help="Stop scaling once the remaining search range falls below this fraction of the starting amount.",
+    )
+    parser.add_argument(
+        "--slippage-usage-fraction",
+        type=float,
+        default=1.0,
+        help=(
+            "Fraction of the slippage-adjusted trade size to actually execute to reserve depth for other market "
+            "participants (e.g. 0.6 to only use 60%% of the depth that satisfies the slippage constraint)."
+        ),
     )
     parser.add_argument(
         "--price-refresh-interval",
