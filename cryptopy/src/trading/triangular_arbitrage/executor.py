@@ -8,7 +8,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from cryptopy.src.trading.triangular_arbitrage.models import (
     TriangularOpportunity,
@@ -17,6 +17,19 @@ from cryptopy.src.trading.triangular_arbitrage.models import (
 
 
 logger = logging.getLogger(__name__)
+
+
+class _ProgressiveExecutionState:
+    """Tracks orders and realised totals when streaming partial fills."""
+
+    def __init__(self, opportunity: TriangularOpportunity) -> None:
+        self.opportunity = opportunity
+        self.orders: List[Dict[str, Any]] = []
+        self.execution_records: List[
+            Tuple[TriangularTradeLeg, Dict[str, Any], Dict[str, Any]]
+        ] = []
+        self.final_amount: float = 0.0
+        self.final_amount_without_fees: float = 0.0
 
 
 class TriangularArbitrageExecutor:
@@ -28,64 +41,38 @@ class TriangularArbitrageExecutor:
     _ORDER_POLL_INTERVAL = 0.5
     _TRADE_HISTORY_LIMIT = 10
 
+    PARTIAL_FILL_BEHAVIOURS = {"wait", "progressive"}
+
     def __init__(
         self,
         exchange: Any,
         *,
         dry_run: bool = True,
         trade_log_path: Optional[Union[str, Path]] = None,
+        partial_fill_mode: str = "wait",
     ) -> None:
+        if partial_fill_mode not in self.PARTIAL_FILL_BEHAVIOURS:
+            raise ValueError(
+                f"partial_fill_mode must be one of {sorted(self.PARTIAL_FILL_BEHAVIOURS)}"
+            )
+
         self.exchange = exchange
         self.dry_run = dry_run
         self.trade_log_path = Path(trade_log_path) if trade_log_path else None
+        self.partial_fill_mode = partial_fill_mode
 
     def execute(self, opportunity: TriangularOpportunity) -> List[Dict[str, Any]]:
         if opportunity.profit <= 0:
             raise ValueError("Cannot execute an unprofitable opportunity")
 
-        orders: List[Dict[str, Any]] = []
-        execution_records: List[Tuple[TriangularTradeLeg, Dict[str, Any], Dict[str, Any]]] = []
-        available_amount = opportunity.starting_amount
-
-        for leg in opportunity.trades:
-            amount, scale = self._determine_order_amount(leg, available_amount)
-
-            if amount <= 0:
-                raise ValueError(
-                    f"Calculated non-positive trade amount ({amount}) for leg {leg.symbol}"
-                )
-
-            order = self.exchange.create_market_order(
-                leg.symbol,
-                leg.side,
-                amount,
-                test_order=self.dry_run,
+        if self.partial_fill_mode == "progressive" and not self.dry_run:
+            orders, execution_records, final_amounts = self._execute_progressive(
+                opportunity
             )
-            if self.dry_run:
-                orders.append(order)
-                metrics = self._planned_execution_metrics(leg)
-                execution_records.append((leg, order, metrics))
-                available_amount = leg.amount_out * scale
-                continue
+        else:
+            orders, execution_records, final_amounts = self._execute_serial(opportunity)
 
-            finalised_order, metrics = self._finalise_order_execution(order, leg)
-            orders.append(finalised_order)
-            execution_records.append((leg, finalised_order, metrics))
-
-            available_amount = metrics["amount_out"]
-
-        actual_final_amount = (
-            opportunity.final_amount if self.dry_run else available_amount
-        )
-        actual_final_without_fees = (
-            opportunity.final_amount_without_fees
-            if self.dry_run
-            else (
-                execution_records[-1][2]["amount_out_without_fee"]
-                if execution_records
-                else opportunity.starting_amount
-            )
-        )
+        actual_final_amount, actual_final_without_fees = final_amounts
         actual_profit = actual_final_amount - opportunity.starting_amount
         actual_profit_without_fees = (
             actual_final_without_fees - opportunity.starting_amount
@@ -108,6 +95,13 @@ class TriangularArbitrageExecutor:
                 actual_profit_percentage,
                 actual_fee_impact,
             )
+
+        self._log_route_slippage(
+            opportunity,
+            actual_final_amount,
+            actual_final_without_fees,
+            actual_profit_percentage,
+        )
 
         return orders
 
@@ -210,6 +204,402 @@ class TriangularArbitrageExecutor:
                         "order_id": order.get("id"),
                     }
                 )
+
+    def _execute_serial(
+        self, opportunity: TriangularOpportunity
+    ) -> Tuple[
+        List[Dict[str, Any]],
+        List[Tuple[TriangularTradeLeg, Dict[str, Any], Dict[str, Any]]],
+        Tuple[float, float],
+    ]:
+        orders: List[Dict[str, Any]] = []
+        execution_records: List[Tuple[TriangularTradeLeg, Dict[str, Any], Dict[str, Any]]] = []
+        available_amount = opportunity.starting_amount
+
+        for leg in opportunity.trades:
+            amount, scale = self._determine_order_amount(leg, available_amount)
+
+            if amount <= 0:
+                raise ValueError(
+                    f"Calculated non-positive trade amount ({amount}) for leg {leg.symbol}"
+                )
+
+            order = self.exchange.create_market_order(
+                leg.symbol,
+                leg.side,
+                amount,
+                test_order=self.dry_run,
+            )
+            if self.dry_run:
+                orders.append(order)
+                metrics = self._planned_execution_metrics(leg)
+                execution_records.append((leg, order, metrics))
+                available_amount = leg.amount_out * scale
+                self._log_slippage_effect(leg, metrics)
+                continue
+
+            finalised_order, metrics = self._finalise_order_execution(order, leg)
+            orders.append(finalised_order)
+            execution_records.append((leg, finalised_order, metrics))
+            self._log_slippage_effect(leg, metrics)
+
+            available_amount = metrics["amount_out"]
+
+        actual_final_amount = (
+            opportunity.final_amount if self.dry_run else available_amount
+        )
+        actual_final_without_fees = (
+            opportunity.final_amount_without_fees
+            if self.dry_run
+            else (
+                execution_records[-1][2]["amount_out_without_fee"]
+                if execution_records
+                else opportunity.starting_amount
+            )
+        )
+
+        return orders, execution_records, (
+            actual_final_amount,
+            actual_final_without_fees,
+        )
+
+    def _execute_progressive(
+        self, opportunity: TriangularOpportunity
+    ) -> Tuple[
+        List[Dict[str, Any]],
+        List[Tuple[TriangularTradeLeg, Dict[str, Any], Dict[str, Any]]],
+        Tuple[float, float],
+    ]:
+        state = _ProgressiveExecutionState(opportunity)
+
+        if not opportunity.trades:
+            return [], [], (opportunity.starting_amount, opportunity.starting_amount)
+
+        self._execute_progressive_leg(
+            opportunity,
+            state,
+            0,
+            opportunity.starting_amount,
+        )
+
+        final_amount = (
+            state.final_amount
+            if state.final_amount > 0
+            else (
+                state.execution_records[-1][2]["amount_out"]
+                if state.execution_records
+                else opportunity.starting_amount
+            )
+        )
+        final_without_fee = (
+            state.final_amount_without_fees
+            if state.final_amount_without_fees > 0
+            else (
+                state.execution_records[-1][2]["amount_out_without_fee"]
+                if state.execution_records
+                else opportunity.starting_amount
+            )
+        )
+
+        return state.orders, state.execution_records, (
+            final_amount,
+            final_without_fee,
+        )
+
+    def _execute_progressive_leg(
+        self,
+        opportunity: TriangularOpportunity,
+        state: _ProgressiveExecutionState,
+        index: int,
+        available_amount: float,
+    ) -> None:
+        if index >= len(opportunity.trades):
+            return
+
+        leg = opportunity.trades[index]
+        amount, scale = self._determine_order_amount(leg, available_amount)
+
+        if amount <= 0:
+            logger.debug(
+                "Skipping leg %s because rounded order amount dropped below precision (available=%s)",
+                leg.symbol,
+                available_amount,
+            )
+            return
+
+        order = self.exchange.create_market_order(
+            leg.symbol,
+            leg.side,
+            amount,
+            test_order=self.dry_run,
+        )
+
+        if self.dry_run:
+            metrics = self._planned_execution_metrics(leg)
+            state.orders.append(order)
+            state.execution_records.append((leg, order, metrics))
+            self._log_slippage_effect(leg, metrics)
+            if index + 1 < len(opportunity.trades):
+                self._execute_progressive_leg(
+                    opportunity,
+                    state,
+                    index + 1,
+                    leg.amount_out * scale,
+                )
+            else:
+                state.final_amount += metrics["amount_out"]
+                state.final_amount_without_fees += metrics["amount_out_without_fee"]
+            return
+
+        order_id = self._extract_order_id(order)
+        if not order_id:
+            raise RuntimeError(
+                f"Exchange response for {leg.side} {leg.symbol} order is missing an id"
+            )
+
+        latest_payload: Dict[str, Any] = {**order}
+        seen_trades: set[str] = set()
+
+        while True:
+            new_trades = self._fetch_new_trades_for_order(
+                order_id,
+                leg.symbol,
+                seen_trades,
+            )
+            for trade in new_trades:
+                chunk_metrics = self._extract_trade_metrics(trade, leg)
+                if chunk_metrics["amount_out"] <= 0:
+                    continue
+                if index + 1 < len(opportunity.trades):
+                    self._execute_progressive_leg(
+                        opportunity,
+                        state,
+                        index + 1,
+                        chunk_metrics["amount_out"],
+                    )
+
+            try:
+                latest = self.exchange.fetch_order(order_id, leg.symbol)
+            except Exception as exc:  # pragma: no cover - ccxt/network failure
+                logger.debug(
+                    "Unable to poll order %s for %s while streaming fills: %s",
+                    order_id,
+                    leg.symbol,
+                    exc,
+                )
+                latest = None
+
+            if latest:
+                latest_payload.update(latest)
+
+            if self._order_complete(latest_payload):
+                break
+
+            time.sleep(self._ORDER_POLL_INTERVAL)
+
+        residual_trades = self._fetch_new_trades_for_order(
+            order_id,
+            leg.symbol,
+            seen_trades,
+        )
+        for trade in residual_trades:
+            chunk_metrics = self._extract_trade_metrics(trade, leg)
+            if chunk_metrics["amount_out"] <= 0:
+                continue
+            if index + 1 < len(opportunity.trades):
+                self._execute_progressive_leg(
+                    opportunity,
+                    state,
+                    index + 1,
+                    chunk_metrics["amount_out"],
+                )
+
+        resolved_order = self._resolve_order_payload(latest_payload, leg, order_id)
+        metrics = self._extract_execution_metrics(resolved_order, leg)
+
+        state.orders.append(resolved_order)
+        state.execution_records.append((leg, resolved_order, metrics))
+        self._log_slippage_effect(leg, metrics)
+
+        if index + 1 >= len(opportunity.trades):
+            state.final_amount += metrics["amount_out"]
+            state.final_amount_without_fees += metrics["amount_out_without_fee"]
+
+    def _fetch_new_trades_for_order(
+        self,
+        order_id: str,
+        symbol: str,
+        seen: set[str],
+    ) -> List[Dict[str, Any]]:
+        try:
+            trades = self.exchange.fetch_my_trades(
+                symbol,
+                limit=self._TRADE_HISTORY_LIMIT,
+            )
+        except Exception as exc:  # pragma: no cover - ccxt/network failure
+            logger.debug(
+                "Unable to fetch trades for %s when streaming order %s: %s",
+                symbol,
+                order_id,
+                exc,
+            )
+            return []
+
+        new_trades: List[Dict[str, Any]] = []
+        for trade in trades:
+            if self._extract_order_id(trade) != order_id and trade.get("order") != order_id:
+                continue
+            trade_key = self._identify_trade(trade)
+            if trade_key in seen:
+                continue
+            seen.add(trade_key)
+            new_trades.append(trade)
+
+        new_trades.sort(key=lambda trade: trade.get("timestamp") or 0)
+        return new_trades
+
+    def _identify_trade(self, trade: Dict[str, Any]) -> str:
+        trade_id = trade.get("id") or trade.get("trade_id") or trade.get("tid")
+        if trade_id:
+            return str(trade_id)
+        timestamp = trade.get("timestamp") or trade.get("datetime") or ""
+        amount = trade.get("amount") or trade.get("filled") or ""
+        cost = trade.get("cost") or ""
+        return f"{timestamp}-{amount}-{cost}"
+
+    def _extract_trade_metrics(
+        self,
+        trade: Dict[str, Any],
+        leg: TriangularTradeLeg,
+    ) -> Dict[str, float]:
+        metrics = self._planned_execution_metrics(leg)
+
+        base, quote = leg.symbol.split("/")
+        traded_quantity = self._safe_float(trade.get("amount"))
+        if traded_quantity is None:
+            traded_quantity = self._safe_float(trade.get("filled"))
+        traded_quantity = float(traded_quantity or 0.0)
+
+        price = self._safe_float(trade.get("price"))
+        cost = self._safe_float(trade.get("cost"))
+        if cost is None and price is not None:
+            cost = price * traded_quantity
+
+        fee_totals: Dict[str, float] = {}
+        for fee in self._normalised_trade_fees(trade):
+            currency = fee.get("currency")
+            fee_cost = self._safe_float(fee.get("cost"))
+            if not currency or fee_cost is None:
+                continue
+            code = str(currency).upper()
+            fee_totals[code] = fee_totals.get(code, 0.0) + fee_cost
+
+        base_fee = fee_totals.get(base) or fee_totals.get(base.upper(), 0.0)
+        quote_fee = fee_totals.get(quote) or fee_totals.get(quote.upper(), 0.0)
+        base_fee = float(base_fee or 0.0)
+        quote_fee = float(quote_fee or 0.0)
+
+        if leg.side == "buy":
+            amount_in = (cost if cost is not None else metrics["amount_in"]) + quote_fee
+            amount_out_without_fee = traded_quantity
+            amount_out = max(traded_quantity - base_fee, 0.0)
+        else:
+            amount_in = traded_quantity + base_fee
+            amount_out_without_fee = cost if cost is not None else metrics["amount_out_without_fee"]
+            amount_out = max((amount_out_without_fee or 0.0) - quote_fee, 0.0)
+
+        metrics.update(
+            {
+                "amount_in": float(amount_in),
+                "amount_out": float(amount_out),
+                "amount_out_without_fee": float(amount_out_without_fee or 0.0),
+                "traded_quantity": float(traded_quantity),
+                "fee_breakdown": {k: float(v) for k, v in fee_totals.items()},
+            }
+        )
+
+        return metrics
+
+    @staticmethod
+    def _normalised_trade_fees(trade: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
+        fees: List[Dict[str, Any]] = []
+        fee_field = trade.get("fee")
+        if isinstance(fee_field, dict):
+            fees.append(fee_field)
+        elif isinstance(fee_field, list):
+            fees.extend(f for f in fee_field if isinstance(f, dict))
+        fees_field = trade.get("fees")
+        if isinstance(fees_field, list):
+            fees.extend(f for f in fees_field if isinstance(f, dict))
+        return fees
+
+    def _order_complete(self, payload: Dict[str, Any]) -> bool:
+        status = str(payload.get("status") or "").lower()
+        if status in {"closed", "canceled", "cancelled", "rejected"}:
+            return True
+        remaining = self._safe_float(payload.get("remaining"))
+        if remaining is not None and remaining <= 0:
+            return True
+        filled = self._safe_float(payload.get("filled")) or 0.0
+        if status == "open" and remaining is None and filled > 0:
+            return True
+        return False
+
+    def _log_slippage_effect(
+        self, leg: TriangularTradeLeg, metrics: Mapping[str, Any]
+    ) -> None:
+        planned_in = float(leg.amount_in)
+        planned_out = float(leg.amount_out)
+        actual_in = self._safe_float(metrics.get("amount_in"))
+        actual_out = self._safe_float(metrics.get("amount_out"))
+        if actual_in is None or actual_out is None:
+            return
+
+        input_delta = actual_in - planned_in
+        input_pct = (input_delta / planned_in * 100.0) if planned_in else 0.0
+        output_delta = actual_out - planned_out
+        output_pct = (output_delta / planned_out * 100.0) if planned_out else 0.0
+
+        logger.info(
+            "Slippage effect for %s %s: input %+,.8f (%+.4f%%) output %+,.8f (%+.4f%%)",
+            leg.side.upper(),
+            leg.symbol,
+            input_delta,
+            input_pct,
+            output_delta,
+            output_pct,
+        )
+
+    def _log_route_slippage(
+        self,
+        opportunity: TriangularOpportunity,
+        actual_final_amount: float,
+        actual_final_without_fees: float,
+        actual_profit_percentage: float,
+    ) -> None:
+        planned_final = float(opportunity.final_amount)
+        planned_final_wo_fee = float(opportunity.final_amount_without_fees)
+        delta_final = actual_final_amount - planned_final
+        delta_final_pct = (
+            (actual_final_amount / planned_final - 1.0) * 100.0
+            if planned_final
+            else 0.0
+        )
+        delta_wo_fee = actual_final_without_fees - planned_final_wo_fee
+        delta_wo_fee_pct = (
+            (actual_final_without_fees / planned_final_wo_fee - 1.0) * 100.0
+            if planned_final_wo_fee
+            else 0.0
+        )
+
+        logger.info(
+            "Route execution slippage: final %+,.8f (%+.4f%%) without fees %+,.8f (%+.4f%%) profit %+,.4f%%",
+            delta_final,
+            delta_final_pct,
+            delta_wo_fee,
+            delta_wo_fee_pct,
+            actual_profit_percentage,
+        )
 
     def _determine_order_amount(
         self,

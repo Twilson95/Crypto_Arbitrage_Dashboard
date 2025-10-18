@@ -53,6 +53,7 @@ WEBSOCKET_TIMEOUT_DEFAULT = 1_000_000.0
 PRICE_REFRESH_INTERVAL_DEFAULT = 3_000_000.0
 PRICE_MAX_AGE_DEFAULT = 60.0
 SLIPPAGE_USAGE_FRACTION_DEFAULT = 1.0
+PARTIAL_FILL_MODE_DEFAULT = "wait"
 ASSET_FILTER_DEFAULT: Sequence[str] = ("USD",
                                        "USDC","USDT","USDG",
                                        "BTC","ETH","SOL","DOGE","ADA","XRP",
@@ -1048,6 +1049,61 @@ async def evaluate_and_execute(
 
             if slippage_decision is not None:
                 final_decision = slippage_decision
+                worst_leg_slippage = max(
+                    (
+                        leg.output_slippage_pct
+                        for leg in final_decision.simulation.legs
+                    ),
+                    default=0.0,
+                )
+                if worst_leg_slippage > 0.0:
+                    worst_factor = max(0.0, 1.0 - worst_leg_slippage / 100.0)
+                    if worst_factor <= 0.0:
+                        logger.info(
+                            "Skipping opportunity because worst-leg slippage %.4f%% leaves no executable size.",
+                            worst_leg_slippage,
+                        )
+                        continue
+                    worst_scale = final_decision.scale * worst_factor
+                    try:
+                        worst_adjusted = _simulate_scale(worst_scale)
+                    except InsufficientLiquidityError:
+                        logger.info(
+                            "Skipping opportunity because the order book cannot satisfy the worst-leg slippage %.4f%% adjustment.",
+                            worst_leg_slippage,
+                        )
+                        continue
+                    except Exception as exc:
+                        logger.info(
+                            "Skipping opportunity after applying worst-leg slippage %.4f%% scaling: %s",
+                            worst_leg_slippage,
+                            exc,
+                        )
+                        continue
+                    if not _decision_within_threshold(worst_adjusted, threshold):
+                        logger.info(
+                            "Skipping opportunity because worst-leg slippage %.4f%% scaling resulted in total slippage %.4f%% (max leg price %.4f%% / size %.4f%%) above %.4f%%.",
+                            worst_leg_slippage,
+                            worst_adjusted.total_slippage_pct,
+                            worst_adjusted.max_leg_slippage_pct,
+                            worst_adjusted.max_leg_output_slippage_pct,
+                            threshold,
+                        )
+                        continue
+                    if worst_adjusted.scale <= 0.0:
+                        logger.info(
+                            "Skipping opportunity because worst-leg slippage %.4f%% reduced executable size to zero.",
+                            worst_leg_slippage,
+                        )
+                        continue
+                    if worst_adjusted.scale < final_decision.scale - 1e-9:
+                        logger.info(
+                            "Worst-leg slippage %.4f%% reduced executable scale from %.2f%% to %.2f%%.",
+                            worst_leg_slippage,
+                            final_decision.scale * 100.0,
+                            worst_adjusted.scale * 100.0,
+                        )
+                    final_decision = worst_adjusted
                 usage_fraction = max(min(slippage_usage_fraction, 1.0), 0.0)
                 if usage_fraction <= 0.0:
                     logger.info(
@@ -1308,6 +1364,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             exchange,
             dry_run=not args.live_trading,
             trade_log_path=trade_log_path,
+            partial_fill_mode=args.partial_fill_mode,
         )
         if trade_log_path:
             logger.info(f"Logging executed trades to {trade_log_path}")
@@ -1519,6 +1576,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Fraction of the slippage-adjusted trade size to actually execute to reserve depth for other market "
             "participants (e.g. 0.6 to only use 60%% of the depth that satisfies the slippage constraint)."
+        ),
+    )
+    parser.add_argument(
+        "--partial-fill-mode",
+        choices=["wait", "progressive"],
+        default=PARTIAL_FILL_MODE_DEFAULT,
+        help=(
+            "Behaviour when an order leg is only partially filled: 'wait' blocks until the leg completes,"
+            " while 'progressive' forwards each filled chunk through the remaining legs as fills arrive."
         ),
     )
     parser.add_argument(
