@@ -16,6 +16,11 @@ from cryptopy.src.trading.triangular_arbitrage.models import (
     TriangularTradeLeg,
 )
 
+try:  # pragma: no cover - optional dependency when ccxt is unavailable in tests
+    from ccxt.base.errors import InsufficientFunds as CcxtInsufficientFunds  # type: ignore
+except Exception:  # pragma: no cover - fallback when ccxt is not installed
+    CcxtInsufficientFunds = None  # type: ignore[assignment]
+
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +46,7 @@ class TriangularArbitrageExecutor:
     _ORDER_COMPLETION_TIMEOUT = 15.0
     _ORDER_POLL_INTERVAL = 0.5
     _TRADE_HISTORY_LIMIT = 10
+    _INSUFFICIENT_FUNDS_RETRIES = 10
     PARTIAL_FILL_BEHAVIOURS = {"wait", "progressive"}
 
     def __init__(
@@ -217,19 +223,7 @@ class TriangularArbitrageExecutor:
         available_amount = opportunity.starting_amount
 
         for leg in opportunity.trades:
-            amount, scale = self._determine_order_amount(leg, available_amount)
-
-            if amount <= 0:
-                raise ValueError(
-                    f"Calculated non-positive trade amount ({amount}) for leg {leg.symbol}"
-                )
-
-            order = self.exchange.create_market_order(
-                leg.symbol,
-                leg.side,
-                amount,
-                test_order=self.dry_run,
-            )
+            order, amount, scale = self._submit_leg_order(leg, available_amount)
             if self.dry_run:
                 orders.append(order)
                 metrics = self._planned_execution_metrics(leg)
@@ -317,22 +311,15 @@ class TriangularArbitrageExecutor:
             return
 
         leg = opportunity.trades[index]
-        amount, scale = self._determine_order_amount(leg, available_amount)
-
-        if amount <= 0:
+        try:
+            order, amount, scale = self._submit_leg_order(leg, available_amount)
+        except ValueError:
             logger.debug(
                 "Skipping leg %s because rounded order amount dropped below precision (available=%s)",
                 leg.symbol,
                 available_amount,
             )
             return
-
-        order = self.exchange.create_market_order(
-            leg.symbol,
-            leg.side,
-            amount,
-            test_order=self.dry_run,
-        )
 
         if self.dry_run:
             metrics = self._planned_execution_metrics(leg)
@@ -600,6 +587,103 @@ class TriangularArbitrageExecutor:
             delta_wo_fee_pct,
             actual_profit_percentage,
         )
+
+    def _submit_leg_order(
+        self, leg: TriangularTradeLeg, available_amount: float
+    ) -> Tuple[Dict[str, Any], float, float]:
+        """Create a market order for ``leg``, retrying when funds are marginal."""
+
+        attempts = 1 if self.dry_run else self._INSUFFICIENT_FUNDS_RETRIES
+        attempt_available = float(available_amount)
+        last_error: Optional[Exception] = None
+
+        for attempt in range(attempts):
+            amount, scale = self._determine_order_amount(leg, attempt_available)
+
+            if amount <= 0:
+                raise ValueError(
+                    f"Calculated non-positive trade amount ({amount}) for leg {leg.symbol}"
+                )
+
+            try:
+                order = self.exchange.create_market_order(
+                    leg.symbol,
+                    leg.side,
+                    amount,
+                    test_order=self.dry_run,
+                )
+            except Exception as exc:
+                if self.dry_run or not self._is_insufficient_funds_error(exc):
+                    raise
+
+                last_error = exc
+                adjusted_available = self._reduce_available_after_insufficient_funds(
+                    attempt_available, attempt
+                )
+                if adjusted_available <= 0:
+                    break
+                if math.isclose(
+                    adjusted_available,
+                    attempt_available,
+                    rel_tol=0,
+                    abs_tol=1e-18,
+                ):
+                    adjusted_available = attempt_available * (1 - 1e-6)
+                if adjusted_available <= 0:
+                    break
+                logger.debug(
+                    "Retrying %s %s after insufficient funds (attempt %s/%s): %s -> %s",
+                    leg.side,
+                    leg.symbol,
+                    attempt + 1,
+                    attempts,
+                    attempt_available,
+                    adjusted_available,
+                )
+                attempt_available = adjusted_available
+                continue
+
+            return order, amount, scale
+
+        if last_error is not None:
+            raise last_error
+
+        raise ValueError(
+            f"Calculated non-positive trade amount for leg {leg.symbol} after adjustments"
+        )
+
+    def _reduce_available_after_insufficient_funds(
+        self, available_amount: float, attempt: int
+    ) -> float:
+        """Return a slightly smaller available amount after an insufficient funds error."""
+
+        if available_amount <= 0:
+            return 0.0
+
+        fractional_step = min(0.05, 2e-3 * (attempt + 1))
+        target = available_amount * (1 - fractional_step)
+        nudged = math.nextafter(available_amount, 0.0)
+
+        candidates = [value for value in (target, nudged) if value > 0]
+        if not candidates:
+            return 0.0
+
+        reduced = min(candidates)
+        if math.isclose(reduced, available_amount, rel_tol=0, abs_tol=1e-18):
+            reduced = available_amount * (1 - fractional_step)
+
+        return max(reduced, 0.0)
+
+    @staticmethod
+    def _is_insufficient_funds_error(exc: Exception) -> bool:
+        """Return ``True`` when ``exc`` indicates an insufficient funds rejection."""
+
+        if CcxtInsufficientFunds is not None and isinstance(exc, CcxtInsufficientFunds):
+            return True
+        if exc.__class__.__name__.lower() == "insufficientfunds":
+            return True
+        message = str(exc)
+        return "insufficient funds" in message.lower()
 
     def _determine_order_amount(
         self,

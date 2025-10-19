@@ -1,4 +1,5 @@
 import math
+from typing import Any, Dict, List
 
 from cryptopy.src.trading.triangular_arbitrage.executor import TriangularArbitrageExecutor
 from cryptopy.src.trading.triangular_arbitrage.models import TriangularTradeLeg
@@ -113,3 +114,43 @@ def test_order_amount_quantised_to_precision() -> None:
 
     assert math.isclose(amount, 0.012, rel_tol=0, abs_tol=1e-12)
     assert math.isclose(scale, 0.012 / 0.0123456, rel_tol=0, abs_tol=1e-12)
+
+
+def test_submit_leg_order_retries_after_insufficient_funds() -> None:
+    class InsufficientFunds(Exception):
+        pass
+
+    class _RetryExchange:
+        def __init__(self) -> None:
+            self.calls: List[float] = []
+            self.failures = 0
+
+        def create_market_order(self, symbol: str, side: str, amount: float, **_: Any) -> Dict[str, Any]:
+            self.calls.append(float(amount))
+            if self.failures == 0:
+                self.failures += 1
+                raise InsufficientFunds("Insufficient funds")
+            return {"id": "order", "symbol": symbol, "side": side, "amount": float(amount)}
+
+        def amount_to_precision(self, symbol: str, amount: float) -> float:
+            return float(amount)
+
+    exchange = _RetryExchange()
+    executor = TriangularArbitrageExecutor(exchange, dry_run=False)
+    leg = _make_leg(
+        symbol="PAXG/ETH",
+        side="buy",
+        amount_in=100.0,
+        amount_out=1.0,
+        traded_quantity=1.0,
+    )
+
+    order, amount, scale = executor._submit_leg_order(leg, available_amount=100.0)
+
+    assert len(exchange.calls) >= 2
+    assert exchange.calls[0] > exchange.calls[-1]
+    assert math.isclose(exchange.calls[0], 1.0, rel_tol=0, abs_tol=1e-12)
+    assert math.isclose(exchange.calls[-1], amount, rel_tol=0, abs_tol=1e-12)
+    assert amount < 1.0
+    assert scale < 1.0
+    assert order["amount"] == amount
