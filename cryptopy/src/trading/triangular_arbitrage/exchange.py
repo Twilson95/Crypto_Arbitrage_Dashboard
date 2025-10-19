@@ -595,6 +595,13 @@ class ExchangeConnection:
         self._ensure_required_credentials(self.rest_client)
         return self.rest_client.create_order(symbol, "market", side, amount, params=params)
 
+    def fetch_balance(self) -> Dict[str, Any]:
+        """Fetch the authenticated account balances from the exchange."""
+
+        self._apply_credentials(self.rest_client)
+        self._ensure_required_credentials(self.rest_client)
+        return self.rest_client.fetch_balance()
+
     def fetch_order(self, order_id: str, symbol: str) -> Dict[str, Any]:
         """Fetch a specific order from the exchange."""
 

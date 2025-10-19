@@ -598,7 +598,12 @@ class TriangularArbitrageExecutor:
         last_error: Optional[Exception] = None
 
         for attempt in range(attempts):
-            amount, scale = self._determine_order_amount(leg, attempt_available)
+            synced_available = self._sync_available_with_exchange(leg, attempt_available)
+
+            if synced_available <= 0:
+                break
+
+            amount, scale = self._determine_order_amount(leg, synced_available)
 
             if amount <= 0:
                 raise ValueError(
@@ -618,7 +623,7 @@ class TriangularArbitrageExecutor:
 
                 last_error = exc
                 adjusted_available = self._reduce_available_after_insufficient_funds(
-                    attempt_available, attempt
+                    synced_available, attempt
                 )
                 if adjusted_available <= 0:
                     break
@@ -684,6 +689,106 @@ class TriangularArbitrageExecutor:
             return True
         message = str(exc)
         return "insufficient funds" in message.lower()
+
+    def _sync_available_with_exchange(
+        self, leg: TriangularTradeLeg, available_amount: float
+    ) -> float:
+        """Cap ``available_amount`` to the exchange-reported free balance for ``leg``."""
+
+        if self.dry_run:
+            return float(available_amount)
+
+        currency = self._leg_balance_currency(leg)
+        if currency is None:
+            return float(available_amount)
+
+        fetch_balance = getattr(self.exchange, "fetch_balance", None)
+        if not callable(fetch_balance):
+            return float(available_amount)
+
+        try:
+            balance = fetch_balance()
+        except Exception as exc:  # pragma: no cover - network failure path
+            logger.debug(
+                "Unable to fetch balance while preparing %s %s: %s",
+                leg.side,
+                leg.symbol,
+                exc,
+            )
+            return float(available_amount)
+
+        exchange_available = self._extract_free_balance(balance, currency)
+        if exchange_available is None:
+            return float(available_amount)
+
+        capped = min(float(available_amount), exchange_available)
+        if capped < float(available_amount):
+            logger.debug(
+                "Capping available amount for %s %s to exchange balance %.16f (local %.16f)",
+                leg.side,
+                leg.symbol,
+                exchange_available,
+                available_amount,
+            )
+
+        return max(capped, 0.0)
+
+    @staticmethod
+    def _leg_balance_currency(leg: TriangularTradeLeg) -> Optional[str]:
+        try:
+            base, quote = leg.symbol.split("/")
+        except ValueError:  # pragma: no cover - defensive guard
+            return None
+        return base if leg.side == "sell" else quote
+
+    def _extract_free_balance(
+        self, balance: Any, currency: str
+    ) -> Optional[float]:
+        """Return the free balance for ``currency`` from ``balance`` if available."""
+
+        if balance is None:
+            return None
+
+        variants = {currency, currency.upper(), currency.lower()}
+
+        if isinstance(balance, dict):
+            free_section = balance.get("free")
+            if isinstance(free_section, dict):
+                for key in variants:
+                    value = free_section.get(key)
+                    if value is not None:
+                        return self._coerce_float(value)
+
+            for key in variants:
+                entry = balance.get(key)
+                value = self._extract_balance_entry(entry)
+                if value is not None:
+                    return value
+
+        return self._coerce_float(balance if currency in variants else None)
+
+    def _extract_balance_entry(self, entry: Any) -> Optional[float]:
+        if isinstance(entry, dict):
+            for field in ("free", "available", "total", "balance", "remaining"):
+                value = entry.get(field)
+                if value is not None:
+                    coerced = self._coerce_float(value)
+                    if coerced is not None:
+                        return coerced
+        else:
+            coerced = self._coerce_float(entry)
+            if coerced is not None:
+                return coerced
+        return None
+
+    @staticmethod
+    def _coerce_float(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def _determine_order_amount(
         self,
