@@ -6,6 +6,7 @@ import asyncio
 import logging
 import math
 import itertools
+import time
 from datetime import datetime
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -857,6 +858,29 @@ async def evaluate_and_execute(
         )
 
         best = raw_best
+        price_ages: Dict[str, float] = {}
+        now_wall = time.time()
+        for symbol in best.route.symbols:
+            snapshot = fresh_prices.get(symbol)
+            if snapshot is None:
+                continue
+            age = max(now_wall - snapshot.timestamp, 0.0)
+            price_ages[symbol] = age
+        if price_ages:
+            min_age = min(price_ages.values())
+            max_age = max(price_ages.values())
+            avg_age = sum(price_ages.values()) / len(price_ages)
+            formatted = ", ".join(
+                f"{symbol}:{age * 1000.0:.1f}ms" for symbol, age in sorted(price_ages.items())
+            )
+            logger.info(
+                "Price staleness for route %s: min=%.3fs avg=%.3fs max=%.3fs (%s)",
+                " -> ".join(best.route.symbols),
+                min_age,
+                avg_age,
+                max_age,
+                formatted,
+            )
         slippage_decision: Optional[SlippageDecision] = None
 
         if slippage_action != "ignore":
@@ -1047,63 +1071,63 @@ async def evaluate_and_execute(
 
                 slippage_decision = best_candidate
 
-            if slippage_decision is not None:
-                final_decision = slippage_decision
-                worst_leg_slippage = max(
-                    (
-                        leg.output_slippage_pct
-                        for leg in final_decision.simulation.legs
-                    ),
-                    default=0.0,
-                )
-                if worst_leg_slippage > 0.0:
-                    worst_factor = max(0.0, 1.0 - worst_leg_slippage / 100.0)
-                    if worst_factor <= 0.0:
-                        logger.info(
-                            "Skipping opportunity because worst-leg slippage %.4f%% leaves no executable size.",
-                            worst_leg_slippage,
-                        )
-                        continue
-                    worst_scale = final_decision.scale * worst_factor
-                    try:
-                        worst_adjusted = _simulate_scale(worst_scale)
-                    except InsufficientLiquidityError:
-                        logger.info(
-                            "Skipping opportunity because the order book cannot satisfy the worst-leg slippage %.4f%% adjustment.",
-                            worst_leg_slippage,
-                        )
-                        continue
-                    except Exception as exc:
-                        logger.info(
-                            "Skipping opportunity after applying worst-leg slippage %.4f%% scaling: %s",
-                            worst_leg_slippage,
-                            exc,
-                        )
-                        continue
-                    if not _decision_within_threshold(worst_adjusted, threshold):
-                        logger.info(
-                            "Skipping opportunity because worst-leg slippage %.4f%% scaling resulted in total slippage %.4f%% (max leg price %.4f%% / size %.4f%%) above %.4f%%.",
-                            worst_leg_slippage,
-                            worst_adjusted.total_slippage_pct,
-                            worst_adjusted.max_leg_slippage_pct,
-                            worst_adjusted.max_leg_output_slippage_pct,
-                            threshold,
-                        )
-                        continue
-                    if worst_adjusted.scale <= 0.0:
-                        logger.info(
-                            "Skipping opportunity because worst-leg slippage %.4f%% reduced executable size to zero.",
-                            worst_leg_slippage,
-                        )
-                        continue
-                    if worst_adjusted.scale < final_decision.scale - 1e-9:
-                        logger.info(
-                            "Worst-leg slippage %.4f%% reduced executable scale from %.2f%% to %.2f%%.",
-                            worst_leg_slippage,
-                            final_decision.scale * 100.0,
-                            worst_adjusted.scale * 100.0,
-                        )
-                    final_decision = worst_adjusted
+        if slippage_decision is not None:
+            final_decision = slippage_decision
+            worst_leg_slippage = max(
+                (
+                    leg.output_slippage_pct
+                    for leg in final_decision.simulation.legs
+                ),
+                default=0.0,
+            )
+            if worst_leg_slippage > 0.0:
+                worst_factor = max(0.0, 1.0 - worst_leg_slippage / 100.0)
+                if worst_factor <= 0.0:
+                    logger.info(
+                        "Skipping opportunity because worst-leg slippage %.4f%% leaves no executable size.",
+                        worst_leg_slippage,
+                    )
+                    continue
+                worst_scale = final_decision.scale * worst_factor
+                try:
+                    worst_adjusted = _simulate_scale(worst_scale)
+                except InsufficientLiquidityError:
+                    logger.info(
+                        "Skipping opportunity because the order book cannot satisfy the worst-leg slippage %.4f%% adjustment.",
+                        worst_leg_slippage,
+                    )
+                    continue
+                except Exception as exc:
+                    logger.info(
+                        "Skipping opportunity after applying worst-leg slippage %.4f%% scaling: %s",
+                        worst_leg_slippage,
+                        exc,
+                    )
+                    continue
+                if not _decision_within_threshold(worst_adjusted, threshold):
+                    logger.info(
+                        "Skipping opportunity because worst-leg slippage %.4f%% scaling resulted in total slippage %.4f%% (max leg price %.4f%% / size %.4f%%) above %.4f%%.",
+                        worst_leg_slippage,
+                        worst_adjusted.total_slippage_pct,
+                        worst_adjusted.max_leg_slippage_pct,
+                        worst_adjusted.max_leg_output_slippage_pct,
+                        threshold,
+                    )
+                    continue
+                if worst_adjusted.scale <= 0.0:
+                    logger.info(
+                        "Skipping opportunity because worst-leg slippage %.4f%% reduced executable size to zero.",
+                        worst_leg_slippage,
+                    )
+                    continue
+                if worst_adjusted.scale < final_decision.scale - 1e-9:
+                    logger.info(
+                        "Worst-leg slippage %.4f%% reduced executable scale from %.2f%% to %.2f%%.",
+                        worst_leg_slippage,
+                        final_decision.scale * 100.0,
+                        worst_adjusted.scale * 100.0,
+                    )
+                final_decision = worst_adjusted
                 usage_fraction = max(min(slippage_usage_fraction, 1.0), 0.0)
                 if usage_fraction <= 0.0:
                     logger.info(
@@ -1172,6 +1196,15 @@ async def evaluate_and_execute(
                         for leg in slippage_decision.simulation.legs
                     )
                     logger.info("Per-leg slippage estimates: %s", leg_details)
+
+        planning_ready_at = perf_counter()
+        planning_latency = planning_ready_at - evaluation_started_at
+        logger.info(
+            "Planning latency for %s triggered by %s: %.3fs",
+            " -> ".join(best.route.symbols),
+            reason_summary,
+            planning_latency,
+        )
 
         if best.profit_percentage < min_profit_percentage:
             logger.info(

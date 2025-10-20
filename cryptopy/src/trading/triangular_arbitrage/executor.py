@@ -71,12 +71,19 @@ class TriangularArbitrageExecutor:
         if opportunity.profit <= 0:
             raise ValueError("Cannot execute an unprofitable opportunity")
 
+        execution_started = time.perf_counter()
+        leg_timings: List[Dict[str, float]] = []
+
         if self.partial_fill_mode == "progressive" and not self.dry_run:
             orders, execution_records, final_amounts = self._execute_progressive(
-                opportunity
+                opportunity,
+                leg_timings,
             )
         else:
-            orders, execution_records, final_amounts = self._execute_serial(opportunity)
+            orders, execution_records, final_amounts = self._execute_serial(
+                opportunity,
+                leg_timings,
+            )
 
         actual_final_amount, actual_final_without_fees = final_amounts
         actual_profit = actual_final_amount - opportunity.starting_amount
@@ -108,6 +115,24 @@ class TriangularArbitrageExecutor:
             actual_final_without_fees,
             actual_profit_percentage,
         )
+
+        total_execution_time = time.perf_counter() - execution_started
+        if leg_timings:
+            for entry in leg_timings:
+                logger.info(
+                    "Execution timing for %s %s: submit %.3fs fill %.3fs total %.3fs",
+                    entry["side"],
+                    entry["symbol"],
+                    entry["submit_duration"],
+                    entry["fill_duration"],
+                    entry["total_duration"],
+                )
+            logger.info(
+                "Execution timing summary for %s: %.3fs across %d leg(s)",
+                " -> ".join(opportunity.route.symbols),
+                total_execution_time,
+                len(leg_timings),
+            )
 
         return orders
 
@@ -212,7 +237,9 @@ class TriangularArbitrageExecutor:
                 )
 
     def _execute_serial(
-        self, opportunity: TriangularOpportunity
+        self,
+        opportunity: TriangularOpportunity,
+        timings: Optional[List[Dict[str, float]]] = None,
     ) -> Tuple[
         List[Dict[str, Any]],
         List[Tuple[TriangularTradeLeg, Dict[str, Any], Dict[str, Any]]],
@@ -223,21 +250,48 @@ class TriangularArbitrageExecutor:
         available_amount = opportunity.starting_amount
 
         for leg in opportunity.trades:
+            leg_started_perf = time.perf_counter()
+            submit_start = time.perf_counter()
             order, amount, scale = self._submit_leg_order(leg, available_amount)
+            submit_duration = time.perf_counter() - submit_start
             if self.dry_run:
                 orders.append(order)
                 metrics = self._planned_execution_metrics(leg)
                 execution_records.append((leg, order, metrics))
                 available_amount = leg.amount_out * scale
                 self._log_slippage_effect(leg, metrics)
+                if timings is not None:
+                    total_duration = time.perf_counter() - leg_started_perf
+                    timings.append(
+                        {
+                            "symbol": leg.symbol,
+                            "side": leg.side,
+                            "submit_duration": submit_duration,
+                            "fill_duration": 0.0,
+                            "total_duration": total_duration,
+                        }
+                    )
                 continue
 
+            finalise_start = time.perf_counter()
             finalised_order, metrics = self._finalise_order_execution(order, leg)
+            fill_duration = time.perf_counter() - finalise_start
             orders.append(finalised_order)
             execution_records.append((leg, finalised_order, metrics))
             self._log_slippage_effect(leg, metrics)
 
             available_amount = metrics["amount_out"]
+            if timings is not None:
+                total_duration = time.perf_counter() - leg_started_perf
+                timings.append(
+                    {
+                        "symbol": leg.symbol,
+                        "side": leg.side,
+                        "submit_duration": submit_duration,
+                        "fill_duration": fill_duration,
+                        "total_duration": total_duration,
+                    }
+                )
 
         actual_final_amount = (
             opportunity.final_amount if self.dry_run else available_amount
@@ -258,7 +312,9 @@ class TriangularArbitrageExecutor:
         )
 
     def _execute_progressive(
-        self, opportunity: TriangularOpportunity
+        self,
+        opportunity: TriangularOpportunity,
+        timings: Optional[List[Dict[str, float]]] = None,
     ) -> Tuple[
         List[Dict[str, Any]],
         List[Tuple[TriangularTradeLeg, Dict[str, Any], Dict[str, Any]]],
@@ -274,6 +330,7 @@ class TriangularArbitrageExecutor:
             state,
             0,
             opportunity.starting_amount,
+            timings,
         )
 
         final_amount = (
@@ -306,11 +363,13 @@ class TriangularArbitrageExecutor:
         state: _ProgressiveExecutionState,
         index: int,
         available_amount: float,
+        timings: Optional[List[Dict[str, float]]] = None,
     ) -> None:
         if index >= len(opportunity.trades):
             return
 
         leg = opportunity.trades[index]
+        leg_started_perf = time.perf_counter()
         try:
             order, amount, scale = self._submit_leg_order(leg, available_amount)
         except ValueError:
@@ -319,7 +378,20 @@ class TriangularArbitrageExecutor:
                 leg.symbol,
                 available_amount,
             )
+            if timings is not None:
+                total_duration = time.perf_counter() - leg_started_perf
+                timings.append(
+                    {
+                        "symbol": leg.symbol,
+                        "side": leg.side,
+                        "submit_duration": total_duration,
+                        "fill_duration": 0.0,
+                        "total_duration": total_duration,
+                    }
+                )
             return
+
+        submit_duration = time.perf_counter() - leg_started_perf
 
         if self.dry_run:
             metrics = self._planned_execution_metrics(leg)
@@ -332,10 +404,22 @@ class TriangularArbitrageExecutor:
                     state,
                     index + 1,
                     leg.amount_out * scale,
+                    timings,
                 )
             else:
                 state.final_amount += metrics["amount_out"]
                 state.final_amount_without_fees += metrics["amount_out_without_fee"]
+            if timings is not None:
+                total_duration = time.perf_counter() - leg_started_perf
+                timings.append(
+                    {
+                        "symbol": leg.symbol,
+                        "side": leg.side,
+                        "submit_duration": total_duration,
+                        "fill_duration": 0.0,
+                        "total_duration": total_duration,
+                    }
+                )
             return
 
         order_id = self._extract_order_id(order)
@@ -363,6 +447,7 @@ class TriangularArbitrageExecutor:
                         state,
                         index + 1,
                         chunk_metrics["amount_out"],
+                        timings,
                     )
 
             try:
@@ -399,6 +484,7 @@ class TriangularArbitrageExecutor:
                     state,
                     index + 1,
                     chunk_metrics["amount_out"],
+                    timings,
                 )
 
         resolved_order = self._resolve_order_payload(latest_payload, leg, order_id)
@@ -411,6 +497,19 @@ class TriangularArbitrageExecutor:
         if index + 1 >= len(opportunity.trades):
             state.final_amount += metrics["amount_out"]
             state.final_amount_without_fees += metrics["amount_out_without_fee"]
+
+        if timings is not None:
+            total_duration = time.perf_counter() - leg_started_perf
+            fill_duration = max(total_duration - submit_duration, 0.0)
+            timings.append(
+                {
+                    "symbol": leg.symbol,
+                    "side": leg.side,
+                    "submit_duration": submit_duration,
+                    "fill_duration": fill_duration,
+                    "total_duration": total_duration,
+                }
+            )
 
     def _fetch_new_trades_for_order(
         self,
