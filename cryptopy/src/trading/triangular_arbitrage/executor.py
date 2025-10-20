@@ -450,6 +450,16 @@ class TriangularArbitrageExecutor:
                         timings,
                     )
 
+            ws_update, used_websocket = self._watch_order_update(
+                order_id,
+                leg.symbol,
+                self._ORDER_POLL_INTERVAL,
+            )
+            if ws_update:
+                latest_payload.update(ws_update)
+                if self._order_complete(latest_payload):
+                    break
+
             try:
                 latest = self.exchange.fetch_order(order_id, leg.symbol)
             except Exception as exc:  # pragma: no cover - ccxt/network failure
@@ -467,7 +477,10 @@ class TriangularArbitrageExecutor:
             if self._order_complete(latest_payload):
                 break
 
-            time.sleep(self._ORDER_POLL_INTERVAL)
+            if not used_websocket and latest is None and ws_update is None:
+                time.sleep(self._ORDER_POLL_INTERVAL)
+            elif used_websocket and latest is None and ws_update is None:
+                time.sleep(0.05)
 
         residual_trades = self._fetch_new_trades_for_order(
             order_id,
@@ -543,6 +556,20 @@ class TriangularArbitrageExecutor:
 
         new_trades.sort(key=lambda trade: trade.get("timestamp") or 0)
         return new_trades
+
+    def _watch_order_update(
+        self, order_id: str, symbol: str, timeout: float
+    ) -> Tuple[Optional[Dict[str, Any]], bool]:
+        watcher = getattr(self.exchange, "watch_order_via_websocket", None)
+        if watcher is None:
+            return None, False
+        try:
+            return watcher(order_id, symbol, timeout=timeout), True
+        except Exception:
+            logger.debug(
+                "watch_order_via_websocket failed for %s %s", order_id, symbol, exc_info=True
+            )
+            return None, True
 
     def _identify_trade(self, trade: Dict[str, Any]) -> str:
         trade_id = trade.get("id") or trade.get("trade_id") or trade.get("tid")
@@ -1128,6 +1155,16 @@ class TriangularArbitrageExecutor:
         latest_payload: Dict[str, Any] = {}
 
         while time.time() < deadline:
+            ws_update, used_websocket = self._watch_order_update(
+                order_id,
+                symbol,
+                self._ORDER_POLL_INTERVAL,
+            )
+            if ws_update:
+                latest_payload.update(ws_update)
+                if self._order_complete(latest_payload):
+                    break
+
             try:
                 latest = self.exchange.fetch_order(order_id, symbol)
             except Exception as exc:  # pragma: no cover - ccxt/network failure
@@ -1137,24 +1174,17 @@ class TriangularArbitrageExecutor:
                     symbol,
                     exc,
                 )
-                break
+                latest = None
 
             if latest:
                 latest_payload.update(latest)
+                if self._order_complete(latest_payload):
+                    break
 
-            status = str(latest_payload.get("status") or "").lower()
-            filled = self._safe_float(latest_payload.get("filled")) or 0.0
-            remaining = self._safe_float(latest_payload.get("remaining"))
-
-            if status in {"closed", "canceled", "cancelled", "rejected"}:
-                break
-            if remaining is not None and remaining <= 0:
-                break
-            if status == "open" and filled > 0 and remaining is None:
-                # Some exchanges omit ``remaining`` when fully filled.
-                break
-
-            time.sleep(self._ORDER_POLL_INTERVAL)
+            if not used_websocket and latest is None and ws_update is None:
+                time.sleep(self._ORDER_POLL_INTERVAL)
+            elif used_websocket and latest is None and ws_update is None:
+                time.sleep(0.05)
 
         return latest_payload
 

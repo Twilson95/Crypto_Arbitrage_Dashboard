@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
+import threading
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Sequence
 
 from cryptopy.src.trading.triangular_arbitrage.models import OrderBookSnapshot
@@ -31,6 +33,11 @@ try:  # pragma: no cover - optional dependency
     import ccxt.pro as ccxtpro  # type: ignore
 except Exception:  # pragma: no cover - gracefully degrade if ccxt.pro is not available
     ccxtpro = None  # type: ignore
+
+try:  # pragma: no cover - optional dependency
+    import requests
+except ModuleNotFoundError:  # pragma: no cover - optional dependency missing
+    requests = None  # type: ignore
 
 
 SANDBOX_MARKET_DATA_UNAVAILABLE = {
@@ -65,6 +72,10 @@ class ExchangeConnection:
         self._rest_sandbox_enabled = False
         self._market_data_rest_sandbox_enabled = False
         self._ws_sandbox_enabled = False
+        self._shared_http_session = requests.Session() if requests is not None else None
+        self._ws_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._ws_thread: Optional[threading.Thread] = None
+        self._ws_loop_ready = threading.Event()
 
         exchange_class = getattr(ccxt, self.exchange_name)
         rest_config = {
@@ -72,6 +83,7 @@ class ExchangeConnection:
             **self.credentials,
         }
         self.rest_client = rest_client or exchange_class(rest_config)
+        self._attach_shared_session(self.rest_client)
         self._apply_credentials(self.rest_client)
 
         if use_testnet:
@@ -95,6 +107,7 @@ class ExchangeConnection:
         else:
             self.market_data_client = self.rest_client
         if self.market_data_client is not self.rest_client:
+            self._attach_shared_session(self.market_data_client)
             self._apply_credentials(self.market_data_client)
 
         if (
@@ -119,6 +132,9 @@ class ExchangeConnection:
             }
             self.websocket_client = ws_class(ws_config)
             self._apply_credentials(self.websocket_client)
+
+        if self._supports_private_order_streams():
+            self._start_order_watch_loop()
 
         self.market_data_websocket_client = market_data_websocket_client or self.websocket_client
         if (
@@ -181,6 +197,156 @@ class ExchangeConnection:
         """Return the cached market metadata loaded during initialisation."""
 
         return self._market_cache
+
+    def _attach_shared_session(self, client: Any) -> None:
+        if not client or self._shared_http_session is None:
+            return
+        if hasattr(client, "session"):
+            try:
+                client.session = self._shared_http_session
+            except Exception:
+                logger.debug(
+                    "Unable to attach shared HTTP session to %s client", client,
+                    exc_info=True,
+                )
+
+    def _start_order_watch_loop(self) -> None:
+        if self._ws_loop is not None:
+            return
+
+        loop = asyncio.new_event_loop()
+        self._ws_loop = loop
+
+        def _run_loop() -> None:
+            asyncio.set_event_loop(loop)
+            self._ws_loop_ready.set()
+            try:
+                loop.run_forever()
+            finally:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                try:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                except Exception:
+                    pass
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.close()
+
+        thread = threading.Thread(target=_run_loop, name="exchange-order-watch", daemon=True)
+        self._ws_thread = thread
+        thread.start()
+        self._ws_loop_ready.wait(timeout=5.0)
+
+    def _stop_order_watch_loop(self) -> None:
+        loop = self._ws_loop
+        thread = self._ws_thread
+        if loop is None:
+            return
+        try:
+            loop.call_soon_threadsafe(loop.stop)
+        except RuntimeError:
+            pass
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5.0)
+        self._ws_loop = None
+        self._ws_thread = None
+        self._ws_loop_ready = threading.Event()
+
+    def _close_websocket_client(self, client: Any) -> None:
+        if not client or not hasattr(client, "close"):
+            return
+        try:
+            close_result = client.close()
+        except Exception:
+            logger.debug("Failed to close websocket client", exc_info=True)
+            return
+        if asyncio.iscoroutine(close_result):
+            loop = self._ws_loop
+            try:
+                if loop is not None and loop.is_running():
+                    asyncio.run_coroutine_threadsafe(close_result, loop).result(timeout=5.0)
+                else:
+                    asyncio.run(close_result)
+            except Exception:
+                logger.debug("Error awaiting websocket client close", exc_info=True)
+
+    def _supports_private_order_streams(self) -> bool:
+        client = self.websocket_client
+        return bool(client and hasattr(client, "watch_order"))
+
+    @staticmethod
+    def _order_payload_closed(payload: Dict[str, Any]) -> bool:
+        status = str(payload.get("status") or "").lower()
+        if status in {"closed", "canceled", "cancelled", "rejected"}:
+            return True
+        remaining = payload.get("remaining")
+        if remaining is not None:
+            try:
+                return float(remaining) <= 0
+            except (TypeError, ValueError):
+                pass
+        return False
+
+    async def _watch_order_until_complete(
+        self,
+        order_id: str,
+        symbol: str,
+        timeout: float,
+    ) -> Optional[Dict[str, Any]]:
+        client = self.websocket_client
+        if client is None or not hasattr(client, "watch_order"):
+            return None
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(timeout, 0.0)
+        last_payload: Optional[Dict[str, Any]] = None
+
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return last_payload
+            try:
+                payload = await asyncio.wait_for(
+                    client.watch_order(order_id, symbol),
+                    timeout=remaining,
+                )
+            except asyncio.TimeoutError:
+                return last_payload
+            except Exception:
+                logger.debug(
+                    "watch_order update failed for %s %s", order_id, symbol, exc_info=True
+                )
+                return last_payload
+
+            if not isinstance(payload, dict):
+                continue
+
+            last_payload = payload
+            if self._order_payload_closed(payload):
+                return payload
+
+    def watch_order_via_websocket(
+        self, order_id: str, symbol: str, *, timeout: float
+    ) -> Optional[Dict[str, Any]]:
+        """Attempt to stream order updates via websocket for faster fills."""
+
+        if not self._supports_private_order_streams():
+            return None
+        if self._ws_loop is None:
+            self._start_order_watch_loop()
+        coroutine = self._watch_order_until_complete(order_id, symbol, timeout)
+        try:
+            result = asyncio.run_coroutine_threadsafe(coroutine, self._ws_loop).result(
+                timeout + 1.0
+            )
+        except (concurrent.futures.TimeoutError, RuntimeError):
+            return None
+        except Exception:
+            logger.debug(
+                "watch_order coroutine errored for %s %s", order_id, symbol, exc_info=True
+            )
+            return None
+        return result
 
     def _to_precision(self, method_name: str, symbol: str, value: float) -> float:
         method = getattr(self.rest_client, method_name, None)
@@ -791,38 +957,21 @@ class ExchangeConnection:
             except Exception:
                 pass
         websocket_to_close = self.market_data_websocket_client
-        if websocket_to_close and hasattr(websocket_to_close, "close"):
-            try:
-                loop = None
-                try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    pass
-                close_coro = websocket_to_close.close()
-                if loop and loop.is_running():
-                    loop.create_task(close_coro)
-                else:
-                    asyncio.run(close_coro)
-            except Exception:
-                pass
+        if websocket_to_close:
+            self._close_websocket_client(websocket_to_close)
         if (
             self.websocket_client
             and self.websocket_client is not self.market_data_websocket_client
             and hasattr(self.websocket_client, "close")
         ):
+            self._close_websocket_client(self.websocket_client)
+        self._stop_order_watch_loop()
+        if self._shared_http_session is not None:
             try:
-                loop = None
-                try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    pass
-                close_coro = self.websocket_client.close()
-                if loop and loop.is_running():
-                    loop.create_task(close_coro)
-                else:
-                    asyncio.run(close_coro)
+                self._shared_http_session.close()
             except Exception:
-                pass
+                logger.debug("Failed to close shared HTTP session", exc_info=True)
+            self._shared_http_session = None
 
     async def aclose(self) -> None:
         if hasattr(self.rest_client, "close"):
@@ -850,3 +999,10 @@ class ExchangeConnection:
                 await self.websocket_client.close()
             except Exception:
                 pass
+        self._stop_order_watch_loop()
+        if self._shared_http_session is not None:
+            try:
+                self._shared_http_session.close()
+            except Exception:
+                logger.debug("Failed to close shared HTTP session", exc_info=True)
+            self._shared_http_session = None

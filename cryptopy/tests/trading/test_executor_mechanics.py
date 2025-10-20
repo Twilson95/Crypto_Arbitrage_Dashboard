@@ -1,5 +1,5 @@
 import math
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from cryptopy.src.trading.triangular_arbitrage.executor import TriangularArbitrageExecutor
 from cryptopy.src.trading.triangular_arbitrage.models import TriangularTradeLeg
@@ -190,3 +190,31 @@ def test_submit_leg_order_caps_to_exchange_balance() -> None:
     assert math.isclose(scale, 0.5, rel_tol=0, abs_tol=1e-12)
     assert order["amount"] == amount
     assert exchange.orders == [amount]
+
+
+def test_watch_order_update_without_websocket_hook() -> None:
+    executor = TriangularArbitrageExecutor(_DummyExchange(), dry_run=False)
+
+    payload, used = executor._watch_order_update("order", "ETH/USD", 0.1)
+
+    assert payload is None
+    assert used is False
+
+
+def test_watch_order_update_uses_exchange_hook() -> None:
+    class _WatchExchange(_DummyExchange):
+        def __init__(self) -> None:
+            self.calls: List[Tuple[str, str, float]] = []
+
+        def watch_order_via_websocket(self, order_id: str, symbol: str, timeout: float):
+            self.calls.append((order_id, symbol, timeout))
+            return {"id": order_id, "status": "closed"}
+
+    exchange = _WatchExchange()
+    executor = TriangularArbitrageExecutor(exchange, dry_run=False)
+
+    payload, used = executor._watch_order_update("abc", "ETH/USD", 0.2)
+
+    assert used is True
+    assert payload == {"id": "abc", "status": "closed"}
+    assert exchange.calls == [("abc", "ETH/USD", 0.2)]
