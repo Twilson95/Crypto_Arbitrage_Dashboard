@@ -44,7 +44,12 @@ class TriangularArbitrageExecutor:
     _ORDER_STATUS_ATTEMPTS = 5
     _ORDER_STATUS_DELAY = 0.2
     _ORDER_COMPLETION_TIMEOUT = 15.0
-    _ORDER_POLL_INTERVAL = 0.5
+    _ORDER_POLL_INTERVAL_FAST = 0.1
+    _ORDER_POLL_INTERVAL_SLOW = 0.5
+    _ORDER_POLL_FAST_WINDOW = 3.0
+    _REST_POLL_INTERVAL = 0.2
+    _REST_POLL_INTERVAL_WEBSOCKET = 0.5
+    _WEBSOCKET_IDLE_SLEEP = 0.02
     _TRADE_HISTORY_LIMIT = 10
     _INSUFFICIENT_FUNDS_RETRIES = 10
     PARTIAL_FILL_BEHAVIOURS = {"wait", "progressive"}
@@ -430,6 +435,8 @@ class TriangularArbitrageExecutor:
 
         latest_payload: Dict[str, Any] = {**order}
         seen_trades: set[str] = set()
+        order_poll_started = time.perf_counter()
+        last_rest_poll = time.perf_counter()
 
         while True:
             new_trades = self._fetch_new_trades_for_order(
@@ -450,18 +457,29 @@ class TriangularArbitrageExecutor:
                         timings,
                     )
 
+            poll_interval = self._order_poll_interval(order_poll_started)
             ws_update, used_websocket = self._watch_order_update(
                 order_id,
                 leg.symbol,
-                self._ORDER_POLL_INTERVAL,
+                poll_interval,
             )
             if ws_update:
                 latest_payload.update(ws_update)
                 if self._order_complete(latest_payload):
                     break
 
+            now = time.perf_counter()
+            should_poll_rest = (not used_websocket) or (
+                now - last_rest_poll >= self._rest_poll_interval(used_websocket)
+            )
             try:
-                latest = self.exchange.fetch_order(order_id, leg.symbol)
+                latest = (
+                    self.exchange.fetch_order(order_id, leg.symbol)
+                    if should_poll_rest
+                    else None
+                )
+                if should_poll_rest:
+                    last_rest_poll = now
             except Exception as exc:  # pragma: no cover - ccxt/network failure
                 logger.debug(
                     "Unable to poll order %s for %s while streaming fills: %s",
@@ -478,9 +496,9 @@ class TriangularArbitrageExecutor:
                 break
 
             if not used_websocket and latest is None and ws_update is None:
-                time.sleep(self._ORDER_POLL_INTERVAL)
+                time.sleep(poll_interval)
             elif used_websocket and latest is None and ws_update is None:
-                time.sleep(0.05)
+                time.sleep(min(self._WEBSOCKET_IDLE_SLEEP, poll_interval))
 
         residual_trades = self._fetch_new_trades_for_order(
             order_id,
@@ -570,6 +588,19 @@ class TriangularArbitrageExecutor:
                 "watch_order_via_websocket failed for %s %s", order_id, symbol, exc_info=True
             )
             return None, True
+
+    def _order_poll_interval(self, started_at: float) -> float:
+        elapsed = time.perf_counter() - started_at
+        if elapsed < self._ORDER_POLL_FAST_WINDOW:
+            return self._ORDER_POLL_INTERVAL_FAST
+        return self._ORDER_POLL_INTERVAL_SLOW
+
+    def _rest_poll_interval(self, used_websocket: bool) -> float:
+        return (
+            self._REST_POLL_INTERVAL_WEBSOCKET
+            if used_websocket
+            else self._REST_POLL_INTERVAL
+        )
 
     def _identify_trade(self, trade: Dict[str, Any]) -> str:
         trade_id = trade.get("id") or trade.get("trade_id") or trade.get("tid")
@@ -1153,20 +1184,33 @@ class TriangularArbitrageExecutor:
     def _wait_for_order_completion(self, order_id: str, symbol: str) -> Dict[str, Any]:
         deadline = time.time() + self._ORDER_COMPLETION_TIMEOUT
         latest_payload: Dict[str, Any] = {}
+        order_poll_started = time.perf_counter()
+        last_rest_poll = time.perf_counter()
 
         while time.time() < deadline:
+            poll_interval = self._order_poll_interval(order_poll_started)
             ws_update, used_websocket = self._watch_order_update(
                 order_id,
                 symbol,
-                self._ORDER_POLL_INTERVAL,
+                poll_interval,
             )
             if ws_update:
                 latest_payload.update(ws_update)
                 if self._order_complete(latest_payload):
                     break
 
+            now = time.perf_counter()
+            should_poll_rest = (not used_websocket) or (
+                now - last_rest_poll >= self._rest_poll_interval(used_websocket)
+            )
             try:
-                latest = self.exchange.fetch_order(order_id, symbol)
+                latest = (
+                    self.exchange.fetch_order(order_id, symbol)
+                    if should_poll_rest
+                    else None
+                )
+                if should_poll_rest:
+                    last_rest_poll = now
             except Exception as exc:  # pragma: no cover - ccxt/network failure
                 logger.debug(
                     "Unable to poll order %s for %s: %s",
@@ -1182,9 +1226,9 @@ class TriangularArbitrageExecutor:
                     break
 
             if not used_websocket and latest is None and ws_update is None:
-                time.sleep(self._ORDER_POLL_INTERVAL)
+                time.sleep(poll_interval)
             elif used_websocket and latest is None and ws_update is None:
-                time.sleep(0.05)
+                time.sleep(min(self._WEBSOCKET_IDLE_SLEEP, poll_interval))
 
         return latest_payload
 
