@@ -1,6 +1,8 @@
 import math
 from typing import Any, Dict, List, Tuple
 
+import pytest
+
 from cryptopy.src.trading.triangular_arbitrage.executor import TriangularArbitrageExecutor
 from cryptopy.src.trading.triangular_arbitrage.models import TriangularTradeLeg
 
@@ -218,3 +220,126 @@ def test_watch_order_update_uses_exchange_hook() -> None:
     assert used is True
     assert payload == {"id": "abc", "status": "closed"}
     assert exchange.calls == [("abc", "ETH/USD", 0.2)]
+
+
+def test_speculative_submit_retries_until_success() -> None:
+    class InsufficientFunds(Exception):
+        pass
+
+    class _SpeculativeExchange:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def create_market_order(self, symbol: str, side: str, amount: float, **_: Any) -> Dict[str, Any]:
+            self.calls += 1
+            if self.calls < 3:
+                raise InsufficientFunds("insufficient funds")
+            return {"id": f"order-{self.calls}", "symbol": symbol, "side": side, "amount": float(amount)}
+
+        def amount_to_precision(self, symbol: str, amount: float) -> float:
+            return float(amount)
+
+    exchange = _SpeculativeExchange()
+    executor = TriangularArbitrageExecutor(
+        exchange,
+        dry_run=False,
+        staggered_leg_delay=0.0,
+        staggered_slippage_assumption=[0.0],
+    )
+    leg = _make_leg(
+        symbol="ETH/USD",
+        side="buy",
+        amount_in=100.0,
+        amount_out=1.0,
+        traded_quantity=1.0,
+    )
+
+    order, amount, scale = executor._submit_leg_order(
+        leg,
+        available_amount=100.0,
+        speculative=True,
+    )
+
+    assert exchange.calls == 3
+    assert order["id"] == "order-3"
+    assert math.isclose(amount, 1.0, rel_tol=0, abs_tol=1e-12)
+    assert math.isclose(scale, 1.0, rel_tol=0, abs_tol=1e-12)
+
+
+def test_reconcile_staggered_gap_executes_residual() -> None:
+    class _StaggeredExchange(_DummyExchange):
+        def __init__(self) -> None:
+            self.orders: List[float] = []
+
+        def create_market_order(self, symbol: str, side: str, amount: float, **_: Any) -> Dict[str, Any]:
+            self.orders.append(float(amount))
+            return {"id": f"order-{len(self.orders)}", "symbol": symbol, "side": side, "amount": float(amount)}
+
+    class _StaggeredExecutor(TriangularArbitrageExecutor):
+        def __init__(self) -> None:
+            super().__init__(
+                _StaggeredExchange(),
+                dry_run=False,
+                staggered_leg_delay=0.0,
+                staggered_slippage_assumption=[0.0],
+            )
+            self._submitted: List[float] = []
+
+        def _submit_leg_order(
+            self,
+            leg: TriangularTradeLeg,
+            available_amount: float,
+            *,
+            speculative: bool = False,
+        ) -> Tuple[Dict[str, Any], float, float]:
+            self._submitted.append(available_amount)
+            return super()._submit_leg_order(leg, available_amount, speculative=speculative)
+
+        def _finalise_order_execution(
+            self, order: Dict[str, Any], leg: TriangularTradeLeg
+        ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+            amount = float(order["amount"])
+            metrics = {
+                "amount_in": amount,
+                "amount_out": amount,
+                "amount_out_without_fee": amount,
+                "traded_quantity": amount,
+                "fee_breakdown": {},
+            }
+            return order, metrics
+
+    executor = _StaggeredExecutor()
+    leg = _make_leg(
+        symbol="ALGO/USD",
+        side="sell",
+        amount_in=100.0,
+        amount_out=100.0,
+        traded_quantity=100.0,
+    )
+
+    previous_state = {"aggregated_metrics": {"amount_out": 100.0}}
+    current_state = {
+        "leg": leg,
+        "orders": [],
+        "metrics": [
+            {
+                "amount_in": 90.0,
+                "amount_out": 90.0,
+                "amount_out_without_fee": 90.0,
+                "traded_quantity": 90.0,
+                "fee_breakdown": {},
+            }
+        ],
+        "submit_durations": [],
+        "fill_durations": [],
+    }
+    current_state["aggregated_metrics"] = executor._combine_execution_metrics(
+        current_state["metrics"]
+    )
+
+    reconciled = executor._reconcile_staggered_gap(previous_state, current_state)
+
+    assert executor._submitted[-1] == pytest.approx(10.0)
+    assert math.isclose(reconciled["amount_in"], 100.0, rel_tol=0, abs_tol=1e-12)
+    assert math.isclose(reconciled["amount_out"], 100.0, rel_tol=0, abs_tol=1e-12)
+    assert len(current_state["orders"]) == 1

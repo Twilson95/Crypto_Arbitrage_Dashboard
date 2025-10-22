@@ -55,6 +55,8 @@ PRICE_REFRESH_INTERVAL_DEFAULT = 3_000_000.0
 PRICE_MAX_AGE_DEFAULT = 60.0
 SLIPPAGE_USAGE_FRACTION_DEFAULT = 1.0
 PARTIAL_FILL_MODE_DEFAULT = "wait"
+STAGGERED_LEG_DELAY_DEFAULT = 0.1
+STAGGERED_SLIPPAGE_ASSUMPTION_DEFAULT = 0.01
 ASSET_FILTER_DEFAULT: Sequence[str] = ("USD",
                                        "USDC","USDT","USDG",
                                        "BTC","ETH","SOL","DOGE","ADA","XRP",
@@ -1392,12 +1394,20 @@ async def run_from_args(args: argparse.Namespace) -> None:
         slippage_buffer=args.slippage_buffer,
     )
     executor: Optional[TriangularArbitrageExecutor] = None
+    staggered_slippage = (
+        args.staggered_slippage_assumption
+        if getattr(args, "staggered_slippage_assumption", None)
+        else [STAGGERED_SLIPPAGE_ASSUMPTION_DEFAULT]
+    )
+
     if args.enable_execution:
         executor = TriangularArbitrageExecutor(
             exchange,
             dry_run=not args.live_trading,
             trade_log_path=trade_log_path,
             partial_fill_mode=args.partial_fill_mode,
+            staggered_leg_delay=args.staggered_leg_delay,
+            staggered_slippage_assumption=staggered_slippage,
         )
         if trade_log_path:
             logger.info(f"Logging executed trades to {trade_log_path}")
@@ -1613,11 +1623,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--partial-fill-mode",
-        choices=["wait", "progressive"],
+        choices=["wait", "progressive", "staggered"],
         default=PARTIAL_FILL_MODE_DEFAULT,
         help=(
-            "Behaviour when an order leg is only partially filled: 'wait' blocks until the leg completes,"
-            " while 'progressive' forwards each filled chunk through the remaining legs as fills arrive."
+            "Behaviour when an order leg is partially filled: 'wait' blocks until completion, "
+            "'progressive' streams fills downstream, and 'staggered' submits each leg speculatively "
+            "with a configurable delay and reconciles any residual once fills settle."
+        ),
+    )
+    parser.add_argument(
+        "--staggered-leg-delay",
+        type=float,
+        default=STAGGERED_LEG_DELAY_DEFAULT,
+        help=(
+            "Seconds to wait between submitting consecutive legs when using the 'staggered' "
+            "partial-fill mode."
+        ),
+    )
+    parser.add_argument(
+        "--staggered-slippage-assumption",
+        type=float,
+        action="append",
+        default=None,
+        metavar="FRACTION",
+        help=(
+            "Assumed fractional slippage per leg when sizing staggered submissions (e.g. 0.01 for 1%%). "
+            "Provide once to reuse for all legs or multiple times to set leg-specific values."
         ),
     )
     parser.add_argument(
