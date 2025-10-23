@@ -266,6 +266,62 @@ def test_speculative_submit_retries_until_success() -> None:
     assert math.isclose(scale, 1.0, rel_tol=0, abs_tol=1e-12)
 
 
+def test_speculative_submit_scales_to_available_balance() -> None:
+    class InsufficientFunds(Exception):
+        pass
+
+    class _PartialExchange:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.balance = 4.0
+
+        def create_market_order(
+            self, symbol: str, side: str, amount: float, **_: Any
+        ) -> Dict[str, Any]:
+            self.calls += 1
+            if self.calls == 1:
+                raise InsufficientFunds("insufficient funds")
+            return {
+                "id": f"order-{self.calls}",
+                "symbol": symbol,
+                "side": side,
+                "amount": float(amount),
+            }
+
+        def fetch_balance(self) -> Dict[str, Dict[str, float]]:
+            return {"free": {"ALGO": self.balance}}
+
+        def amount_to_precision(self, symbol: str, amount: float) -> float:
+            return float(amount)
+
+    exchange = _PartialExchange()
+    executor = TriangularArbitrageExecutor(
+        exchange,
+        dry_run=False,
+        staggered_leg_delay=0.0,
+        staggered_slippage_assumption=[0.0],
+    )
+
+    leg = _make_leg(
+        symbol="ALGO/USD",
+        side="sell",
+        amount_in=100.0,
+        amount_out=100.0,
+        traded_quantity=100.0,
+    )
+
+    order, amount, scale = executor._submit_leg_order(
+        leg,
+        available_amount=100.0,
+        speculative=True,
+    )
+
+    assert exchange.calls == 2
+    assert order["id"] == "order-2"
+    assert math.isclose(amount, 4.0, rel_tol=0, abs_tol=1e-12)
+    assert math.isclose(scale, 0.04, rel_tol=0, abs_tol=1e-12)
+
+
 def test_reconcile_staggered_gap_executes_residual() -> None:
     class _StaggeredExchange(_DummyExchange):
         def __init__(self) -> None:

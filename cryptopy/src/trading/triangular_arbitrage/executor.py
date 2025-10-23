@@ -993,8 +993,15 @@ class TriangularArbitrageExecutor:
             amount, scale = self._determine_order_amount(leg, synced_available)
 
             if amount <= 0:
-                if speculative and self.staggered_leg_delay > 0:
-                    time.sleep(self.staggered_leg_delay)
+                if speculative:
+                    synced_after_error = self._sync_available_with_exchange(
+                        leg, attempt_available
+                    )
+                    if synced_after_error > 0 and synced_after_error != attempt_available:
+                        attempt_available = synced_after_error
+                        continue
+                    if self.staggered_leg_delay > 0:
+                        time.sleep(self.staggered_leg_delay)
                     continue
                 raise ValueError(
                     f"Calculated non-positive trade amount ({amount}) for leg {leg.symbol}"
@@ -1013,6 +1020,11 @@ class TriangularArbitrageExecutor:
 
                 last_error = exc
                 if speculative:
+                    synced_after_error = self._sync_available_with_exchange(
+                        leg, attempt_available
+                    )
+                    if synced_after_error > 0 and synced_after_error < attempt_available:
+                        attempt_available = synced_after_error
                     if self.staggered_leg_delay > 0:
                         time.sleep(self.staggered_leg_delay)
                     continue
