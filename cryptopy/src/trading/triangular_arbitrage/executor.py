@@ -279,7 +279,7 @@ class TriangularArbitrageExecutor:
                 metrics = self._planned_execution_metrics(leg)
                 execution_records.append((leg, order, metrics))
                 available_amount = leg.amount_out * scale
-                self._log_slippage_effect(leg, metrics)
+                self._log_slippage_effect(leg, metrics, label="total")
                 if timings is not None:
                     total_duration = time.perf_counter() - leg_started_perf
                     timings.append(
@@ -298,7 +298,7 @@ class TriangularArbitrageExecutor:
             fill_duration = time.perf_counter() - finalise_start
             orders.append(finalised_order)
             execution_records.append((leg, finalised_order, metrics))
-            self._log_slippage_effect(leg, metrics)
+            self._log_slippage_effect(leg, metrics, label="total")
 
             available_amount = metrics["amount_out"]
             if timings is not None:
@@ -437,7 +437,7 @@ class TriangularArbitrageExecutor:
             combined_order = self._combined_staggered_order(state)
             orders.extend(state["orders"])
             execution_records.append((state["leg"], combined_order, aggregated))
-            self._log_slippage_effect(state["leg"], aggregated)
+            self._log_slippage_effect(state["leg"], aggregated, label="total")
 
             if timings is not None:
                 submit_total = sum(state["submit_durations"])
@@ -491,6 +491,9 @@ class TriangularArbitrageExecutor:
             metrics_list.append(metrics)
             fill_durations.append(fill_duration)
 
+            label = "primary" if order_index == 0 else f"residual #{order_index}"
+            self._log_slippage_effect(leg, metrics, label=label)
+
         aggregated = self._combine_execution_metrics(metrics_list)
         state["aggregated_metrics"] = aggregated
         return aggregated
@@ -523,6 +526,10 @@ class TriangularArbitrageExecutor:
             current_state["orders"][-1] = resolved_order
             current_state.setdefault("metrics", []).append(metrics)
             current_state.setdefault("fill_durations", []).append(fill_duration)
+
+            order_index = len(current_state["metrics"]) - 1
+            label = "primary" if order_index == 0 else f"residual #{order_index}"
+            self._log_slippage_effect(current_state["leg"], metrics, label=label)
 
             aggregated = self._combine_execution_metrics(current_state["metrics"])
             current_state["aggregated_metrics"] = aggregated
@@ -618,7 +625,7 @@ class TriangularArbitrageExecutor:
             metrics = self._planned_execution_metrics(leg)
             state.orders.append(order)
             state.execution_records.append((leg, order, metrics))
-            self._log_slippage_effect(leg, metrics)
+            self._log_slippage_effect(leg, metrics, label="total")
             if index + 1 < len(opportunity.trades):
                 self._execute_progressive_leg(
                     opportunity,
@@ -739,7 +746,7 @@ class TriangularArbitrageExecutor:
 
         state.orders.append(resolved_order)
         state.execution_records.append((leg, resolved_order, metrics))
-        self._log_slippage_effect(leg, metrics)
+        self._log_slippage_effect(leg, metrics, label="total")
 
         if index + 1 >= len(opportunity.trades):
             state.final_amount += metrics["amount_out"]
@@ -906,7 +913,11 @@ class TriangularArbitrageExecutor:
         return False
 
     def _log_slippage_effect(
-        self, leg: TriangularTradeLeg, metrics: Mapping[str, Any]
+        self,
+        leg: TriangularTradeLeg,
+        metrics: Mapping[str, Any],
+        *,
+        label: Optional[str] = None,
     ) -> None:
         planned_in = float(leg.amount_in)
         planned_out = float(leg.amount_out)
@@ -920,10 +931,13 @@ class TriangularArbitrageExecutor:
         output_delta = actual_out - planned_out
         output_pct = (output_delta / planned_out * 100.0) if planned_out else 0.0
 
+        prefix = f"Slippage effect for {leg.side.upper()} {leg.symbol}"
+        if label:
+            prefix = f"{prefix} [{label}]"
+
         logger.info(
-            "Slippage effect for %s %s: input %+0.8f (%+.4f%%) output %+0.8f (%+.4f%%)",
-            leg.side.upper(),
-            leg.symbol,
+            "%s: input %+0.8f (%+.4f%%) output %+0.8f (%+.4f%%)",
+            prefix,
             input_delta,
             input_pct,
             output_delta,
