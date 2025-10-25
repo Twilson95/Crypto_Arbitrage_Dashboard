@@ -83,6 +83,7 @@ class TriangularArbitrageExecutor:
             self._staggered_slippage = (0.01,)
         self._staggered_runtime_factors: Dict[int, float] = {}
         self._staggered_expected_residuals: Dict[int, Dict[str, Any]] = {}
+        self._partial_mode_log_cache: Dict[str, bool] = {}
 
     def execute(self, opportunity: TriangularOpportunity) -> List[Dict[str, Any]]:
         if opportunity.profit <= 0:
@@ -90,6 +91,8 @@ class TriangularArbitrageExecutor:
 
         execution_started = time.perf_counter()
         leg_timings: List[Dict[str, float]] = []
+
+        self._log_execution_mode(opportunity)
 
         if self.partial_fill_mode == "progressive" and not self.dry_run:
             orders, execution_records, final_amounts = self._execute_progressive(
@@ -1118,6 +1121,51 @@ class TriangularArbitrageExecutor:
         if isinstance(fees_field, list):
             fees.extend(f for f in fees_field if isinstance(f, dict))
         return fees
+
+    def _log_execution_mode(self, opportunity: TriangularOpportunity) -> None:
+        route_key = " -> ".join(opportunity.route.symbols)
+
+        if self.partial_fill_mode == "staggered":
+            logger.info(
+                "Executing %s with staggered partial-fill mode: delay %.3fs, assumptions %s",
+                route_key,
+                self.staggered_leg_delay,
+                self._format_staggered_assumptions(),
+            )
+            return
+
+        if self.partial_fill_mode == "progressive":
+            logger.info(
+                "Executing %s with progressive partial-fill mode (streaming partial fills)",
+                route_key,
+            )
+            return
+
+        cache_key = f"wait::{route_key}"
+        if self._partial_mode_log_cache.get(cache_key):
+            return
+
+        self._partial_mode_log_cache[cache_key] = True
+        assumption_summary = self._format_staggered_assumptions()
+        if assumption_summary != "none":
+            logger.info(
+                "Executing %s with wait partial-fill mode (staggered assumptions %s inactive)",
+                route_key,
+                assumption_summary,
+            )
+        else:
+            logger.info(
+                "Executing %s with wait partial-fill mode",
+                route_key,
+            )
+
+    def _format_staggered_assumptions(self) -> str:
+        if not self._staggered_slippage:
+            return "none"
+        filtered = [value for value in self._staggered_slippage if value > 0]
+        if not filtered:
+            return "none"
+        return ", ".join(f"{value * 100:.2f}%" for value in filtered)
 
     def _order_complete(self, payload: Dict[str, Any]) -> bool:
         status = str(payload.get("status") or "").lower()
