@@ -81,6 +81,8 @@ class TriangularArbitrageExecutor:
             self._staggered_slippage = tuple(processed)
         else:
             self._staggered_slippage = (0.01,)
+        self._staggered_runtime_factors: Dict[int, float] = {}
+        self._staggered_expected_residuals: Dict[int, Dict[str, Any]] = {}
 
     def execute(self, opportunity: TriangularOpportunity) -> List[Dict[str, Any]]:
         if opportunity.profit <= 0:
@@ -392,89 +394,296 @@ class TriangularArbitrageExecutor:
         if not opportunity.trades:
             return [], [], (opportunity.starting_amount, opportunity.starting_amount)
 
-        leg_states: List[Dict[str, Any]] = []
-        available_amount = opportunity.starting_amount
+        overrides, expected = self._prepare_staggered_factors(opportunity)
+        previous_factors = self._staggered_runtime_factors
+        previous_expected = self._staggered_expected_residuals
+        self._staggered_runtime_factors = overrides
+        self._staggered_expected_residuals = expected
 
-        for index, leg in enumerate(opportunity.trades):
-            state: Dict[str, Any] = {
-                "leg": leg,
-                "orders": [],
-                "metrics": [],
-                "submit_durations": [],
-                "fill_durations": [],
-                "start_time": time.perf_counter(),
-            }
+        try:
+            leg_states: List[Dict[str, Any]] = []
+            available_amount = opportunity.starting_amount
 
-            submit_start = time.perf_counter()
-            order, amount, scale = self._submit_leg_order(
-                leg,
-                available_amount,
-                speculative=index > 0,
-            )
-            submit_duration = time.perf_counter() - submit_start
-            state["orders"].append(order)
-            state["submit_durations"].append(submit_duration)
-            state["initial_scale"] = scale
-            leg_states.append(state)
+            for index, leg in enumerate(opportunity.trades):
+                state: Dict[str, Any] = {
+                    "leg": leg,
+                    "orders": [],
+                    "metrics": [],
+                    "submit_durations": [],
+                    "fill_durations": [],
+                    "start_time": time.perf_counter(),
+                }
 
-            available_amount = max(
-                0.0,
-                float(leg.amount_out) * scale * self._staggered_slippage_factor(index),
-            )
+                self._log_staggered_plan(leg, available_amount, index)
 
-            if index + 1 < len(opportunity.trades) and self.staggered_leg_delay > 0:
-                time.sleep(self.staggered_leg_delay)
-
-        orders: List[Dict[str, Any]] = []
-        execution_records: List[Tuple[TriangularTradeLeg, Dict[str, Any], Dict[str, Any]]] = []
-
-        for index, state in enumerate(leg_states):
-            aggregated = self._finalise_staggered_orders(state)
-            if index > 0:
-                aggregated = self._reconcile_staggered_gap(leg_states[index - 1], state)
-
-            state["completed_time"] = time.perf_counter()
-            combined_order = self._combined_staggered_order(state)
-            orders.extend(state["orders"])
-            execution_records.append((state["leg"], combined_order, aggregated))
-            self._log_slippage_effect(state["leg"], aggregated, label="total")
-
-            if timings is not None:
-                submit_total = sum(state["submit_durations"])
-                fill_total = sum(state["fill_durations"])
-                total_duration = max(
-                    state.get("completed_time", time.perf_counter()) - state["start_time"],
-                    submit_total + fill_total,
+                submit_start = time.perf_counter()
+                order, amount, scale = self._submit_leg_order(
+                    leg,
+                    available_amount,
+                    speculative=index > 0,
                 )
-                timings.append(
-                    {
-                        "symbol": state["leg"].symbol,
-                        "side": state["leg"].side,
-                        "submit_duration": submit_total,
-                        "fill_duration": fill_total,
-                        "total_duration": total_duration,
-                    }
+                submit_duration = time.perf_counter() - submit_start
+                state["orders"].append(order)
+                state["submit_durations"].append(submit_duration)
+                state["initial_scale"] = scale
+                leg_states.append(state)
+
+                submitted_id = self._extract_order_id(order) or "<unknown>"
+                logger.info(
+                    "Submitted %s %s order %s for amount %.12f (scale %.6f)",
+                    leg.side.upper(),
+                    leg.symbol,
+                    submitted_id,
+                    float(amount),
+                    scale,
                 )
 
-        final_metrics = leg_states[-1].get("aggregated_metrics") if leg_states else None
-        final_amount = (
-            float(final_metrics.get("amount_out", opportunity.starting_amount))
-            if final_metrics
-            else opportunity.starting_amount
-        )
-        final_without_fee = (
-            float(final_metrics.get("amount_out_without_fee", opportunity.starting_amount))
-            if final_metrics
-            else opportunity.starting_amount
-        )
+                available_amount = max(
+                    0.0,
+                    float(leg.amount_out) * scale * self._staggered_slippage_factor(index),
+                )
 
-        return orders, execution_records, (final_amount, final_without_fee)
+                if index + 1 < len(opportunity.trades) and self.staggered_leg_delay > 0:
+                    time.sleep(self.staggered_leg_delay)
+
+            orders: List[Dict[str, Any]] = []
+            execution_records: List[Tuple[TriangularTradeLeg, Dict[str, Any], Dict[str, Any]]] = []
+
+            for index, state in enumerate(leg_states):
+                aggregated = self._finalise_staggered_orders(state)
+                if index > 0:
+                    aggregated = self._reconcile_staggered_gap(leg_states[index - 1], state)
+
+                state["completed_time"] = time.perf_counter()
+                combined_order = self._combined_staggered_order(state)
+                orders.extend(state["orders"])
+                execution_records.append((state["leg"], combined_order, aggregated))
+                self._log_slippage_effect(state["leg"], aggregated, label="total")
+
+                if timings is not None:
+                    submit_total = sum(state["submit_durations"])
+                    fill_total = sum(state["fill_durations"])
+                    total_duration = max(
+                        state.get("completed_time", time.perf_counter()) - state["start_time"],
+                        submit_total + fill_total,
+                    )
+                    timings.append(
+                        {
+                            "symbol": state["leg"].symbol,
+                            "side": state["leg"].side,
+                            "submit_duration": submit_total,
+                            "fill_duration": fill_total,
+                            "total_duration": total_duration,
+                        }
+                    )
+
+            final_metrics = leg_states[-1].get("aggregated_metrics") if leg_states else None
+            final_amount = (
+                float(final_metrics.get("amount_out", opportunity.starting_amount))
+                if final_metrics
+                else opportunity.starting_amount
+            )
+            final_without_fee = (
+                float(final_metrics.get("amount_out_without_fee", opportunity.starting_amount))
+                if final_metrics
+                else opportunity.starting_amount
+            )
+
+            return orders, execution_records, (final_amount, final_without_fee)
+        finally:
+            self._staggered_runtime_factors = previous_factors
+            self._staggered_expected_residuals = previous_expected
 
     def _staggered_slippage_factor(self, index: int) -> float:
+        override = self._staggered_runtime_factors.get(index)
+        if override is not None:
+            return max(0.0, float(override))
+
         if not self._staggered_slippage:
             return 1.0
         assumption = self._staggered_slippage[min(index, len(self._staggered_slippage) - 1)]
         return max(0.0, 1.0 - float(assumption))
+
+    def _staggered_assumption_value(self, index: int) -> float:
+        if not self._staggered_slippage:
+            return 0.0
+        return max(
+            0.0,
+            float(self._staggered_slippage[min(index, len(self._staggered_slippage) - 1)]),
+        )
+
+    def _prepare_staggered_factors(
+        self, opportunity: TriangularOpportunity
+    ) -> Tuple[Dict[int, float], Dict[int, Dict[str, Any]]]:
+        expected: Dict[int, Dict[str, Any]] = {}
+        overrides: Dict[int, float] = {}
+
+        for index, leg in enumerate(opportunity.trades):
+            assumption = self._staggered_assumption_value(index)
+            breakdown = self._expected_residual_breakdown(leg, assumption)
+            expected[index] = breakdown
+
+            if index == 0 or assumption <= 0:
+                continue
+
+            limits = self._minimum_trade_requirements(leg)
+            if not limits:
+                continue
+
+            residual_input = breakdown.get("input") or 0.0
+            residual_output = breakdown.get("output") or 0.0
+
+            violations: List[str] = []
+            if leg.side == "buy":
+                min_cost = limits.get("cost")
+                if min_cost is not None and residual_input < min_cost:
+                    violations.append(
+                        f"input {breakdown['input_currency']} {residual_input:.12f} < min {min_cost:.12f}"
+                    )
+                min_amount = limits.get("amount")
+                if min_amount is not None and residual_output < min_amount:
+                    violations.append(
+                        f"output {breakdown['output_currency']} {residual_output:.12f} < min {min_amount:.12f}"
+                    )
+            else:
+                min_amount = limits.get("amount")
+                if min_amount is not None and residual_input < min_amount:
+                    violations.append(
+                        f"input {breakdown['input_currency']} {residual_input:.12f} < min {min_amount:.12f}"
+                    )
+                min_cost = limits.get("cost")
+                if min_cost is not None and residual_output < min_cost:
+                    violations.append(
+                        f"output {breakdown['output_currency']} {residual_output:.12f} < min {min_cost:.12f}"
+                    )
+
+            if violations:
+                overrides[index] = 1.0
+                breakdown["assumption"] = 0.0
+                breakdown["input"] = 0.0
+                breakdown["output"] = 0.0
+                breakdown["expected_initial_input"] = breakdown.get("planned_input", 0.0)
+                breakdown["residual_disabled_reason"] = ", ".join(violations)
+                logger.info(
+                    "Staggered residual disabled for %s %s: %s",
+                    leg.side.upper(),
+                    leg.symbol,
+                    breakdown["residual_disabled_reason"],
+                )
+
+        return overrides, expected
+
+    def _expected_residual_breakdown(
+        self, leg: TriangularTradeLeg, assumption: float
+    ) -> Dict[str, Any]:
+        base, quote = leg.symbol.split("/")
+        assumption = max(0.0, float(assumption))
+
+        if leg.side == "buy":
+            planned_input = float(leg.amount_in)
+            planned_output = float(leg.traded_quantity)
+            input_currency = quote
+            output_currency = base
+        else:
+            planned_input = float(leg.traded_quantity)
+            planned_output = float(leg.amount_out)
+            input_currency = base
+            output_currency = quote
+
+        residual_input = planned_input * assumption
+        residual_output = planned_output * assumption
+
+        return {
+            "assumption": assumption,
+            "input_currency": input_currency,
+            "output_currency": output_currency,
+            "planned_input": planned_input,
+            "planned_output": planned_output,
+            "expected_initial_input": planned_input - residual_input,
+            "input": residual_input,
+            "output": residual_output,
+        }
+
+    def _minimum_trade_requirements(self, leg: TriangularTradeLeg) -> Dict[str, float]:
+        fetcher = getattr(self.exchange, "get_min_trade_values", None)
+        if not callable(fetcher):
+            return {}
+
+        try:
+            raw_limits = fetcher(leg.symbol)
+        except Exception as exc:  # pragma: no cover - network dependent
+            logger.debug(
+                "Unable to fetch minimum trade limits for %s: %s",
+                leg.symbol,
+                exc,
+            )
+            return {}
+
+        limits: Dict[str, float] = {}
+        if isinstance(raw_limits, Mapping):
+            for key in ("amount", "cost"):
+                value = raw_limits.get(key)
+                if value is None:
+                    continue
+                coerced = self._safe_float(value)
+                if coerced is not None and coerced > 0:
+                    limits[key] = coerced
+        return limits
+
+    def _log_staggered_plan(
+        self, leg: TriangularTradeLeg, available_amount: float, index: int
+    ) -> None:
+        breakdown = self._staggered_expected_residuals.get(index, {})
+        planned_input = breakdown.get("planned_input")
+        if planned_input is None:
+            planned_input = (
+                float(leg.amount_in)
+                if leg.side == "buy"
+                else float(leg.traded_quantity)
+            )
+
+        expected_initial = breakdown.get("expected_initial_input", planned_input)
+        actual_initial = min(planned_input, float(available_amount))
+        residual_input = breakdown.get("input", max(planned_input - expected_initial, 0.0))
+        residual_output = breakdown.get("output", 0.0)
+        assumption_pct = (breakdown.get("assumption") or 0.0) * 100.0
+        input_currency = breakdown.get("input_currency") or self._leg_input_currency(leg)
+        output_currency = breakdown.get("output_currency") or self._leg_output_currency(leg)
+
+        logger.info(
+            "Staggered plan for %s %s: initial %s %.12f (expected %.12f) vs planned %.12f "
+            "(expected residual %s %.12f, %s %.12f, assumption %.4f%%)",
+            leg.side.upper(),
+            leg.symbol,
+            input_currency,
+            actual_initial,
+            expected_initial,
+            planned_input,
+            input_currency,
+            residual_input,
+            output_currency,
+            residual_output,
+            assumption_pct,
+        )
+
+        reason = breakdown.get("residual_disabled_reason")
+        if reason:
+            logger.info(
+                "Residual underfill disabled for %s %s: %s",
+                leg.side.upper(),
+                leg.symbol,
+                reason,
+            )
+
+    @staticmethod
+    def _leg_input_currency(leg: TriangularTradeLeg) -> str:
+        base, quote = leg.symbol.split("/")
+        return quote if leg.side == "buy" else base
+
+    @staticmethod
+    def _leg_output_currency(leg: TriangularTradeLeg) -> str:
+        base, quote = leg.symbol.split("/")
+        return base if leg.side == "buy" else quote
 
     def _finalise_staggered_orders(self, state: Dict[str, Any]) -> Dict[str, Any]:
         leg = state["leg"]
@@ -510,6 +719,16 @@ class TriangularArbitrageExecutor:
         residual = target_out - consumed
 
         while residual > tolerance:
+            input_currency = self._leg_input_currency(current_state["leg"])
+            logger.info(
+                "Submitting residual for %s %s: remaining %s %.12f (tolerance %.12f)",
+                current_state["leg"].side.upper(),
+                current_state["leg"].symbol,
+                input_currency,
+                residual,
+                tolerance,
+            )
+
             submit_start = time.perf_counter()
             order, amount, scale = self._submit_leg_order(
                 current_state["leg"],

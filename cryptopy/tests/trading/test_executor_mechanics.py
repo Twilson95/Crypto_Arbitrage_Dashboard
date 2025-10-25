@@ -4,7 +4,11 @@ from typing import Any, Dict, List, Tuple
 import pytest
 
 from cryptopy.src.trading.triangular_arbitrage.executor import TriangularArbitrageExecutor
-from cryptopy.src.trading.triangular_arbitrage.models import TriangularTradeLeg
+from cryptopy.src.trading.triangular_arbitrage.models import (
+    TriangularOpportunity,
+    TriangularRoute,
+    TriangularTradeLeg,
+)
 
 
 class _DummyExchange:
@@ -34,6 +38,40 @@ def _make_leg(
         fee_rate=fee_rate,
         fee_paid=0.0,
         traded_quantity=traded_quantity,
+    )
+
+
+def _make_staggered_opportunity() -> TriangularOpportunity:
+    route = TriangularRoute(("USDC/USD", "ALGO/USDC", "ALGO/USD"), "USD")
+    trades = [
+        _make_leg(
+            symbol="USDC/USD",
+            side="buy",
+            amount_in=100.0,
+            amount_out=100.0,
+            traded_quantity=100.0,
+        ),
+        _make_leg(
+            symbol="ALGO/USDC",
+            side="buy",
+            amount_in=100.0,
+            amount_out=200.0,
+            traded_quantity=200.0,
+        ),
+        _make_leg(
+            symbol="ALGO/USD",
+            side="sell",
+            amount_in=200.0,
+            amount_out=101.0,
+            traded_quantity=200.0,
+        ),
+    ]
+    return TriangularOpportunity(
+        route=route,
+        starting_amount=100.0,
+        final_amount=101.0,
+        final_amount_without_fees=101.0,
+        trades=trades,
     )
 
 
@@ -399,3 +437,43 @@ def test_reconcile_staggered_gap_executes_residual() -> None:
     assert math.isclose(reconciled["amount_in"], 100.0, rel_tol=0, abs_tol=1e-12)
     assert math.isclose(reconciled["amount_out"], 100.0, rel_tol=0, abs_tol=1e-12)
     assert len(current_state["orders"]) == 1
+
+
+def test_prepare_staggered_factors_disable_when_residual_below_min() -> None:
+    class _MinExchange(_DummyExchange):
+        def get_min_trade_values(self, symbol: str) -> Dict[str, float]:
+            return {"amount": 5.0, "cost": 20.0}
+
+    executor = TriangularArbitrageExecutor(
+        _MinExchange(),
+        dry_run=False,
+        staggered_leg_delay=0.0,
+        staggered_slippage_assumption=[0.1],
+    )
+
+    opportunity = _make_staggered_opportunity()
+    overrides, expected = executor._prepare_staggered_factors(opportunity)
+
+    assert overrides.get(1) == pytest.approx(1.0)
+    assert expected[1]["assumption"] == pytest.approx(0.0)
+    assert "residual_disabled_reason" in expected[1]
+
+
+def test_prepare_staggered_factors_retains_underfill_above_min() -> None:
+    class _LooseExchange(_DummyExchange):
+        def get_min_trade_values(self, symbol: str) -> Dict[str, float]:
+            return {"amount": 0.01, "cost": 0.01}
+
+    executor = TriangularArbitrageExecutor(
+        _LooseExchange(),
+        dry_run=False,
+        staggered_leg_delay=0.0,
+        staggered_slippage_assumption=[0.1],
+    )
+
+    opportunity = _make_staggered_opportunity()
+    overrides, expected = executor._prepare_staggered_factors(opportunity)
+
+    assert 1 not in overrides
+    assert expected[1]["assumption"] == pytest.approx(0.1)
+    assert expected[1]["input"] == pytest.approx(10.0)

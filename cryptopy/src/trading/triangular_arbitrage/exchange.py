@@ -617,6 +617,41 @@ class ExchangeConnection:
 
         return dict(self._fee_source)
 
+    @staticmethod
+    def _coerce_float(value: Any) -> Optional[float]:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def get_min_trade_values(self, symbol: str) -> Dict[str, float]:
+        """Return the minimum trade limits for ``symbol`` when available."""
+
+        market = self._market_cache.get(symbol, {})
+        if not isinstance(market, dict):
+            return {}
+
+        result: Dict[str, float] = {}
+        limits = market.get("limits")
+        if isinstance(limits, dict):
+            for key in ("amount", "cost"):
+                raw = limits.get(key)
+                if isinstance(raw, dict):
+                    coerced = self._coerce_float(raw.get("min"))
+                    if coerced is not None and coerced > 0:
+                        result[key] = coerced
+
+        if "amount" not in result:
+            info = market.get("info")
+            if isinstance(info, dict):
+                coerced = self._coerce_float(info.get("ordermin"))
+                if coerced is not None and coerced > 0:
+                    result["amount"] = coerced
+
+        return result
+
     def _prime_trading_fee_cache(self) -> None:
         """Attempt to populate the taker fee cache using exchange endpoints."""
 
