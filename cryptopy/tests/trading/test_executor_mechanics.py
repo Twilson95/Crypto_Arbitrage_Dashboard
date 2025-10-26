@@ -3,7 +3,10 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 
-from cryptopy.src.trading.triangular_arbitrage.executor import TriangularArbitrageExecutor
+from cryptopy.src.trading.triangular_arbitrage.executor import (
+    MinimumTradeSizeError,
+    TriangularArbitrageExecutor,
+)
 from cryptopy.src.trading.triangular_arbitrage.models import (
     TriangularOpportunity,
     TriangularRoute,
@@ -232,6 +235,34 @@ def test_submit_leg_order_caps_to_exchange_balance() -> None:
     assert exchange.orders == [amount]
 
 
+def test_submit_leg_order_enforces_minimum_trade_size() -> None:
+    class _MinExchange(_DummyExchange):
+        def __init__(self) -> None:
+            self.orders: List[float] = []
+
+        def get_min_trade_values(self, symbol: str) -> Dict[str, float]:
+            return {"amount": 0.5, "cost": 20.0}
+
+        def create_market_order(self, symbol: str, side: str, amount: float, **_: Any) -> Dict[str, Any]:
+            self.orders.append(float(amount))
+            return {"id": "order", "symbol": symbol, "side": side, "amount": float(amount)}
+
+    exchange = _MinExchange()
+    executor = TriangularArbitrageExecutor(exchange, dry_run=False)
+    leg = _make_leg(
+        symbol="AAVE/USD",
+        side="buy",
+        amount_in=10.0,
+        amount_out=0.2,
+        traded_quantity=0.2,
+    )
+
+    with pytest.raises(MinimumTradeSizeError):
+        executor._submit_leg_order(leg, available_amount=10.0)
+
+    assert exchange.orders == []
+
+
 def test_watch_order_update_without_websocket_hook() -> None:
     executor = TriangularArbitrageExecutor(_DummyExchange(), dry_run=False)
 
@@ -437,6 +468,62 @@ def test_reconcile_staggered_gap_executes_residual() -> None:
     assert math.isclose(reconciled["amount_in"], 100.0, rel_tol=0, abs_tol=1e-12)
     assert math.isclose(reconciled["amount_out"], 100.0, rel_tol=0, abs_tol=1e-12)
     assert len(current_state["orders"]) == 1
+
+
+def test_reconcile_staggered_gap_skips_residual_below_minimum() -> None:
+    class _MinResidualExchange(_DummyExchange):
+        def __init__(self) -> None:
+            self.orders: List[float] = []
+
+        def get_min_trade_values(self, symbol: str) -> Dict[str, float]:
+            return {"amount": 0.5}
+
+        def create_market_order(self, symbol: str, side: str, amount: float, **_: Any) -> Dict[str, Any]:
+            self.orders.append(float(amount))
+            return {"id": "order", "symbol": symbol, "side": side, "amount": float(amount)}
+
+    executor = TriangularArbitrageExecutor(
+        _MinResidualExchange(),
+        dry_run=False,
+        staggered_leg_delay=0.0,
+        staggered_slippage_assumption=[0.0],
+    )
+    exchange = executor.exchange
+
+    leg = _make_leg(
+        symbol="ALGO/USD",
+        side="sell",
+        amount_in=1.0,
+        amount_out=1.0,
+        traded_quantity=1.0,
+    )
+
+    previous_state = {"aggregated_metrics": {"amount_out": 1.0}}
+    current_state = {
+        "leg": leg,
+        "orders": [],
+        "metrics": [
+            {
+                "amount_in": 0.51,
+                "amount_out": 0.51,
+                "amount_out_without_fee": 0.51,
+                "traded_quantity": 0.51,
+                "fee_breakdown": {},
+            }
+        ],
+        "submit_durations": [],
+        "fill_durations": [],
+    }
+    current_state["aggregated_metrics"] = executor._combine_execution_metrics(
+        current_state["metrics"]
+    )
+
+    reconciled = executor._reconcile_staggered_gap(previous_state, current_state)
+
+    assert exchange.orders == []
+    assert math.isclose(reconciled["amount_in"], 0.51, rel_tol=0, abs_tol=1e-12)
+    assert math.isclose(reconciled["amount_out"], 0.51, rel_tol=0, abs_tol=1e-12)
+    assert current_state["orders"] == []
 
 
 def test_prepare_staggered_factors_disable_when_residual_below_min() -> None:

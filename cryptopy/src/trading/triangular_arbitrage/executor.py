@@ -25,6 +25,14 @@ except Exception:  # pragma: no cover - fallback when ccxt is not installed
 logger = logging.getLogger(__name__)
 
 
+class MinimumTradeSizeError(ValueError):
+    """Raised when a calculated order fails the venue's minimum trade requirements."""
+
+    def __init__(self, leg: "TriangularTradeLeg", message: str) -> None:
+        super().__init__(message)
+        self.leg = leg
+
+
 class _ProgressiveExecutionState:
     """Tracks orders and realised totals when streaming partial fills."""
 
@@ -633,6 +641,56 @@ class TriangularArbitrageExecutor:
                     limits[key] = coerced
         return limits
 
+    def _ensure_minimum_trade_size(
+        self,
+        leg: TriangularTradeLeg,
+        amount: float,
+        scale: float,
+        available_amount: float,
+    ) -> None:
+        """Raise when ``amount`` violates the venue minimums for ``leg``."""
+
+        limits = self._minimum_trade_requirements(leg)
+        if not limits:
+            return
+
+        tolerance = 1e-12
+        min_amount = limits.get("amount")
+        if min_amount is not None and amount + tolerance < min_amount:
+            raise MinimumTradeSizeError(
+                leg,
+                (
+                    f"trade amount {amount:.12f} for {leg.symbol} below minimum "
+                    f"{min_amount:.12f}"
+                ),
+            )
+
+        min_cost = limits.get("cost")
+        if min_cost is None:
+            return
+
+        cost_estimate = 0.0
+        if leg.side == "buy":
+            required_quote = float(leg.amount_in)
+            if required_quote > 0 and scale > 0:
+                cost_estimate = required_quote * scale
+            cost_estimate = min(max(cost_estimate, 0.0), float(available_amount))
+            if cost_estimate <= 0 and available_amount > 0:
+                cost_estimate = float(available_amount)
+        else:
+            planned_quote = float(leg.amount_out)
+            if planned_quote > 0 and scale > 0:
+                cost_estimate = planned_quote * scale
+
+        if cost_estimate + tolerance < min_cost:
+            raise MinimumTradeSizeError(
+                leg,
+                (
+                    f"trade notional {cost_estimate:.12f} for {leg.symbol} below minimum "
+                    f"{min_cost:.12f}"
+                ),
+            )
+
     def _log_staggered_plan(
         self, leg: TriangularTradeLeg, available_amount: float, index: int
     ) -> None:
@@ -747,11 +805,20 @@ class TriangularArbitrageExecutor:
             )
 
             submit_start = time.perf_counter()
-            order, amount, scale = self._submit_leg_order(
-                current_state["leg"],
-                residual,
-                speculative=False,
-            )
+            try:
+                order, amount, scale = self._submit_leg_order(
+                    current_state["leg"],
+                    residual,
+                    speculative=False,
+                )
+            except MinimumTradeSizeError as exc:
+                logger.info(
+                    "Skipping residual for %s %s: %s",
+                    current_state["leg"].side.upper(),
+                    current_state["leg"].symbol,
+                    exc,
+                )
+                break
             submit_duration = time.perf_counter() - submit_start
             current_state.setdefault("orders", []).append(order)
             current_state.setdefault("submit_durations", []).append(submit_duration)
@@ -836,6 +903,25 @@ class TriangularArbitrageExecutor:
         leg_started_perf = time.perf_counter()
         try:
             order, amount, scale = self._submit_leg_order(leg, available_amount)
+        except MinimumTradeSizeError as exc:
+            logger.info(
+                "Skipping leg %s %s due to minimum trade constraint: %s",
+                leg.side.upper(),
+                leg.symbol,
+                exc,
+            )
+            if timings is not None:
+                total_duration = time.perf_counter() - leg_started_perf
+                timings.append(
+                    {
+                        "symbol": leg.symbol,
+                        "side": leg.side,
+                        "submit_duration": total_duration,
+                        "fill_duration": 0.0,
+                        "total_duration": total_duration,
+                    }
+                )
+            return
         except ValueError:
             logger.debug(
                 "Skipping leg %s because rounded order amount dropped below precision (available=%s)",
@@ -1301,6 +1387,29 @@ class TriangularArbitrageExecutor:
                 raise ValueError(
                     f"Calculated non-positive trade amount ({amount}) for leg {leg.symbol}"
                 )
+
+            try:
+                self._ensure_minimum_trade_size(
+                    leg,
+                    amount,
+                    scale,
+                    synced_available,
+                )
+            except MinimumTradeSizeError as exc:
+                if speculative:
+                    logger.debug(
+                        "Waiting for sufficient size on %s %s: %s",
+                        leg.side.upper(),
+                        leg.symbol,
+                        exc,
+                    )
+                    if self.staggered_leg_delay > 0:
+                        time.sleep(self.staggered_leg_delay)
+                    refreshed = self._sync_available_with_exchange(leg, float("inf"))
+                    if math.isfinite(refreshed) and refreshed > attempt_available:
+                        attempt_available = refreshed
+                    continue
+                raise
 
             try:
                 order = self.exchange.create_market_order(
