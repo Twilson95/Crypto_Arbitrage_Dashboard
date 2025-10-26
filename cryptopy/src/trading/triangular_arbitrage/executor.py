@@ -62,7 +62,7 @@ class TriangularArbitrageExecutor:
         *,
         dry_run: bool = True,
         trade_log_path: Optional[Union[str, Path]] = None,
-        partial_fill_mode: str = "wait",
+        partial_fill_mode: str = "staggered",
         staggered_leg_delay: float = 0.1,
         staggered_slippage_assumption: Optional[Sequence[float]] = None,
     ) -> None:
@@ -705,6 +705,20 @@ class TriangularArbitrageExecutor:
 
             label = "primary" if order_index == 0 else f"residual #{order_index}"
             self._log_slippage_effect(leg, metrics, label=label)
+
+            submit_duration = 0.0
+            if order_index < len(state.get("submit_durations", [])):
+                submit_duration = float(state["submit_durations"][order_index])
+            total_duration = submit_duration + fill_duration
+            logger.info(
+                "Staggered order timing for %s %s [%s]: submit %.3fs fill %.3fs total %.3fs",
+                leg.side.upper(),
+                leg.symbol,
+                label,
+                submit_duration,
+                fill_duration,
+                total_duration,
+            )
 
         aggregated = self._combine_execution_metrics(metrics_list)
         state["aggregated_metrics"] = aggregated
