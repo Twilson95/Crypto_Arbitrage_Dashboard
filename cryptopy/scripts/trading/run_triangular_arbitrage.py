@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import logging
 import math
+import os
 import itertools
 import time
 from datetime import datetime
@@ -15,6 +16,11 @@ from time import perf_counter
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from asyncio import QueueEmpty
+
+try:  # pragma: no cover - optional dependency
+    import psutil
+except Exception:  # pragma: no cover - psutil is optional at runtime
+    psutil = None
 
 import yaml
 
@@ -57,6 +63,8 @@ SLIPPAGE_USAGE_FRACTION_DEFAULT = 1.0
 PARTIAL_FILL_MODE_DEFAULT = "staggered"
 STAGGERED_LEG_DELAY_DEFAULT = 0.1
 STAGGERED_SLIPPAGE_ASSUMPTION_DEFAULT = 0.01
+ENABLE_BENCHMARKING_DEFAULT = False
+BENCHMARK_INTERVAL_DEFAULT = 1.0
 ASSET_FILTER_DEFAULT: Sequence[str] = ("USD",
                                        "USDC","USDT","USDG",
                                        "BTC","ETH","SOL","DOGE","ADA","XRP",
@@ -100,6 +108,140 @@ MARKET_FILTER_REASON_DESCRIPTIONS = {
         "excluded from discovery."
     ),
 }
+
+
+@dataclass
+class BenchmarkSample:
+    """Single resource usage sample collected during benchmarking."""
+
+    timestamp: float
+    cpu_percent: float
+    rss_bytes: int
+    threads: int
+
+
+class BenchmarkRecorder:
+    """Collect periodic CPU and memory metrics for the current process."""
+
+    def __init__(self, *, enabled: bool, interval: float = 1.0) -> None:
+        self.enabled = bool(enabled)
+        self.interval = max(interval, 0.1)
+        self.samples: List[BenchmarkSample] = []
+        self._process: Optional["psutil.Process"] = None
+        self._stop_event: Optional[asyncio.Event] = None
+        self._task: Optional[asyncio.Task[None]] = None
+        self._start_time: float = 0.0
+        self.logical_cpus: Optional[int] = None
+        self.physical_cpus: Optional[int] = None
+
+    async def start(self) -> None:
+        """Begin sampling if benchmarking is enabled and psutil is available."""
+
+        if not self.enabled:
+            return
+        if psutil is None:
+            logger.warning(
+                "Benchmarking requested but psutil is not installed; install psutil to enable metrics."
+            )
+            self.enabled = False
+            return
+
+        self._process = psutil.Process()
+        self._process.cpu_percent(interval=None)  # Prime the internal counters.
+        self.logical_cpus = psutil.cpu_count(logical=True) or os.cpu_count()
+        self.physical_cpus = psutil.cpu_count(logical=False)
+        self._start_time = perf_counter()
+        self.samples.clear()
+        self._stop_event = asyncio.Event()
+        # Record a baseline memory sample without CPU usage to anchor the series.
+        self._record_sample(include_cpu=False)
+        self._task = asyncio.create_task(self._run_loop(), name="benchmark-recorder")
+
+        logger.info(
+            "Benchmarking enabled: interval=%.2fs logical_cpu=%s physical_cpu=%s",
+            self.interval,
+            self.logical_cpus if self.logical_cpus is not None else "unknown",
+            self.physical_cpus if self.physical_cpus is not None else "unknown",
+        )
+
+    async def stop(self) -> None:
+        """Stop sampling and await the background task."""
+
+        if not self.enabled:
+            return
+        if self._stop_event and not self._stop_event.is_set():
+            self._stop_event.set()
+        if self._task:
+            await self._task
+        self._task = None
+        self._stop_event = None
+
+    async def _run_loop(self) -> None:
+        assert self._stop_event is not None  # For type-checkers
+        try:
+            while True:
+                try:
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=self.interval)
+                    break
+                except asyncio.TimeoutError:
+                    self._record_sample()
+        finally:
+            # Capture a final snapshot to report end-of-run memory usage.
+            self._record_sample()
+
+    def _record_sample(self, *, include_cpu: bool = True) -> None:
+        if not self.enabled or self._process is None:
+            return
+        try:
+            with self._process.oneshot():
+                cpu_percent = (
+                    self._process.cpu_percent(interval=None) if include_cpu else 0.0
+                )
+                rss_bytes = self._process.memory_info().rss
+                threads = self._process.num_threads()
+        except Exception as exc:  # pragma: no cover - sampling is best effort
+            logger.debug("Benchmark recorder failed to sample metrics: %s", exc)
+            return
+        timestamp = perf_counter() - self._start_time
+        self.samples.append(
+            BenchmarkSample(
+                timestamp=timestamp,
+                cpu_percent=cpu_percent,
+                rss_bytes=rss_bytes,
+                threads=threads,
+            )
+        )
+
+    def summary(self) -> Optional[Dict[str, float]]:
+        """Return aggregate statistics for the collected samples."""
+
+        if not self.enabled or not self.samples:
+            return None
+
+        cpu_values = [sample.cpu_percent for sample in self.samples]
+        rss_values = [sample.rss_bytes for sample in self.samples]
+        thread_values = [sample.threads for sample in self.samples]
+
+        total_samples = len(self.samples)
+        duration = self.samples[-1].timestamp if self.samples else 0.0
+
+        def _average(values: List[float]) -> float:
+            return float(sum(values) / len(values)) if values else 0.0
+
+        summary: Dict[str, float] = {
+            "samples": float(total_samples),
+            "duration": duration,
+            "cpu_avg": _average(cpu_values),
+            "cpu_max": max(cpu_values) if cpu_values else 0.0,
+            "rss_avg": _average(rss_values),
+            "rss_max": max(rss_values) if rss_values else 0.0,
+            "threads_avg": _average(thread_values),
+            "threads_max": float(max(thread_values)) if thread_values else 0.0,
+            "logical_cpus": float(self.logical_cpus or os.cpu_count() or 0),
+        }
+        if self.physical_cpus is not None:
+            summary["physical_cpus"] = float(self.physical_cpus)
+        return summary
 
 
 def _chunked(sequence: Sequence[str], size: int) -> Iterable[Sequence[str]]:
@@ -1347,6 +1489,11 @@ async def run_from_args(args: argparse.Namespace) -> None:
             f"Sandbox mode is not available for {exchange_name} via ccxt; requests will hit the production API."
         )
 
+    benchmark = BenchmarkRecorder(
+        enabled=args.enable_benchmarking,
+        interval=max(args.benchmark_interval, 0.1),
+    )
+
     if asset_filter:
         logger.info(f"Restricting discovery to assets: {', '.join(asset_filter)}")
 
@@ -1431,6 +1578,8 @@ async def run_from_args(args: argparse.Namespace) -> None:
     trigger_queue: "asyncio.Queue[str]" = asyncio.Queue()
     stop_event = asyncio.Event()
 
+    await benchmark.start()
+
     if symbols:
         initial_loaded = await prime_price_cache(
             exchange,
@@ -1509,6 +1658,29 @@ async def run_from_args(args: argparse.Namespace) -> None:
         price_task.cancel()
         evaluator.cancel()
         await asyncio.gather(market_data_task, price_task, evaluator, return_exceptions=True)
+        await benchmark.stop()
+        summary = benchmark.summary()
+        if summary:
+            rss_avg_mib = summary["rss_avg"] / (1024**2)
+            rss_max_mib = summary["rss_max"] / (1024**2)
+            logical_cpus = int(summary.get("logical_cpus", 0)) or "unknown"
+            physical_cpus = summary.get("physical_cpus")
+            if physical_cpus is not None:
+                physical_cpus = int(physical_cpus)
+            logger.info(
+                "Benchmark summary: duration=%.2fs samples=%d CPU avg=%.2f%% max=%.2f%% across %s logical core(s)%s; "
+                "RSS avg=%.2f MiB max=%.2f MiB; threads avg=%.1f max=%d",
+                summary["duration"],
+                int(summary["samples"]),
+                summary["cpu_avg"],
+                summary["cpu_max"],
+                logical_cpus,
+                f" (physical {physical_cpus})" if physical_cpus else "",
+                rss_avg_mib,
+                rss_max_mib,
+                summary["threads_avg"],
+                int(summary["threads_max"]),
+            )
         await exchange.aclose()
 
 
@@ -1680,6 +1852,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=EVALUATION_INTERVAL_DEFAULT,
         help="Minimum interval in seconds between opportunity evaluations.",
+    )
+    parser.add_argument(
+        "--enable-benchmarking",
+        action=argparse.BooleanOptionalAction,
+        default=ENABLE_BENCHMARKING_DEFAULT,
+        help="Collect periodic CPU, memory, and thread usage metrics during execution.",
+    )
+    parser.add_argument(
+        "--benchmark-interval",
+        type=float,
+        default=BENCHMARK_INTERVAL_DEFAULT,
+        help="Seconds between benchmark samples when benchmarking is enabled.",
     )
     parser.add_argument(
         "--trade-log",
