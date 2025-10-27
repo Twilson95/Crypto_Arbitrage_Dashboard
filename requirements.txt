@@ -17,6 +17,5 @@ seaborn~=0.13.2
 matplotlib~=3.9.2
 dtreeviz~=2.2.2
 dash-bootstrap-components~=1.6.0
-taipy~=4.1.0
 pytest~=8.3.3
 river~=0.22.0
