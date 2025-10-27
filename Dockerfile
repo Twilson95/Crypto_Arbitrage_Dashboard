@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.6
 
-FROM python:3.11-slim AS base
+FROM python:3.11-slim-bookworm as base
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
