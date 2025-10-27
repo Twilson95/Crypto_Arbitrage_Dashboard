@@ -5,7 +5,9 @@ import argparse
 import asyncio
 import logging
 import math
+import os
 import itertools
+import time
 from datetime import datetime
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -15,15 +17,23 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from asyncio import QueueEmpty
 
+try:  # pragma: no cover - optional dependency
+    import psutil
+except Exception:  # pragma: no cover - psutil is optional at runtime
+    psutil = None
+
 import yaml
 
 from cryptopy.src.trading.triangular_arbitrage import (
     ExchangeConnection,
     InsufficientLiquidityError,
     PriceSnapshot,
+    PrecisionAdapter,
+    SlippageSimulation,
     TriangularArbitrageCalculator,
     TriangularArbitrageExecutor,
     TriangularRoute,
+    simulate_opportunity_with_order_books,
 )
 
 
@@ -49,6 +59,12 @@ EVALUATION_INTERVAL_DEFAULT = 30.0
 WEBSOCKET_TIMEOUT_DEFAULT = 1_000_000.0
 PRICE_REFRESH_INTERVAL_DEFAULT = 3_000_000.0
 PRICE_MAX_AGE_DEFAULT = 60.0
+SLIPPAGE_USAGE_FRACTION_DEFAULT = 1.0
+PARTIAL_FILL_MODE_DEFAULT = "staggered"
+STAGGERED_LEG_DELAY_DEFAULT = 0.1
+STAGGERED_SLIPPAGE_ASSUMPTION_DEFAULT = 0.01
+ENABLE_BENCHMARKING_DEFAULT = False
+BENCHMARK_INTERVAL_DEFAULT = 1.0
 ASSET_FILTER_DEFAULT: Sequence[str] = ("USD",
                                        "USDC","USDT","USDG",
                                        "BTC","ETH","SOL","DOGE","ADA","XRP",
@@ -92,6 +108,140 @@ MARKET_FILTER_REASON_DESCRIPTIONS = {
         "excluded from discovery."
     ),
 }
+
+
+@dataclass
+class BenchmarkSample:
+    """Single resource usage sample collected during benchmarking."""
+
+    timestamp: float
+    cpu_percent: float
+    rss_bytes: int
+    threads: int
+
+
+class BenchmarkRecorder:
+    """Collect periodic CPU and memory metrics for the current process."""
+
+    def __init__(self, *, enabled: bool, interval: float = 1.0) -> None:
+        self.enabled = bool(enabled)
+        self.interval = max(interval, 0.1)
+        self.samples: List[BenchmarkSample] = []
+        self._process: Optional["psutil.Process"] = None
+        self._stop_event: Optional[asyncio.Event] = None
+        self._task: Optional[asyncio.Task[None]] = None
+        self._start_time: float = 0.0
+        self.logical_cpus: Optional[int] = None
+        self.physical_cpus: Optional[int] = None
+
+    async def start(self) -> None:
+        """Begin sampling if benchmarking is enabled and psutil is available."""
+
+        if not self.enabled:
+            return
+        if psutil is None:
+            logger.warning(
+                "Benchmarking requested but psutil is not installed; install psutil to enable metrics."
+            )
+            self.enabled = False
+            return
+
+        self._process = psutil.Process()
+        self._process.cpu_percent(interval=None)  # Prime the internal counters.
+        self.logical_cpus = psutil.cpu_count(logical=True) or os.cpu_count()
+        self.physical_cpus = psutil.cpu_count(logical=False)
+        self._start_time = perf_counter()
+        self.samples.clear()
+        self._stop_event = asyncio.Event()
+        # Record a baseline memory sample without CPU usage to anchor the series.
+        self._record_sample(include_cpu=False)
+        self._task = asyncio.create_task(self._run_loop(), name="benchmark-recorder")
+
+        logger.info(
+            "Benchmarking enabled: interval=%.2fs logical_cpu=%s physical_cpu=%s",
+            self.interval,
+            self.logical_cpus if self.logical_cpus is not None else "unknown",
+            self.physical_cpus if self.physical_cpus is not None else "unknown",
+        )
+
+    async def stop(self) -> None:
+        """Stop sampling and await the background task."""
+
+        if not self.enabled:
+            return
+        if self._stop_event and not self._stop_event.is_set():
+            self._stop_event.set()
+        if self._task:
+            await self._task
+        self._task = None
+        self._stop_event = None
+
+    async def _run_loop(self) -> None:
+        assert self._stop_event is not None  # For type-checkers
+        try:
+            while True:
+                try:
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=self.interval)
+                    break
+                except asyncio.TimeoutError:
+                    self._record_sample()
+        finally:
+            # Capture a final snapshot to report end-of-run memory usage.
+            self._record_sample()
+
+    def _record_sample(self, *, include_cpu: bool = True) -> None:
+        if not self.enabled or self._process is None:
+            return
+        try:
+            with self._process.oneshot():
+                cpu_percent = (
+                    self._process.cpu_percent(interval=None) if include_cpu else 0.0
+                )
+                rss_bytes = self._process.memory_info().rss
+                threads = self._process.num_threads()
+        except Exception as exc:  # pragma: no cover - sampling is best effort
+            logger.debug("Benchmark recorder failed to sample metrics: %s", exc)
+            return
+        timestamp = perf_counter() - self._start_time
+        self.samples.append(
+            BenchmarkSample(
+                timestamp=timestamp,
+                cpu_percent=cpu_percent,
+                rss_bytes=rss_bytes,
+                threads=threads,
+            )
+        )
+
+    def summary(self) -> Optional[Dict[str, float]]:
+        """Return aggregate statistics for the collected samples."""
+
+        if not self.enabled or not self.samples:
+            return None
+
+        cpu_values = [sample.cpu_percent for sample in self.samples]
+        rss_values = [sample.rss_bytes for sample in self.samples]
+        thread_values = [sample.threads for sample in self.samples]
+
+        total_samples = len(self.samples)
+        duration = self.samples[-1].timestamp if self.samples else 0.0
+
+        def _average(values: List[float]) -> float:
+            return float(sum(values) / len(values)) if values else 0.0
+
+        summary: Dict[str, float] = {
+            "samples": float(total_samples),
+            "duration": duration,
+            "cpu_avg": _average(cpu_values),
+            "cpu_max": max(cpu_values) if cpu_values else 0.0,
+            "rss_avg": _average(rss_values),
+            "rss_max": max(rss_values) if rss_values else 0.0,
+            "threads_avg": _average(thread_values),
+            "threads_max": float(max(thread_values)) if thread_values else 0.0,
+            "logical_cpus": float(self.logical_cpus or os.cpu_count() or 0),
+        }
+        if self.physical_cpus is not None:
+            summary["physical_cpus"] = float(self.physical_cpus)
+        return summary
 
 
 def _chunked(sequence: Sequence[str], size: int) -> Iterable[Sequence[str]]:
@@ -293,6 +443,17 @@ class CachedPrice:
 
     snapshot: PriceSnapshot
     updated_at: float
+
+
+@dataclass
+class SlippageDecision:
+    """Outcome of replaying an opportunity against live order books."""
+
+    simulation: SlippageSimulation
+    total_slippage_pct: float
+    scale: float
+    max_leg_slippage_pct: float
+    max_leg_output_slippage_pct: float
 
 
 @dataclass(frozen=True)
@@ -664,6 +825,7 @@ async def prime_price_cache(
 async def evaluate_and_execute(
     calculator: TriangularArbitrageCalculator,
     executor: Optional[TriangularArbitrageExecutor],
+    exchange: ExchangeConnection,
     routes: Sequence[TriangularRoute],
     *,
     price_cache: Dict[str, CachedPrice],
@@ -676,6 +838,13 @@ async def evaluate_and_execute(
     evaluation_interval: float,
     enable_execution: bool,
     price_max_age: float,
+    slippage_action: str,
+    max_slippage_percentage: Optional[float],
+    slippage_order_book_depth: int,
+    slippage_min_scale: float,
+    slippage_scale_steps: int,
+    slippage_scale_tolerance: float,
+    slippage_usage_fraction: float,
     trigger_queue: "asyncio.Queue[str]",
     stop_event: asyncio.Event,
 ) -> None:
@@ -824,13 +993,370 @@ async def evaluate_and_execute(
                 )
             continue
 
-        best = opportunities[0]
+        raw_best = opportunities[0]
         logger.info(
-            f"Best opportunity: route={' -> '.join(best.route.symbols)} "
-            f"profit={best.profit:.6f} ({best.profit_percentage:.4f}%) "
-            f"profit_without_fees={best.profit_without_fees:.6f} "
-            f"fee_impact={best.fee_impact:.6f} {best.route.starting_currency}"
+            f"Best opportunity: route={' -> '.join(raw_best.route.symbols)} "
+            f"profit={raw_best.profit:.6f} ({raw_best.profit_percentage:.4f}%) "
+            f"profit_without_fees={raw_best.profit_without_fees:.6f} "
+            f"fee_impact={raw_best.fee_impact:.6f} {raw_best.route.starting_currency}"
         )
+
+        best = raw_best
+        price_ages: Dict[str, float] = {}
+        now_wall = time.time()
+        for symbol in best.route.symbols:
+            snapshot = fresh_prices.get(symbol)
+            if snapshot is None:
+                continue
+            age = max(now_wall - snapshot.timestamp, 0.0)
+            price_ages[symbol] = age
+        if price_ages:
+            min_age = min(price_ages.values())
+            max_age = max(price_ages.values())
+            avg_age = sum(price_ages.values()) / len(price_ages)
+            formatted = ", ".join(
+                f"{symbol}:{age * 1000.0:.1f}ms" for symbol, age in sorted(price_ages.items())
+            )
+            logger.info(
+                "Price staleness for route %s: min=%.3fs avg=%.3fs max=%.3fs (%s)",
+                " -> ".join(best.route.symbols),
+                min_age,
+                avg_age,
+                max_age,
+                formatted,
+            )
+        slippage_decision: Optional[SlippageDecision] = None
+
+        if slippage_action != "ignore":
+            precision_adapter = PrecisionAdapter(
+                amount_to_precision=exchange.amount_to_precision,
+                cost_to_precision=exchange.cost_to_precision,
+            )
+            try:
+                order_books = {}
+                depth = max(int(slippage_order_book_depth), 1)
+                for symbol in raw_best.route.symbols:
+                    order_books[symbol] = await asyncio.to_thread(
+                        exchange.get_order_book,
+                        symbol,
+                        limit=depth,
+                    )
+            except Exception as exc:
+                logger.info(
+                    "Skipping opportunity because order book retrieval failed while estimating slippage for %s: %s",
+                    " -> ".join(raw_best.route.symbols),
+                    exc,
+                )
+                continue
+
+            def _simulate_scale(scale: float) -> SlippageDecision:
+                simulation = simulate_opportunity_with_order_books(
+                    raw_best,
+                    order_books,
+                    starting_amount=raw_best.starting_amount * scale,
+                    precision=precision_adapter,
+                )
+                expected_final = raw_best.final_amount * scale
+                actual_final = simulation.opportunity.final_amount
+                total_slippage = (
+                    ((expected_final - actual_final) / expected_final) * 100.0
+                    if expected_final
+                    else 0.0
+                )
+                max_leg_slippage = max(
+                    (leg.slippage_pct for leg in simulation.legs),
+                    default=0.0,
+                )
+                max_output_slippage = max(
+                    (leg.output_slippage_pct for leg in simulation.legs),
+                    default=0.0,
+                )
+                return SlippageDecision(
+                    simulation,
+                    total_slippage,
+                    scale,
+                    max_leg_slippage,
+                    max_output_slippage,
+                )
+
+            def _decision_within_threshold(
+                decision: SlippageDecision,
+                threshold_pct: float,
+            ) -> bool:
+                epsilon = 1e-9
+                limit = max(threshold_pct, 0.0)
+                if limit == 0.0:
+                    return (
+                        decision.total_slippage_pct <= epsilon
+                        and decision.max_leg_slippage_pct <= epsilon
+                        and decision.max_leg_output_slippage_pct <= epsilon
+                    )
+                boundary = limit + epsilon
+                return (
+                    decision.total_slippage_pct <= boundary
+                    and decision.max_leg_slippage_pct <= boundary
+                    and decision.max_leg_output_slippage_pct <= boundary
+                )
+
+            initial_decision: Optional[SlippageDecision]
+            initial_error: Optional[Exception]
+            try:
+                initial_decision = _simulate_scale(1.0)
+            except InsufficientLiquidityError as exc:
+                initial_decision = None
+                initial_error = exc
+            except Exception as exc:
+                logger.info(
+                    "Skipping opportunity after slippage simulation failed for scale 1.0: %s",
+                    exc,
+                )
+                continue
+            else:
+                initial_error = None
+
+            threshold = max_slippage_percentage if max_slippage_percentage is not None else 0.0
+
+            if initial_decision is None:
+                if slippage_action != "scale":
+                    logger.info(
+                        "Skipping opportunity because available depth could not satisfy the planned trade size: %s",
+                        initial_error,
+                    )
+                    continue
+            elif _decision_within_threshold(initial_decision, threshold):
+                slippage_decision = initial_decision
+            elif slippage_action == "reject":
+                logger.info(
+                    "Skipping opportunity because estimated slippage %.4f%% (max leg price %.4f%% / size %.4f%%) exceeds configured maximum %.4f%%.",
+                    initial_decision.total_slippage_pct,
+                    initial_decision.max_leg_slippage_pct,
+                    initial_decision.max_leg_output_slippage_pct,
+                    threshold,
+                )
+                continue
+
+            if slippage_decision is None and slippage_action == "scale":
+                min_scale = max(min(slippage_min_scale, 1.0), 0.0)
+                tolerance = max(slippage_scale_tolerance, 1e-4)
+                steps = max(slippage_scale_steps, 1)
+                low = min_scale
+                high = 1.0
+                best_candidate: Optional[SlippageDecision] = None
+
+                for _ in range(steps):
+                    if high - low <= tolerance:
+                        break
+                    trial = (low + high) / 2.0
+                    if trial <= 0:
+                        break
+                    try:
+                        candidate = _simulate_scale(trial)
+                    except InsufficientLiquidityError:
+                        high = trial
+                        continue
+                    except Exception as exc:
+                        logger.debug(
+                            "Slippage simulation failed for scale %.4f: %s",
+                            trial,
+                            exc,
+                        )
+                        high = trial
+                        continue
+                    if _decision_within_threshold(candidate, threshold):
+                        best_candidate = candidate
+                        low = trial
+                    else:
+                        logger.debug(
+                            "Rejected scale %.2f%%: total slippage %.4f%%, max leg price %.4f%%, max leg size %.4f%% (threshold %.4f%%)",
+                            trial * 100.0,
+                            candidate.total_slippage_pct,
+                            candidate.max_leg_slippage_pct,
+                            candidate.max_leg_output_slippage_pct,
+                            threshold,
+                        )
+                        high = trial
+
+                if best_candidate is None and min_scale > 0.0:
+                    try:
+                        candidate = _simulate_scale(min_scale)
+                    except InsufficientLiquidityError:
+                        candidate = None
+                    except Exception as exc:
+                        logger.debug(
+                            "Slippage simulation failed for minimum scale %.4f: %s",
+                            min_scale,
+                            exc,
+                        )
+                        candidate = None
+                    if candidate and _decision_within_threshold(candidate, threshold):
+                        best_candidate = candidate
+
+                if best_candidate is None:
+                    reason = (
+                        f"insufficient depth ({initial_error})"
+                        if initial_decision is None
+                        else (
+                            "slippage total %.4f%% / max leg price %.4f%% / size %.4f%% > %.4f%%"
+                            % (
+                                initial_decision.total_slippage_pct,
+                                initial_decision.max_leg_slippage_pct,
+                                initial_decision.max_leg_output_slippage_pct,
+                                threshold,
+                            )
+                        )
+                    )
+                    logger.info(
+                        "Skipping opportunity because slippage remained above %.4f%% even after scaling down to %.2f%% of the starting amount (%s).",
+                        threshold,
+                        min_scale * 100,
+                        reason,
+                    )
+                    continue
+
+                slippage_decision = best_candidate
+
+        if slippage_decision is not None:
+            final_decision = slippage_decision
+            worst_leg_slippage = max(
+                (
+                    leg.output_slippage_pct
+                    for leg in final_decision.simulation.legs
+                ),
+                default=0.0,
+            )
+            if worst_leg_slippage > 0.0:
+                worst_factor = max(0.0, 1.0 - worst_leg_slippage / 100.0)
+                if worst_factor <= 0.0:
+                    logger.info(
+                        "Skipping opportunity because worst-leg slippage %.4f%% leaves no executable size.",
+                        worst_leg_slippage,
+                    )
+                    continue
+                worst_scale = final_decision.scale * worst_factor
+                try:
+                    worst_adjusted = _simulate_scale(worst_scale)
+                except InsufficientLiquidityError:
+                    logger.info(
+                        "Skipping opportunity because the order book cannot satisfy the worst-leg slippage %.4f%% adjustment.",
+                        worst_leg_slippage,
+                    )
+                    continue
+                except Exception as exc:
+                    logger.info(
+                        "Skipping opportunity after applying worst-leg slippage %.4f%% scaling: %s",
+                        worst_leg_slippage,
+                        exc,
+                    )
+                    continue
+                if not _decision_within_threshold(worst_adjusted, threshold):
+                    logger.info(
+                        "Skipping opportunity because worst-leg slippage %.4f%% scaling resulted in total slippage %.4f%% (max leg price %.4f%% / size %.4f%%) above %.4f%%.",
+                        worst_leg_slippage,
+                        worst_adjusted.total_slippage_pct,
+                        worst_adjusted.max_leg_slippage_pct,
+                        worst_adjusted.max_leg_output_slippage_pct,
+                        threshold,
+                    )
+                    continue
+                if worst_adjusted.scale <= 0.0:
+                    logger.info(
+                        "Skipping opportunity because worst-leg slippage %.4f%% reduced executable size to zero.",
+                        worst_leg_slippage,
+                    )
+                    continue
+                if worst_adjusted.scale < final_decision.scale - 1e-9:
+                    logger.info(
+                        "Worst-leg slippage %.4f%% reduced executable scale from %.2f%% to %.2f%%.",
+                        worst_leg_slippage,
+                        final_decision.scale * 100.0,
+                        worst_adjusted.scale * 100.0,
+                    )
+                final_decision = worst_adjusted
+                usage_fraction = max(min(slippage_usage_fraction, 1.0), 0.0)
+                if usage_fraction <= 0.0:
+                    logger.info(
+                        "Skipping opportunity because configured slippage usage fraction is 0%% of the adjusted size.",
+                    )
+                    continue
+                if usage_fraction < 1.0:
+                    final_scale = final_decision.scale * usage_fraction
+                    try:
+                        usage_adjusted = _simulate_scale(final_scale)
+                    except InsufficientLiquidityError:
+                        logger.info(
+                            "Skipping opportunity because the order book cannot satisfy the reserved usage fraction %.2f%%.",
+                            usage_fraction * 100.0,
+                        )
+                        continue
+                    except Exception as exc:
+                        logger.info(
+                            "Skipping opportunity after applying slippage usage fraction %.2f%%: %s",
+                            usage_fraction * 100.0,
+                            exc,
+                        )
+                        continue
+                    if not _decision_within_threshold(usage_adjusted, threshold):
+                        logger.info(
+                            "Skipping opportunity because usage fraction %.2f%% resulted in slippage %.4f%% (max leg price %.4f%% / size %.4f%%) above the %.4f%% limit.",
+                            usage_fraction * 100.0,
+                            usage_adjusted.total_slippage_pct,
+                            usage_adjusted.max_leg_slippage_pct,
+                            usage_adjusted.max_leg_output_slippage_pct,
+                            threshold,
+                        )
+                        continue
+                    logger.info(
+                        "Additional usage reservation reduced executable scale from %.2f%% to %.2f%% (usage fraction %.2f%%).",
+                        final_decision.scale * 100.0,
+                        usage_adjusted.scale * 100.0,
+                        usage_fraction * 100.0,
+                    )
+                    final_decision = usage_adjusted
+
+                slippage_decision = final_decision
+                best = final_decision.simulation.opportunity
+                logger.info(
+                    "Slippage-adjusted plan: scale=%.2f%% final_amount=% .6f profit=% .6f (% .4f%%) total_slippage=% .4f%% (max leg price %.4f%% / size %.4f%%)",
+                    slippage_decision.scale * 100.0,
+                    best.final_amount,
+                    best.profit,
+                    best.profit_percentage,
+                    slippage_decision.total_slippage_pct,
+                    slippage_decision.max_leg_slippage_pct,
+                    slippage_decision.max_leg_output_slippage_pct,
+                )
+                if not math.isclose(best.starting_amount, raw_best.starting_amount, rel_tol=0.0, abs_tol=1e-9):
+                    logger.info(
+                        "Starting amount reduced from %.6f to %.6f due to slippage adjustments.",
+                        raw_best.starting_amount,
+                        best.starting_amount,
+                    )
+                if slippage_decision.simulation.legs:
+                    leg_details = ", ".join(
+                        (
+                            f"{leg.symbol}:price {leg.slippage_pct:.4f}% size {leg.output_slippage_pct:.4f}%"
+                            f" expected_out {leg.expected_amount_out:.10f} -> actual_out {leg.actual_amount_out:.10f}"
+                        )
+                        for leg in slippage_decision.simulation.legs
+                    )
+                    logger.info("Per-leg slippage estimates: %s", leg_details)
+
+        planning_ready_at = perf_counter()
+        planning_latency = planning_ready_at - evaluation_started_at
+        logger.info(
+            "Planning latency for %s triggered by %s: %.3fs",
+            " -> ".join(best.route.symbols),
+            reason_summary,
+            planning_latency,
+        )
+
+        if best.profit_percentage < min_profit_percentage:
+            logger.info(
+                "Opportunity rejected after slippage adjustment; profit %.4f%% below minimum %.4f%%.",
+                best.profit_percentage,
+                min_profit_percentage,
+            )
+            continue
 
         profit_signature = (round(best.final_amount, 8), round(best.profit_percentage, 4))
         if last_execution and last_execution.route == best.route and last_execution.profit_signature == profit_signature:
@@ -924,6 +1450,25 @@ async def run_from_args(args: argparse.Namespace) -> None:
     if max_executions is not None and max_executions <= 0:
         max_executions = None
 
+    if args.slippage_action != "ignore":
+        if args.max_slippage_percentage is None:
+            raise SystemExit(
+                "--max-slippage-percentage must be provided when --slippage-action is not 'ignore'."
+            )
+        if args.max_slippage_percentage < 0:
+            raise SystemExit("--max-slippage-percentage must be non-negative.")
+        if args.slippage_order_book_depth <= 0:
+            raise SystemExit("--slippage-order-book-depth must be positive.")
+        if args.slippage_action == "scale":
+            if not 0 <= args.slippage_scale_min <= 1:
+                raise SystemExit("--slippage-scale-min must be between 0 and 1 (inclusive).")
+            if args.slippage_scale_steps <= 0:
+                raise SystemExit("--slippage-scale-steps must be positive.")
+            if args.slippage_scale_tolerance <= 0:
+                raise SystemExit("--slippage-scale-tolerance must be positive.")
+        if not 0 <= args.slippage_usage_fraction <= 1:
+            raise SystemExit("--slippage-usage-fraction must be between 0 and 1 (inclusive).")
+
     price_refresh_interval = max(args.price_refresh_interval, 0.1)
     price_max_age = max(args.price_max_age, price_refresh_interval)
 
@@ -943,6 +1488,11 @@ async def run_from_args(args: argparse.Namespace) -> None:
         logger.warning(
             f"Sandbox mode is not available for {exchange_name} via ccxt; requests will hit the production API."
         )
+
+    benchmark = BenchmarkRecorder(
+        enabled=args.enable_benchmarking,
+        interval=max(args.benchmark_interval, 0.1),
+    )
 
     if asset_filter:
         logger.info(f"Restricting discovery to assets: {', '.join(asset_filter)}")
@@ -991,11 +1541,20 @@ async def run_from_args(args: argparse.Namespace) -> None:
         slippage_buffer=args.slippage_buffer,
     )
     executor: Optional[TriangularArbitrageExecutor] = None
+    staggered_slippage = (
+        args.staggered_slippage_assumption
+        if getattr(args, "staggered_slippage_assumption", None)
+        else [STAGGERED_SLIPPAGE_ASSUMPTION_DEFAULT]
+    )
+
     if args.enable_execution:
         executor = TriangularArbitrageExecutor(
             exchange,
             dry_run=not args.live_trading,
             trade_log_path=trade_log_path,
+            partial_fill_mode=args.partial_fill_mode,
+            staggered_leg_delay=args.staggered_leg_delay,
+            staggered_slippage_assumption=staggered_slippage,
         )
         if trade_log_path:
             logger.info(f"Logging executed trades to {trade_log_path}")
@@ -1018,6 +1577,8 @@ async def run_from_args(args: argparse.Namespace) -> None:
     price_cache: Dict[str, CachedPrice] = {}
     trigger_queue: "asyncio.Queue[str]" = asyncio.Queue()
     stop_event = asyncio.Event()
+
+    await benchmark.start()
 
     if symbols:
         initial_loaded = await prime_price_cache(
@@ -1060,6 +1621,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
         evaluate_and_execute(
             calculator,
             executor,
+            exchange,
             routes,
             price_cache=price_cache,
             markets=markets,
@@ -1071,6 +1633,13 @@ async def run_from_args(args: argparse.Namespace) -> None:
             evaluation_interval=args.evaluation_interval,
             enable_execution=args.enable_execution,
             price_max_age=price_max_age,
+            slippage_action=args.slippage_action,
+            max_slippage_percentage=args.max_slippage_percentage,
+            slippage_order_book_depth=args.slippage_order_book_depth,
+            slippage_min_scale=args.slippage_scale_min,
+            slippage_scale_steps=args.slippage_scale_steps,
+            slippage_scale_tolerance=args.slippage_scale_tolerance,
+            slippage_usage_fraction=args.slippage_usage_fraction,
             trigger_queue=trigger_queue,
             stop_event=stop_event,
         ),
@@ -1089,6 +1658,29 @@ async def run_from_args(args: argparse.Namespace) -> None:
         price_task.cancel()
         evaluator.cancel()
         await asyncio.gather(market_data_task, price_task, evaluator, return_exceptions=True)
+        await benchmark.stop()
+        summary = benchmark.summary()
+        if summary:
+            rss_avg_mib = summary["rss_avg"] / (1024**2)
+            rss_max_mib = summary["rss_max"] / (1024**2)
+            logical_cpus = int(summary.get("logical_cpus", 0)) or "unknown"
+            physical_cpus = summary.get("physical_cpus")
+            if physical_cpus is not None:
+                physical_cpus = int(physical_cpus)
+            logger.info(
+                "Benchmark summary: duration=%.2fs samples=%d CPU avg=%.2f%% max=%.2f%% across %s logical core(s)%s; "
+                "RSS avg=%.2f MiB max=%.2f MiB; threads avg=%.1f max=%d",
+                summary["duration"],
+                int(summary["samples"]),
+                summary["cpu_avg"],
+                summary["cpu_max"],
+                logical_cpus,
+                f" (physical {physical_cpus})" if physical_cpus else "",
+                rss_avg_mib,
+                rss_max_mib,
+                summary["threads_avg"],
+                int(summary["threads_max"]),
+            )
         await exchange.aclose()
 
 
@@ -1150,6 +1742,88 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fractional buffer applied after fees to account for slippage (e.g. 0.01 for 1%%).",
     )
     parser.add_argument(
+        "--slippage-action",
+        choices=["ignore", "reject", "scale"],
+        default="ignore",
+        help=(
+            "Strategy to apply when order book depth indicates slippage: "
+            "'ignore' keeps previous behaviour, 'reject' skips trades over the threshold, "
+            "and 'scale' reduces the trade size until the slippage requirement is met."
+        ),
+    )
+    parser.add_argument(
+        "--max-slippage-percentage",
+        type=float,
+        default=None,
+        help="Maximum acceptable aggregate slippage percentage when evaluating order book depth.",
+    )
+    parser.add_argument(
+        "--slippage-order-book-depth",
+        type=int,
+        default=20,
+        help="Number of order book levels to request when estimating slippage.",
+    )
+    parser.add_argument(
+        "--slippage-scale-min",
+        type=float,
+        default=0.1,
+        help=(
+            "Smallest fraction of the configured starting amount to consider when scaling trades "
+            "to meet the slippage constraint."
+        ),
+    )
+    parser.add_argument(
+        "--slippage-scale-steps",
+        type=int,
+        default=8,
+        help="Maximum iterations to use while searching for an acceptable scaled trade size.",
+    )
+    parser.add_argument(
+        "--slippage-scale-tolerance",
+        type=float,
+        default=0.02,
+        help="Stop scaling once the remaining search range falls below this fraction of the starting amount.",
+    )
+    parser.add_argument(
+        "--slippage-usage-fraction",
+        type=float,
+        default=SLIPPAGE_USAGE_FRACTION_DEFAULT,
+        help=(
+            "Fraction of the slippage-adjusted trade size to actually execute to reserve depth for other market "
+            "participants (e.g. 0.6 to only use 60%% of the depth that satisfies the slippage constraint)."
+        ),
+    )
+    parser.add_argument(
+        "--partial-fill-mode",
+        choices=["wait", "progressive", "staggered"],
+        default=PARTIAL_FILL_MODE_DEFAULT,
+        help=(
+            "Behaviour when an order leg is partially filled: 'wait' blocks until completion, "
+            "'progressive' streams fills downstream, and 'staggered' submits each leg speculatively "
+            "with a configurable delay and reconciles any residual once fills settle."
+        ),
+    )
+    parser.add_argument(
+        "--staggered-leg-delay",
+        type=float,
+        default=STAGGERED_LEG_DELAY_DEFAULT,
+        help=(
+            "Seconds to wait between submitting consecutive legs when using the 'staggered' "
+            "partial-fill mode."
+        ),
+    )
+    parser.add_argument(
+        "--staggered-slippage-assumption",
+        type=float,
+        action="append",
+        default=None,
+        metavar="FRACTION",
+        help=(
+            "Assumed fractional slippage per leg when sizing staggered submissions (e.g. 0.01 for 1%%). "
+            "Provide once to reuse for all legs or multiple times to set leg-specific values."
+        ),
+    )
+    parser.add_argument(
         "--price-refresh-interval",
         type=float,
         default=PRICE_REFRESH_INTERVAL_DEFAULT,
@@ -1178,6 +1852,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=EVALUATION_INTERVAL_DEFAULT,
         help="Minimum interval in seconds between opportunity evaluations.",
+    )
+    parser.add_argument(
+        "--enable-benchmarking",
+        action=argparse.BooleanOptionalAction,
+        default=ENABLE_BENCHMARKING_DEFAULT,
+        help="Collect periodic CPU, memory, and thread usage metrics during execution.",
+    )
+    parser.add_argument(
+        "--benchmark-interval",
+        type=float,
+        default=BENCHMARK_INTERVAL_DEFAULT,
+        help="Seconds between benchmark samples when benchmarking is enabled.",
     )
     parser.add_argument(
         "--trade-log",
