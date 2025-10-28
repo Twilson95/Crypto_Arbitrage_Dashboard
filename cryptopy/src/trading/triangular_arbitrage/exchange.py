@@ -48,6 +48,8 @@ SANDBOX_MARKET_DATA_UNAVAILABLE = {
 class ExchangeConnection:
     """Encapsulates exchange specific functionality for data and trading."""
 
+    _PREWARM_KEEPALIVE_INTERVAL = 480.0
+
     def __init__(
         self,
         exchange_name: str,
@@ -76,6 +78,10 @@ class ExchangeConnection:
         self._ws_loop: Optional[asyncio.AbstractEventLoop] = None
         self._ws_thread: Optional[threading.Thread] = None
         self._ws_loop_ready = threading.Event()
+        self._order_endpoint_prewarm_attempted = False
+        self._order_endpoint_prewarm_succeeded = False
+        self._prewarm_keepalive_stop = threading.Event()
+        self._prewarm_keepalive_thread: Optional[threading.Thread] = None
 
         exchange_class = getattr(ccxt, self.exchange_name)
         rest_config = {
@@ -192,11 +198,158 @@ class ExchangeConnection:
 
         self._prime_trading_fee_cache()
         self._verify_authenticated_access()
+        self._start_prewarm_keepalive_loop()
 
     def get_markets(self) -> Dict[str, Any]:
         """Return the cached market metadata loaded during initialisation."""
 
         return self._market_cache
+
+    def _select_prewarm_symbol(self, preferred: Optional[str] = None) -> Optional[str]:
+        if preferred and preferred in self._market_cache:
+            return preferred
+
+        for candidate, market in self._market_cache.items():
+            if not isinstance(market, dict):
+                continue
+            if market.get("active") is False:
+                continue
+            market_type = market.get("type")
+            if market.get("spot") is False and market_type not in (None, "spot"):
+                continue
+            return candidate
+
+        if self._market_cache:
+            return next(iter(self._market_cache))
+        return None
+
+    def _prewarm_generic_private_call(self) -> bool:
+        if not self.make_trades:
+            return False
+
+        fetch_balance = getattr(self.rest_client, "fetch_balance", None)
+        if not callable(fetch_balance):
+            return False
+
+        try:
+            self._apply_credentials(self.rest_client)
+            self._ensure_required_credentials(self.rest_client)
+            fetch_balance()
+        except Exception:  # pragma: no cover - network dependent warmup
+            logger.debug(
+                "Generic trading prewarm call failed for %s", self.exchange_name, exc_info=True
+            )
+            return False
+
+        return True
+
+    def _prewarm_kraken_order_endpoint(self, symbol: Optional[str]) -> bool:
+        candidate = self._select_prewarm_symbol(symbol)
+        if not candidate:
+            return False
+
+        market = self._market_cache.get(candidate, {})
+        min_values = self.get_min_trade_values(candidate)
+        amount = min_values.get("amount")
+        if amount is None:
+            amount = self._coerce_float(market.get("lot"))
+        if amount is None or amount <= 0:
+            amount = 1.0
+
+        try:
+            precise_amount = self.amount_to_precision(candidate, float(amount))
+        except Exception:
+            precise_amount = float(amount)
+
+        if precise_amount <= 0:
+            precise_amount = float(amount) if float(amount) > 0 else 1.0
+
+        params = {"validate": True}
+
+        try:
+            self._apply_credentials(self.rest_client)
+            self._ensure_required_credentials(self.rest_client)
+            self.rest_client.create_order(candidate, "market", "buy", precise_amount, params=params)
+        except Exception:  # pragma: no cover - depends on exchange/network
+            logger.debug(
+                "Kraken order endpoint prewarm failed for %s", candidate, exc_info=True
+            )
+            return False
+
+        logger.debug(
+            "Kraken trading session prewarmed via validate order on %s", candidate
+        )
+        return True
+
+    def prewarm_trading_connection(
+        self, symbol: Optional[str] = None, *, force: bool = False
+    ) -> None:
+        if not self.make_trades:
+            return
+
+        if self._order_endpoint_prewarm_attempted and not force:
+            if self._order_endpoint_prewarm_succeeded or symbol is None or self.exchange_name != "kraken":
+                return
+
+        order_success = False
+        generic_success = False
+        attempted = False
+
+        if self.exchange_name == "kraken":
+            attempted = True
+            order_success = self._prewarm_kraken_order_endpoint(symbol)
+            if not order_success:
+                generic_success = self._prewarm_generic_private_call()
+        else:
+            attempted = True
+            generic_success = self._prewarm_generic_private_call()
+
+        if attempted:
+            self._order_endpoint_prewarm_attempted = True
+        if order_success or (self.exchange_name != "kraken" and generic_success):
+            self._order_endpoint_prewarm_succeeded = True
+
+    def _start_prewarm_keepalive_loop(self) -> None:
+        if not self.make_trades:
+            return
+
+        prewarm = getattr(self, "prewarm_trading_connection", None)
+        if not callable(prewarm):
+            return
+
+        if self._prewarm_keepalive_thread and self._prewarm_keepalive_thread.is_alive():
+            return
+
+        interval = max(float(self._PREWARM_KEEPALIVE_INTERVAL), 60.0)
+
+        def _run() -> None:
+            while not self._prewarm_keepalive_stop.wait(interval):
+                try:
+                    prewarm(None, force=True)
+                except Exception:
+                    logger.debug(
+                        "Periodic trading connection prewarm failed for %s",
+                        self.exchange_name,
+                        exc_info=True,
+                    )
+
+        self._prewarm_keepalive_stop.clear()
+        thread = threading.Thread(
+            target=_run,
+            name=f"{self.exchange_name}-prewarm-keepalive",
+            daemon=True,
+        )
+        thread.start()
+        self._prewarm_keepalive_thread = thread
+
+    def _stop_prewarm_keepalive_loop(self) -> None:
+        thread = self._prewarm_keepalive_thread
+        if not thread:
+            return
+
+        self._prewarm_keepalive_stop.set()
+        thread.join(timeout=5.0)
+        self._prewarm_keepalive_thread = None
 
     def _attach_shared_session(self, client: Any) -> None:
         if not client or self._shared_http_session is None:
@@ -981,6 +1134,7 @@ class ExchangeConnection:
         return False
 
     def close(self) -> None:
+        self._stop_prewarm_keepalive_loop()
         if hasattr(self.rest_client, "close"):
             try:
                 self.rest_client.close()
@@ -1009,6 +1163,7 @@ class ExchangeConnection:
             self._shared_http_session = None
 
     async def aclose(self) -> None:
+        self._stop_prewarm_keepalive_loop()
         if hasattr(self.rest_client, "close"):
             try:
                 self.rest_client.close()

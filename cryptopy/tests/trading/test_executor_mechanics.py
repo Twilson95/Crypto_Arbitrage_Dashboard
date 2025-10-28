@@ -235,6 +235,77 @@ def test_submit_leg_order_caps_to_exchange_balance() -> None:
     assert exchange.orders == [amount]
 
 
+def test_submit_leg_order_can_skip_initial_balance_sync() -> None:
+    class _Exchange:
+        def __init__(self) -> None:
+            self.balance_calls = 0
+
+        def fetch_balance(self) -> Dict[str, Any]:
+            self.balance_calls += 1
+            return {"free": {"USD": 100.0}}
+
+        def create_market_order(
+            self, symbol: str, side: str, amount: float, **_: Any
+        ) -> Dict[str, Any]:
+            return {"id": "order", "symbol": symbol, "side": side, "amount": float(amount)}
+
+        def amount_to_precision(self, symbol: str, amount: float) -> float:
+            return float(amount)
+
+    exchange = _Exchange()
+    executor = TriangularArbitrageExecutor(exchange, dry_run=False)
+    leg = _make_leg(
+        symbol="ETH/USD",
+        side="buy",
+        amount_in=100.0,
+        amount_out=0.05,
+        traded_quantity=0.05,
+    )
+
+    executor._submit_leg_order(leg, available_amount=100.0, sync_balance=False)
+
+    assert exchange.balance_calls == 0
+
+
+def test_submit_leg_order_enables_balance_sync_after_insufficient_funds() -> None:
+    class InsufficientFunds(Exception):
+        pass
+
+    class _Exchange:
+        def __init__(self) -> None:
+            self.balance_calls = 0
+            self.calls = 0
+
+        def fetch_balance(self) -> Dict[str, Any]:
+            self.balance_calls += 1
+            return {"free": {"USD": 50.0}}
+
+        def create_market_order(
+            self, symbol: str, side: str, amount: float, **_: Any
+        ) -> Dict[str, Any]:
+            self.calls += 1
+            if self.calls == 1:
+                raise InsufficientFunds("Insufficient funds")
+            return {"id": "order", "symbol": symbol, "side": side, "amount": float(amount)}
+
+        def amount_to_precision(self, symbol: str, amount: float) -> float:
+            return float(amount)
+
+    exchange = _Exchange()
+    executor = TriangularArbitrageExecutor(exchange, dry_run=False)
+    leg = _make_leg(
+        symbol="ETH/USD",
+        side="buy",
+        amount_in=100.0,
+        amount_out=0.05,
+        traded_quantity=0.05,
+    )
+
+    executor._submit_leg_order(leg, available_amount=100.0, sync_balance=False)
+
+    assert exchange.balance_calls >= 1
+
+
 def test_submit_leg_order_enforces_minimum_trade_size() -> None:
     class _MinExchange(_DummyExchange):
         def __init__(self) -> None:

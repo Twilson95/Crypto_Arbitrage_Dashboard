@@ -1,7 +1,10 @@
 """Triangular arbitrage toolkit for the crypto trading simulator."""
 from cryptopy.src.trading.triangular_arbitrage.calculator import TriangularArbitrageCalculator
 from cryptopy.src.trading.triangular_arbitrage.exchange import ExchangeConnection
-from cryptopy.src.trading.triangular_arbitrage.exceptions import InsufficientLiquidityError
+from cryptopy.src.trading.triangular_arbitrage.exceptions import (
+    ExchangeRequestTimeout,
+    InsufficientLiquidityError,
+)
 from cryptopy.src.trading.triangular_arbitrage.executor import TriangularArbitrageExecutor
 from cryptopy.src.trading.triangular_arbitrage.models import (
     OrderBookSnapshot,
@@ -20,6 +23,7 @@ from cryptopy.src.trading.triangular_arbitrage.slippage import (
 
 __all__ = [
     "ExchangeConnection",
+    "ExchangeRequestTimeout",
     "InsufficientLiquidityError",
     "OrderBookSnapshot",
     "PriceSnapshot",
