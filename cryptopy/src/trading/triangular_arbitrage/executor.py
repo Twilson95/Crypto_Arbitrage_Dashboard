@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
+from cryptopy.src.trading.triangular_arbitrage.exceptions import ExchangeRequestTimeout
 from cryptopy.src.trading.triangular_arbitrage.models import (
     TriangularOpportunity,
     TriangularTradeLeg,
@@ -20,6 +21,18 @@ try:  # pragma: no cover - optional dependency when ccxt is unavailable in tests
     from ccxt.base.errors import InsufficientFunds as CcxtInsufficientFunds  # type: ignore
 except Exception:  # pragma: no cover - fallback when ccxt is not installed
     CcxtInsufficientFunds = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - optional dependency when ccxt is unavailable in tests
+    from ccxt.base.errors import RequestTimeout as CcxtRequestTimeout  # type: ignore
+except Exception:  # pragma: no cover - fallback when ccxt is not installed
+    CcxtRequestTimeout = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - optional dependency when requests is unavailable in tests
+    from requests.exceptions import ReadTimeout as RequestsReadTimeout
+    from requests.exceptions import Timeout as RequestsTimeout
+except Exception:  # pragma: no cover - fallback when requests is not installed
+    RequestsReadTimeout = None  # type: ignore[assignment]
+    RequestsTimeout = None  # type: ignore[assignment]
 
 
 logger = logging.getLogger(__name__)
@@ -1433,6 +1446,20 @@ class TriangularArbitrageExecutor:
                     test_order=self.dry_run,
                 )
             except Exception as exc:
+                if not self.dry_run and self._is_temporary_request_error(exc):
+                    last_error = exc
+                    force_sync_balance = True
+                    logger.warning(
+                        "Exchange request timed out for %s %s (attempt %s/%s); retrying",
+                        leg.side.upper(),
+                        leg.symbol,
+                        attempt + 1,
+                        attempts,
+                    )
+                    if self.staggered_leg_delay > 0:
+                        time.sleep(self.staggered_leg_delay)
+                    continue
+
                 if self.dry_run or not self._is_insufficient_funds_error(exc):
                     raise
 
@@ -1477,6 +1504,10 @@ class TriangularArbitrageExecutor:
             return order, amount, scale
 
         if last_error is not None:
+            if self._is_temporary_request_error(last_error):
+                raise ExchangeRequestTimeout(
+                    f"Timed out submitting {leg.side.upper()} {leg.symbol} order"
+                ) from last_error
             raise last_error
 
         raise ValueError(
@@ -1515,6 +1546,22 @@ class TriangularArbitrageExecutor:
             return True
         message = str(exc)
         return "insufficient funds" in message.lower()
+
+    @staticmethod
+    def _is_temporary_request_error(exc: Exception) -> bool:
+        """Return ``True`` when ``exc`` represents a transient request timeout."""
+
+        if CcxtRequestTimeout is not None and isinstance(exc, CcxtRequestTimeout):
+            return True
+        if RequestsReadTimeout is not None and isinstance(exc, RequestsReadTimeout):
+            return True
+        if RequestsTimeout is not None and isinstance(exc, RequestsTimeout):
+            return True
+        name = exc.__class__.__name__.lower()
+        if "timeout" in name or "timedout" in name:
+            return True
+        message = str(exc).lower()
+        return "timed out" in message or "timeout" in message
 
     def _sync_available_with_exchange(
         self, leg: TriangularTradeLeg, available_amount: float
