@@ -109,6 +109,7 @@ class TriangularArbitrageExecutor:
         self._minimum_trade_fetch_failures: Set[str] = set()
 
         self._prime_minimum_trade_cache()
+        self._trading_connection_prewarmed = False
 
     def execute(self, opportunity: TriangularOpportunity) -> List[Dict[str, Any]]:
         if opportunity.profit <= 0:
@@ -1415,6 +1416,8 @@ class TriangularArbitrageExecutor:
 
         force_sync_balance = allow_balance_sync
 
+        self._maybe_prewarm_trading_connection(leg.symbol)
+
         for attempt in range(attempts):
             if speculative:
                 synced_available = float(attempt_available)
@@ -1563,6 +1566,24 @@ class TriangularArbitrageExecutor:
         raise ValueError(
             f"Calculated non-positive trade amount for leg {leg.symbol} after adjustments"
         )
+
+    def _maybe_prewarm_trading_connection(self, symbol: str) -> None:
+        if self.dry_run or self._trading_connection_prewarmed:
+            return
+
+        prewarm = getattr(self.exchange, "prewarm_trading_connection", None)
+        if not callable(prewarm):
+            self._trading_connection_prewarmed = True
+            return
+
+        try:
+            prewarm(symbol)
+        except Exception:
+            logger.debug(
+                "Trading connection prewarm failed for %s", symbol, exc_info=True
+            )
+        finally:
+            self._trading_connection_prewarmed = True
 
     def _reduce_available_after_insufficient_funds(
         self, available_amount: float, attempt: int
