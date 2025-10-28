@@ -26,6 +26,7 @@ import yaml
 
 from cryptopy.src.trading.triangular_arbitrage import (
     ExchangeConnection,
+    ExchangeRequestTimeout,
     InsufficientLiquidityError,
     PriceSnapshot,
     PrecisionAdapter,
@@ -1376,6 +1377,9 @@ async def evaluate_and_execute(
             orders = await executor.execute_async(best)
         except ValueError as exc:
             logger.debug(f"Skipping execution: {exc}")
+            continue
+        except ExchangeRequestTimeout as exc:
+            logger.warning("Skipping execution due to exchange timeout: %s", exc)
             continue
 
         last_execution = OpportunityExecution(best.route, profit_signature)
