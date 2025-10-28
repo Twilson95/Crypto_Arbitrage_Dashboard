@@ -285,7 +285,9 @@ class TriangularArbitrageExecutor:
         for leg in opportunity.trades:
             leg_started_perf = time.perf_counter()
             submit_start = time.perf_counter()
-            order, amount, scale = self._submit_leg_order(leg, available_amount)
+            order, amount, scale = self._submit_leg_order(
+                leg, available_amount, sync_balance=False
+            )
             submit_duration = time.perf_counter() - submit_start
             if self.dry_run:
                 orders.append(order)
@@ -432,6 +434,7 @@ class TriangularArbitrageExecutor:
                     leg,
                     available_amount,
                     speculative=index > 0,
+                    sync_balance=False,
                 )
                 submit_duration = time.perf_counter() - submit_start
                 state["orders"].append(order)
@@ -902,7 +905,9 @@ class TriangularArbitrageExecutor:
         leg = opportunity.trades[index]
         leg_started_perf = time.perf_counter()
         try:
-            order, amount, scale = self._submit_leg_order(leg, available_amount)
+            order, amount, scale = self._submit_leg_order(
+                leg, available_amount, sync_balance=False
+            )
         except MinimumTradeSizeError as exc:
             logger.info(
                 "Skipping leg %s %s due to minimum trade constraint: %s",
@@ -1348,6 +1353,7 @@ class TriangularArbitrageExecutor:
         available_amount: float,
         *,
         speculative: bool = False,
+        sync_balance: bool = True,
     ) -> Tuple[Dict[str, Any], float, float]:
         """Create a market order for ``leg``, retrying when funds are marginal."""
 
@@ -1359,11 +1365,19 @@ class TriangularArbitrageExecutor:
         attempt_available = float(available_amount)
         last_error: Optional[Exception] = None
 
+        force_sync_balance = sync_balance
+
         for attempt in range(attempts):
             if speculative:
                 synced_available = float(attempt_available)
             else:
-                synced_available = self._sync_available_with_exchange(leg, attempt_available)
+                should_sync_balance = force_sync_balance or attempt > 0
+                if should_sync_balance:
+                    synced_available = self._sync_available_with_exchange(
+                        leg, attempt_available
+                    )
+                else:
+                    synced_available = float(attempt_available)
 
             if synced_available <= 0:
                 if speculative and self.staggered_leg_delay > 0:
@@ -1423,6 +1437,7 @@ class TriangularArbitrageExecutor:
                     raise
 
                 last_error = exc
+                force_sync_balance = True
                 if speculative:
                     synced_after_error = self._sync_available_with_exchange(
                         leg, attempt_available
