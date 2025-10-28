@@ -165,6 +165,8 @@ class TriangularArbitrageExecutor:
             actual_final_amount,
             actual_final_without_fees,
             actual_profit_percentage,
+            actual_profit_without_fees,
+            actual_fee_impact,
         )
 
         total_execution_time = time.perf_counter() - execution_started
@@ -438,10 +440,12 @@ class TriangularArbitrageExecutor:
             for index, leg in enumerate(opportunity.trades):
                 state: Dict[str, Any] = {
                     "leg": leg,
+                    "index": index,
                     "orders": [],
                     "metrics": [],
                     "submit_durations": [],
                     "fill_durations": [],
+                    "order_plans": [],
                     "start_time": time.perf_counter(),
                 }
 
@@ -458,6 +462,9 @@ class TriangularArbitrageExecutor:
                 state["orders"].append(order)
                 state["submit_durations"].append(submit_duration)
                 state["initial_scale"] = scale
+                state["order_plans"].append(
+                    self._staggered_primary_order_plan(leg, index)
+                )
                 leg_states.append(state)
 
                 submitted_id = self._extract_order_id(order) or "<unknown>"
@@ -787,6 +794,81 @@ class TriangularArbitrageExecutor:
                 reason,
             )
 
+    def _staggered_primary_order_plan(
+        self, leg: TriangularTradeLeg, index: int
+    ) -> Dict[str, float]:
+        breakdown = self._staggered_expected_residuals.get(index, {})
+        planned_input = self._staggered_planned_input(leg, breakdown)
+        planned_output = self._staggered_planned_output(leg, breakdown)
+
+        residual_input = float(breakdown.get("input") or 0.0)
+        residual_output_field = breakdown.get("output")
+        if residual_output_field is None and residual_input > 0:
+            ratio = self._staggered_residual_ratio(leg, index)
+            residual_output_field = residual_input * ratio
+        residual_output = float(residual_output_field or 0.0)
+
+        expected_initial_input_field = breakdown.get("expected_initial_input")
+        if expected_initial_input_field is not None:
+            expected_initial_input = max(float(expected_initial_input_field), 0.0)
+        else:
+            expected_initial_input = max(planned_input - residual_input, 0.0)
+
+        expected_initial_output = max(planned_output - residual_output, 0.0)
+
+        return {
+            "amount_in": expected_initial_input,
+            "amount_out": expected_initial_output,
+        }
+
+    def _staggered_residual_order_plan(
+        self, leg: TriangularTradeLeg, index: int, residual_input: float
+    ) -> Dict[str, float]:
+        ratio = self._staggered_residual_ratio(leg, index)
+        expected_output = max(float(residual_input) * ratio, 0.0)
+        return {
+            "amount_in": max(float(residual_input), 0.0),
+            "amount_out": expected_output,
+        }
+
+    def _staggered_residual_ratio(self, leg: TriangularTradeLeg, index: int) -> float:
+        breakdown = self._staggered_expected_residuals.get(index, {})
+        residual_input = self._safe_float(breakdown.get("input"))
+        residual_output = self._safe_float(breakdown.get("output"))
+        if residual_input and residual_input > 0 and residual_output is not None:
+            return max(float(residual_output) / float(residual_input), 0.0)
+        return self._staggered_output_ratio(leg, index)
+
+    def _staggered_output_ratio(self, leg: TriangularTradeLeg, index: int) -> float:
+        breakdown = self._staggered_expected_residuals.get(index, {})
+        planned_input = self._staggered_planned_input(leg, breakdown)
+        planned_output = self._staggered_planned_output(leg, breakdown)
+        if planned_input <= 0:
+            return 0.0
+        return max(planned_output / planned_input, 0.0)
+
+    @staticmethod
+    def _staggered_planned_input(
+        leg: TriangularTradeLeg, breakdown: Mapping[str, Any]
+    ) -> float:
+        planned_input = breakdown.get("planned_input")
+        if planned_input is not None:
+            return max(float(planned_input), 0.0)
+        if leg.side == "buy":
+            return max(float(leg.amount_in), 0.0)
+        return max(float(leg.traded_quantity), 0.0)
+
+    @staticmethod
+    def _staggered_planned_output(
+        leg: TriangularTradeLeg, breakdown: Mapping[str, Any]
+    ) -> float:
+        planned_output = breakdown.get("planned_output")
+        if planned_output is not None:
+            return max(float(planned_output), 0.0)
+        if leg.side == "buy":
+            return max(float(leg.traded_quantity), 0.0)
+        return max(float(leg.amount_out), 0.0)
+
     @staticmethod
     def _leg_input_currency(leg: TriangularTradeLeg) -> str:
         base, quote = leg.symbol.split("/")
@@ -813,7 +895,15 @@ class TriangularArbitrageExecutor:
             fill_durations.append(fill_duration)
 
             label = "primary" if order_index == 0 else f"residual #{order_index}"
-            self._log_slippage_effect(leg, metrics, label=label)
+            plans = state.get("order_plans", [])
+            planned = plans[order_index] if order_index < len(plans) else {}
+            self._log_slippage_effect(
+                leg,
+                metrics,
+                label=label,
+                planned_in=(planned or {}).get("amount_in"),
+                planned_out=(planned or {}).get("amount_out"),
+            )
 
             submit_duration = 0.0
             if order_index < len(state.get("submit_durations", [])):
@@ -856,13 +946,11 @@ class TriangularArbitrageExecutor:
             )
 
             submit_start = time.perf_counter()
+            requested_residual = float(residual)
             try:
                 order, amount, scale = self._submit_leg_order(
                     current_state["leg"],
-                    residual,
-                    speculative=False,
-                    allow_balance_sync=True,
-                    sync_on_initial_attempt=True,
+                    requested_residual,
                 )
             except MinimumTradeSizeError as exc:
                 logger.info(
@@ -875,6 +963,13 @@ class TriangularArbitrageExecutor:
             submit_duration = time.perf_counter() - submit_start
             current_state.setdefault("orders", []).append(order)
             current_state.setdefault("submit_durations", []).append(submit_duration)
+            residual_plan = self._staggered_residual_order_plan(
+                current_state["leg"],
+                int(current_state.get("index", 0)),
+                requested_residual,
+            )
+            order_plans = current_state.setdefault("order_plans", [])
+            order_plans.append(residual_plan)
 
             finalise_start = time.perf_counter()
             resolved_order, metrics = self._finalise_order_execution(order, current_state["leg"])
@@ -885,7 +980,21 @@ class TriangularArbitrageExecutor:
 
             order_index = len(current_state["metrics"]) - 1
             label = "primary" if order_index == 0 else f"residual #{order_index}"
-            self._log_slippage_effect(current_state["leg"], metrics, label=label)
+            plans = current_state.get("order_plans", [])
+            planned = plans[order_index] if order_index < len(plans) else residual_plan
+            planned_in = planned.get("amount_in") if isinstance(planned, Mapping) else None
+            planned_out = planned.get("amount_out") if isinstance(planned, Mapping) else None
+            if planned_in is None:
+                planned_in = residual_plan.get("amount_in")
+            if planned_out is None:
+                planned_out = residual_plan.get("amount_out")
+            self._log_slippage_effect(
+                current_state["leg"],
+                metrics,
+                label=label,
+                planned_in=planned_in,
+                planned_out=planned_out,
+            )
 
             aggregated = self._combine_execution_metrics(current_state["metrics"])
             current_state["aggregated_metrics"] = aggregated
@@ -1340,18 +1449,38 @@ class TriangularArbitrageExecutor:
         metrics: Mapping[str, Any],
         *,
         label: Optional[str] = None,
+        planned_in: Optional[float] = None,
+        planned_out: Optional[float] = None,
     ) -> None:
-        planned_in = float(leg.amount_in)
-        planned_out = float(leg.amount_out)
+        if planned_in is not None:
+            planned_input = float(planned_in)
+        else:
+            metric_planned_in = self._safe_float(metrics.get("planned_amount_in"))
+            planned_input = (
+                float(metric_planned_in)
+                if metric_planned_in is not None
+                else float(leg.amount_in)
+            )
+
+        if planned_out is not None:
+            planned_output = float(planned_out)
+        else:
+            metric_planned_out = self._safe_float(metrics.get("planned_amount_out"))
+            planned_output = (
+                float(metric_planned_out)
+                if metric_planned_out is not None
+                else float(leg.amount_out)
+            )
+
         actual_in = self._safe_float(metrics.get("amount_in"))
         actual_out = self._safe_float(metrics.get("amount_out"))
         if actual_in is None or actual_out is None:
             return
 
-        input_delta = actual_in - planned_in
-        input_pct = (input_delta / planned_in * 100.0) if planned_in else 0.0
-        output_delta = actual_out - planned_out
-        output_pct = (output_delta / planned_out * 100.0) if planned_out else 0.0
+        input_delta = actual_in - planned_input
+        input_pct = (input_delta / planned_input * 100.0) if planned_input else 0.0
+        output_delta = actual_out - planned_output
+        output_pct = (output_delta / planned_output * 100.0) if planned_output else 0.0
 
         prefix = f"Slippage effect for {leg.side.upper()} {leg.symbol}"
         if label:
@@ -1372,6 +1501,8 @@ class TriangularArbitrageExecutor:
         actual_final_amount: float,
         actual_final_without_fees: float,
         actual_profit_percentage: float,
+        actual_profit_without_fees: float,
+        actual_fee_impact: float,
     ) -> None:
         planned_final = float(opportunity.final_amount)
         planned_final_wo_fee = float(opportunity.final_amount_without_fees)
@@ -1388,13 +1519,34 @@ class TriangularArbitrageExecutor:
             else 0.0
         )
 
+        starting_amount = float(opportunity.starting_amount)
+        profit_wo_fee_pct = (
+            (actual_profit_without_fees / starting_amount) * 100.0
+            if starting_amount
+            else 0.0
+        )
+        fee_impact_pct = (
+            (actual_fee_impact / starting_amount) * 100.0
+            if starting_amount
+            else 0.0
+        )
+
         logger.info(
-            "Route execution slippage: final %+0.8f (%+.4f%%) without fees %+0.8f (%+.4f%%) profit %+0.4f%%",
+            (
+                "Route execution slippage: final %+0.8f (%+.4f%% vs plan %.8f) "
+                "without fees %+0.8f (%+.4f%% vs plan %.8f) profit (w/ fees) %+0.4f%% "
+                "(w/o fees %+0.4f%%, fee impact %+0.8f/%+.4f%%)"
+            ),
             delta_final,
             delta_final_pct,
+            planned_final,
             delta_wo_fee,
             delta_wo_fee_pct,
+            planned_final_wo_fee,
             actual_profit_percentage,
+            profit_wo_fee_pct,
+            actual_fee_impact,
+            fee_impact_pct,
         )
 
     def _submit_leg_order(
@@ -1403,8 +1555,9 @@ class TriangularArbitrageExecutor:
         available_amount: float,
         *,
         speculative: bool = False,
-        allow_balance_sync: bool = False,
-        sync_on_initial_attempt: bool = False,
+        allow_balance_sync: bool = True,
+        sync_on_initial_attempt: bool = True,
+        sync_balance: Optional[bool] = None,
     ) -> Tuple[Dict[str, Any], float, float]:
         """Create a market order for ``leg``, retrying when funds are marginal."""
 
@@ -1415,6 +1568,10 @@ class TriangularArbitrageExecutor:
             attempts = max(attempts, additional_attempts)
         attempt_available = float(available_amount)
         last_error: Optional[Exception] = None
+
+        if sync_balance is not None:
+            allow_balance_sync = True
+            sync_on_initial_attempt = bool(sync_balance)
 
         force_sync_balance = allow_balance_sync and sync_on_initial_attempt
 
