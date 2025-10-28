@@ -862,6 +862,7 @@ class TriangularArbitrageExecutor:
                     residual,
                     speculative=False,
                     allow_balance_sync=True,
+                    sync_on_initial_attempt=True,
                 )
             except MinimumTradeSizeError as exc:
                 logger.info(
@@ -1403,6 +1404,7 @@ class TriangularArbitrageExecutor:
         *,
         speculative: bool = False,
         allow_balance_sync: bool = False,
+        sync_on_initial_attempt: bool = False,
     ) -> Tuple[Dict[str, Any], float, float]:
         """Create a market order for ``leg``, retrying when funds are marginal."""
 
@@ -1414,7 +1416,7 @@ class TriangularArbitrageExecutor:
         attempt_available = float(available_amount)
         last_error: Optional[Exception] = None
 
-        force_sync_balance = allow_balance_sync
+        force_sync_balance = allow_balance_sync and sync_on_initial_attempt
 
         self._maybe_prewarm_trading_connection(leg.symbol)
 

@@ -48,6 +48,8 @@ SANDBOX_MARKET_DATA_UNAVAILABLE = {
 class ExchangeConnection:
     """Encapsulates exchange specific functionality for data and trading."""
 
+    _PREWARM_KEEPALIVE_INTERVAL = 480.0
+
     def __init__(
         self,
         exchange_name: str,
@@ -78,6 +80,8 @@ class ExchangeConnection:
         self._ws_loop_ready = threading.Event()
         self._order_endpoint_prewarm_attempted = False
         self._order_endpoint_prewarm_succeeded = False
+        self._prewarm_keepalive_stop = threading.Event()
+        self._prewarm_keepalive_thread: Optional[threading.Thread] = None
 
         exchange_class = getattr(ccxt, self.exchange_name)
         rest_config = {
@@ -194,6 +198,7 @@ class ExchangeConnection:
 
         self._prime_trading_fee_cache()
         self._verify_authenticated_access()
+        self._start_prewarm_keepalive_loop()
 
     def get_markets(self) -> Dict[str, Any]:
         """Return the cached market metadata loaded during initialisation."""
@@ -303,6 +308,48 @@ class ExchangeConnection:
             self._order_endpoint_prewarm_attempted = True
         if order_success or (self.exchange_name != "kraken" and generic_success):
             self._order_endpoint_prewarm_succeeded = True
+
+    def _start_prewarm_keepalive_loop(self) -> None:
+        if not self.make_trades:
+            return
+
+        prewarm = getattr(self, "prewarm_trading_connection", None)
+        if not callable(prewarm):
+            return
+
+        if self._prewarm_keepalive_thread and self._prewarm_keepalive_thread.is_alive():
+            return
+
+        interval = max(float(self._PREWARM_KEEPALIVE_INTERVAL), 60.0)
+
+        def _run() -> None:
+            while not self._prewarm_keepalive_stop.wait(interval):
+                try:
+                    prewarm(None, force=True)
+                except Exception:
+                    logger.debug(
+                        "Periodic trading connection prewarm failed for %s",
+                        self.exchange_name,
+                        exc_info=True,
+                    )
+
+        self._prewarm_keepalive_stop.clear()
+        thread = threading.Thread(
+            target=_run,
+            name=f"{self.exchange_name}-prewarm-keepalive",
+            daemon=True,
+        )
+        thread.start()
+        self._prewarm_keepalive_thread = thread
+
+    def _stop_prewarm_keepalive_loop(self) -> None:
+        thread = self._prewarm_keepalive_thread
+        if not thread:
+            return
+
+        self._prewarm_keepalive_stop.set()
+        thread.join(timeout=5.0)
+        self._prewarm_keepalive_thread = None
 
     def _attach_shared_session(self, client: Any) -> None:
         if not client or self._shared_http_session is None:
@@ -1087,6 +1134,7 @@ class ExchangeConnection:
         return False
 
     def close(self) -> None:
+        self._stop_prewarm_keepalive_loop()
         if hasattr(self.rest_client, "close"):
             try:
                 self.rest_client.close()
@@ -1115,6 +1163,7 @@ class ExchangeConnection:
             self._shared_http_session = None
 
     async def aclose(self) -> None:
+        self._stop_prewarm_keepalive_loop()
         if hasattr(self.rest_client, "close"):
             try:
                 self.rest_client.close()
