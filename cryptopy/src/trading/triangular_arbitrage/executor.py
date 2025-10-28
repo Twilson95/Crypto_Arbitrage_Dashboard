@@ -9,7 +9,7 @@ import math
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from cryptopy.src.trading.triangular_arbitrage.exceptions import ExchangeRequestTimeout
 from cryptopy.src.trading.triangular_arbitrage.models import (
@@ -105,6 +105,10 @@ class TriangularArbitrageExecutor:
         self._staggered_runtime_factors: Dict[int, float] = {}
         self._staggered_expected_residuals: Dict[int, Dict[str, Any]] = {}
         self._partial_mode_log_cache: Dict[str, bool] = {}
+        self._minimum_trade_cache: Dict[str, Dict[str, float]] = {}
+        self._minimum_trade_fetch_failures: Set[str] = set()
+
+        self._prime_minimum_trade_cache()
 
     def execute(self, opportunity: TriangularOpportunity) -> List[Dict[str, Any]]:
         if opportunity.profit <= 0:
@@ -299,7 +303,7 @@ class TriangularArbitrageExecutor:
             leg_started_perf = time.perf_counter()
             submit_start = time.perf_counter()
             order, amount, scale = self._submit_leg_order(
-                leg, available_amount, sync_balance=False
+                leg, available_amount, allow_balance_sync=False
             )
             submit_duration = time.perf_counter() - submit_start
             if self.dry_run:
@@ -447,7 +451,7 @@ class TriangularArbitrageExecutor:
                     leg,
                     available_amount,
                     speculative=index > 0,
-                    sync_balance=False,
+                    allow_balance_sync=False,
                 )
                 submit_duration = time.perf_counter() - submit_start
                 state["orders"].append(order)
@@ -632,18 +636,29 @@ class TriangularArbitrageExecutor:
         }
 
     def _minimum_trade_requirements(self, leg: TriangularTradeLeg) -> Dict[str, float]:
+        cached = self._minimum_trade_cache.get(leg.symbol)
+        if cached is not None:
+            return cached
+
+        return self._refresh_minimum_trade_requirements(leg.symbol)
+
+    def _refresh_minimum_trade_requirements(self, symbol: str) -> Dict[str, float]:
         fetcher = getattr(self.exchange, "get_min_trade_values", None)
         if not callable(fetcher):
+            self._minimum_trade_cache[symbol] = {}
             return {}
 
         try:
-            raw_limits = fetcher(leg.symbol)
+            raw_limits = fetcher(symbol)
         except Exception as exc:  # pragma: no cover - network dependent
-            logger.debug(
-                "Unable to fetch minimum trade limits for %s: %s",
-                leg.symbol,
-                exc,
-            )
+            if symbol not in self._minimum_trade_fetch_failures:
+                logger.debug(
+                    "Unable to fetch minimum trade limits for %s: %s",
+                    symbol,
+                    exc,
+                )
+                self._minimum_trade_fetch_failures.add(symbol)
+            self._minimum_trade_cache[symbol] = {}
             return {}
 
         limits: Dict[str, float] = {}
@@ -655,7 +670,26 @@ class TriangularArbitrageExecutor:
                 coerced = self._safe_float(value)
                 if coerced is not None and coerced > 0:
                     limits[key] = coerced
+
+        self._minimum_trade_cache[symbol] = limits
         return limits
+
+    def _prime_minimum_trade_cache(self) -> None:
+        fetcher = getattr(self.exchange, "get_min_trade_values", None)
+        lister = getattr(self.exchange, "list_symbols", None)
+        if not callable(fetcher) or not callable(lister):
+            return
+
+        try:
+            symbols = list(lister())
+        except Exception:  # pragma: no cover - network dependent
+            logger.debug("Unable to prime minimum trade cache", exc_info=True)
+            return
+
+        for symbol in symbols:
+            if symbol in self._minimum_trade_cache:
+                continue
+            self._refresh_minimum_trade_requirements(symbol)
 
     def _ensure_minimum_trade_size(
         self,
@@ -826,6 +860,7 @@ class TriangularArbitrageExecutor:
                     current_state["leg"],
                     residual,
                     speculative=False,
+                    allow_balance_sync=True,
                 )
             except MinimumTradeSizeError as exc:
                 logger.info(
@@ -919,7 +954,7 @@ class TriangularArbitrageExecutor:
         leg_started_perf = time.perf_counter()
         try:
             order, amount, scale = self._submit_leg_order(
-                leg, available_amount, sync_balance=False
+                leg, available_amount, allow_balance_sync=False
             )
         except MinimumTradeSizeError as exc:
             logger.info(
@@ -1366,7 +1401,7 @@ class TriangularArbitrageExecutor:
         available_amount: float,
         *,
         speculative: bool = False,
-        sync_balance: bool = True,
+        allow_balance_sync: bool = False,
     ) -> Tuple[Dict[str, Any], float, float]:
         """Create a market order for ``leg``, retrying when funds are marginal."""
 
@@ -1378,13 +1413,15 @@ class TriangularArbitrageExecutor:
         attempt_available = float(available_amount)
         last_error: Optional[Exception] = None
 
-        force_sync_balance = sync_balance
+        force_sync_balance = allow_balance_sync
 
         for attempt in range(attempts):
             if speculative:
                 synced_available = float(attempt_available)
             else:
-                should_sync_balance = force_sync_balance or attempt > 0
+                should_sync_balance = (
+                    allow_balance_sync and (force_sync_balance or attempt > 0)
+                )
                 if should_sync_balance:
                     synced_available = self._sync_available_with_exchange(
                         leg, attempt_available
@@ -1402,12 +1439,16 @@ class TriangularArbitrageExecutor:
 
             if amount <= 0:
                 if speculative:
-                    synced_after_error = self._sync_available_with_exchange(
-                        leg, attempt_available
-                    )
-                    if synced_after_error > 0 and synced_after_error != attempt_available:
-                        attempt_available = synced_after_error
-                        continue
+                    if allow_balance_sync:
+                        synced_after_error = self._sync_available_with_exchange(
+                            leg, attempt_available
+                        )
+                        if (
+                            synced_after_error > 0
+                            and synced_after_error != attempt_available
+                        ):
+                            attempt_available = synced_after_error
+                            continue
                     if self.staggered_leg_delay > 0:
                         time.sleep(self.staggered_leg_delay)
                     continue
@@ -1432,9 +1473,12 @@ class TriangularArbitrageExecutor:
                     )
                     if self.staggered_leg_delay > 0:
                         time.sleep(self.staggered_leg_delay)
-                    refreshed = self._sync_available_with_exchange(leg, float("inf"))
-                    if math.isfinite(refreshed) and refreshed > attempt_available:
-                        attempt_available = refreshed
+                    if allow_balance_sync:
+                        refreshed = self._sync_available_with_exchange(
+                            leg, float("inf")
+                        )
+                        if math.isfinite(refreshed) and refreshed > attempt_available:
+                            attempt_available = refreshed
                     continue
                 raise
 
@@ -1448,7 +1492,8 @@ class TriangularArbitrageExecutor:
             except Exception as exc:
                 if not self.dry_run and self._is_temporary_request_error(exc):
                     last_error = exc
-                    force_sync_balance = True
+                    if allow_balance_sync:
+                        force_sync_balance = True
                     logger.warning(
                         "Exchange request timed out for %s %s (attempt %s/%s); retrying",
                         leg.side.upper(),
@@ -1464,13 +1509,18 @@ class TriangularArbitrageExecutor:
                     raise
 
                 last_error = exc
-                force_sync_balance = True
+                if allow_balance_sync:
+                    force_sync_balance = True
                 if speculative:
-                    synced_after_error = self._sync_available_with_exchange(
-                        leg, attempt_available
-                    )
-                    if synced_after_error > 0 and synced_after_error < attempt_available:
-                        attempt_available = synced_after_error
+                    if allow_balance_sync:
+                        synced_after_error = self._sync_available_with_exchange(
+                            leg, attempt_available
+                        )
+                        if (
+                            synced_after_error > 0
+                            and synced_after_error < attempt_available
+                        ):
+                            attempt_available = synced_after_error
                     if self.staggered_leg_delay > 0:
                         time.sleep(self.staggered_leg_delay)
                     continue
