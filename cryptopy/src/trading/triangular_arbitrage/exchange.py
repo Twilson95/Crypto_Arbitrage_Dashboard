@@ -205,6 +205,85 @@ class ExchangeConnection:
 
         return self._market_cache
 
+    def refresh_trading_fees(self, symbols: Optional[Sequence[str]] = None) -> Dict[str, float]:
+        """Refresh cached taker fee rates for ``symbols`` when supported by the exchange.
+
+        Returns a mapping of symbols whose fees were updated to their refreshed taker
+        rates. When ``symbols`` is omitted, the method attempts to refresh all
+        available pairs via the bulk endpoint without issuing per-symbol requests.
+        """
+
+        updated: Dict[str, float] = {}
+        if symbols:
+            unique_symbols = [symbol for symbol in dict.fromkeys(symbols) if symbol in self._market_cache]
+        else:
+            unique_symbols = []
+
+        requested = set(unique_symbols)
+
+        client_has = getattr(self.rest_client, "has", {})
+        has_bulk = bool(client_has.get("fetchTradingFees")) if isinstance(client_has, dict) else False
+        if not has_bulk and hasattr(client_has, "get"):
+            has_bulk = bool(client_has.get("fetchTradingFees"))  # type: ignore[arg-type]
+
+        if has_bulk:
+            try:
+                payload = self.rest_client.fetch_trading_fees()
+            except Exception:  # pragma: no cover - network dependent
+                logger.debug("fetch_trading_fees refresh call failed", exc_info=True)
+            else:
+                if isinstance(payload, dict):
+                    for symbol, info in payload.items():
+                        taker_fee = info.get("taker") if isinstance(info, dict) else None
+                        if taker_fee is None:
+                            continue
+                        try:
+                            rate = float(taker_fee)
+                        except (TypeError, ValueError):  # pragma: no cover - defensive cast
+                            continue
+                        self._trading_fee_cache[symbol] = rate
+                        self._fee_source[symbol] = "fetchTradingFees"
+                        self._fee_fetch_failures.discard(symbol)
+                        if not requested or symbol in requested:
+                            updated[symbol] = rate
+
+                if not symbols:
+                    return updated
+
+        targets = [symbol for symbol in unique_symbols if symbol not in updated]
+        if not targets and symbols:
+            targets = [symbol for symbol in requested if symbol not in updated]
+
+        has_single = bool(client_has.get("fetchTradingFee")) if isinstance(client_has, dict) else False
+        if not has_single and hasattr(client_has, "get"):
+            has_single = bool(client_has.get("fetchTradingFee"))  # type: ignore[arg-type]
+
+        if has_single and targets:
+            for symbol in targets:
+                try:
+                    payload = self.rest_client.fetch_trading_fee(symbol)
+                except Exception:  # pragma: no cover - network dependent
+                    self._fee_fetch_failures.add(symbol)
+                    logger.debug(
+                        "fetch_trading_fee refresh call failed for %s", symbol, exc_info=True
+                    )
+                    continue
+
+                taker_fee = payload.get("taker") if isinstance(payload, dict) else None
+                if taker_fee is None:
+                    continue
+                try:
+                    rate = float(taker_fee)
+                except (TypeError, ValueError):  # pragma: no cover - defensive cast
+                    continue
+
+                self._trading_fee_cache[symbol] = rate
+                self._fee_source[symbol] = "fetchTradingFee"
+                self._fee_fetch_failures.discard(symbol)
+                updated[symbol] = rate
+
+        return updated
+
     def _select_prewarm_symbol(self, preferred: Optional[str] = None) -> Optional[str]:
         if preferred and preferred in self._market_cache:
             return preferred

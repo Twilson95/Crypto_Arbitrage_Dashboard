@@ -68,6 +68,7 @@ STAGGERED_SLIPPAGE_ASSUMPTION_DEFAULT = 0.01
 PRE_TRADE_SLIPPAGE_ENABLED_DEFAULT = False
 PRE_TRADE_SLIPPAGE_DEPTH_DEFAULT = 10
 MIN_DAILY_VOLUME_DEFAULT = 0.0
+REFRESH_TRADING_FEES_DEFAULT = True
 ENABLE_BENCHMARKING_DEFAULT = False
 BENCHMARK_INTERVAL_DEFAULT = 1.0
 ASSET_FILTER_DEFAULT: Sequence[str] = ("USD",
@@ -1697,6 +1698,30 @@ async def run_from_args(args: argparse.Namespace) -> None:
             logger.info(f"Logging executed trades to {trade_log_path}")
 
     symbols = sorted({symbol for route in routes for symbol in route.symbols})
+    refreshed_fees: Dict[str, float] = {}
+    if args.refresh_trading_fees:
+        try:
+            refreshed_fees = exchange.refresh_trading_fees(symbols)
+        except Exception as exc:
+            logger.warning(
+                "Failed to refresh taker fees via exchange API; continuing with cached rates: %s",
+                exc,
+            )
+        else:
+            if refreshed_fees:
+                min_refreshed = min(refreshed_fees.values())
+                max_refreshed = max(refreshed_fees.values())
+                avg_refreshed = sum(refreshed_fees.values()) / len(refreshed_fees)
+                logger.info(
+                    "Refreshed taker fees for %d symbol(s): min=%.4f%% max=%.4f%% avg=%.4f%%",
+                    len(refreshed_fees),
+                    min_refreshed * 100.0,
+                    max_refreshed * 100.0,
+                    avg_refreshed * 100.0,
+                )
+            else:
+                logger.debug("Taker fee refresh completed without overrides from the exchange API.")
+
     fee_lookup = {symbol: float(exchange.get_taker_fee(symbol)) for symbol in symbols}
     if fee_lookup:
         min_fee = min(fee_lookup.values())
@@ -1854,6 +1879,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Minimum 24h volume required for markets to participate in route discovery. "
             "Values are interpreted in the exchange's reported units (typically quote currency)."
+        ),
+    )
+    parser.add_argument(
+        "--refresh-trading-fees",
+        action=argparse.BooleanOptionalAction,
+        default=REFRESH_TRADING_FEES_DEFAULT,
+        help=(
+            "Fetch account-specific taker fees from the exchange before evaluating opportunities. "
+            "Disable to rely solely on cached market metadata."
         ),
     )
     parser.add_argument(

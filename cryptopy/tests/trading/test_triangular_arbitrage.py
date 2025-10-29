@@ -627,6 +627,61 @@ def test_exchange_connection_applies_credentials_for_orders(monkeypatch):
     assert connection.rest_client.balance_calls == 1
 
 
+def test_refresh_trading_fees_prefers_account_rates(monkeypatch):
+    from cryptopy.src.trading.triangular_arbitrage import exchange as exchange_module
+
+    class DummyExchange:
+        def __init__(self, config):
+            self.config = config
+            self.has = {"fetchTradingFees": True, "fetchTradingFee": True}
+            self.fees = {"trading": {"taker": 0.004}}
+            self.markets = {
+                "AAA/BBB": {"taker": 0.004},
+                "CCC/DDD": {"taker": 0.004},
+            }
+
+        def load_markets(self):
+            return self.markets
+
+        def fetch_trading_fees(self):
+            return {"AAA/BBB": {"taker": 0.0035}, "ZZZ/YYY": {"taker": 0.0020}}
+
+        def fetch_trading_fee(self, symbol):
+            if symbol != "CCC/DDD":
+                raise AssertionError(f"Unexpected symbol requested: {symbol}")
+            return {"taker": 0.0033}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(exchange_module, "ccxt", SimpleNamespace(dummy=DummyExchange))
+    monkeypatch.setattr(exchange_module, "ccxtpro", None)
+    monkeypatch.setattr(exchange_module, "CcxtNotSupported", Exception)
+
+    connection = exchange_module.ExchangeConnection(
+        "dummy",
+        use_testnet=False,
+        enable_websocket=False,
+        make_trades=False,
+    )
+
+    initial_fee = connection.get_taker_fee("CCC/DDD")
+    assert initial_fee == pytest.approx(0.004)
+
+    refreshed = connection.refresh_trading_fees(["AAA/BBB", "CCC/DDD"])
+
+    assert set(refreshed) == {"AAA/BBB", "CCC/DDD"}
+    assert refreshed["AAA/BBB"] == pytest.approx(0.0035)
+    assert refreshed["CCC/DDD"] == pytest.approx(0.0033)
+
+    assert connection.get_taker_fee("AAA/BBB") == pytest.approx(0.0035)
+    assert connection.get_taker_fee("CCC/DDD") == pytest.approx(0.0033)
+
+    sources = connection.get_fee_sources()
+    assert sources["AAA/BBB"] == "fetchTradingFees"
+    assert sources["CCC/DDD"] == "fetchTradingFee"
+
+
 def test_exchange_connection_raises_when_credentials_invalid(monkeypatch):
     from cryptopy.src.trading.triangular_arbitrage import exchange as exchange_module
 
