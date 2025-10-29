@@ -154,15 +154,15 @@ def test_profitable_route_detected():
 
     prices = {
         "BTC/USD": make_price_snapshot("BTC/USD", bid=101.0, ask=100.0),
-        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.55, ask=0.5),
-        "ETH/USD": make_price_snapshot("ETH/USD", bid=0.55, ask=0.56),
+        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.011, ask=0.010),
+        "ETH/USD": make_price_snapshot("ETH/USD", bid=1.08, ask=1.09),
     }
 
     opportunity = calculator.evaluate_route(route, prices, starting_amount=1000.0)
 
     assert opportunity is not None
     assert opportunity.final_amount > opportunity.starting_amount
-    assert pytest.approx(opportunity.profit_percentage, rel=1e-3) > 5.0
+    assert opportunity.profit_percentage > 5.0
     assert opportunity.final_amount_without_fees >= opportunity.final_amount
     assert pytest.approx(opportunity.fee_impact, rel=1e-9) == pytest.approx(
         opportunity.profit_without_fees - opportunity.profit, rel=1e-9
@@ -177,8 +177,8 @@ def test_route_filtered_when_below_threshold():
 
     prices = {
         "BTC/USD": make_price_snapshot("BTC/USD", bid=101.0, ask=100.0),
-        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.5, ask=0.5),
-        "ETH/USD": make_price_snapshot("ETH/USD", bid=0.5, ask=0.5),
+        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.010, ask=0.010),
+        "ETH/USD": make_price_snapshot("ETH/USD", bid=1.0, ask=1.0),
     }
 
     opportunity = calculator.evaluate_route(
@@ -195,8 +195,8 @@ def test_insufficient_liquidity_raises():
 
     prices = {
         "BTC/USD": make_price_snapshot("BTC/USD", bid=101.0, ask=None),
-        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.55, ask=0.5),
-        "ETH/USD": make_price_snapshot("ETH/USD", bid=0.55, ask=0.56),
+        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.011, ask=0.010),
+        "ETH/USD": make_price_snapshot("ETH/USD", bid=1.08, ask=1.09),
     }
 
     with pytest.raises(InsufficientLiquidityError):
@@ -212,8 +212,8 @@ def test_executor_places_orders_in_sequence(tmp_path):
 
     prices = {
         "BTC/USD": make_price_snapshot("BTC/USD", bid=101.0, ask=100.0),
-        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.55, ask=0.5),
-        "ETH/USD": make_price_snapshot("ETH/USD", bid=0.55, ask=0.56),
+        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.011, ask=0.010),
+        "ETH/USD": make_price_snapshot("ETH/USD", bid=1.08, ask=1.09),
     }
 
     opportunity = calculator.evaluate_route(route, prices, starting_amount=100.0)
@@ -270,8 +270,8 @@ def test_executor_uses_realised_amounts_to_size_orders():
     route = TriangularRoute(("BTC/USD", "BTC/ETH", "ETH/USD"), "USD")
 
     prices = {
-        "BTC/USD": make_price_snapshot("BTC/USD", bid=99.5, ask=100.0),
-        "BTC/ETH": make_price_snapshot("BTC/ETH", bid=0.05, ask=0.051),
+        "BTC/USD": make_price_snapshot("BTC/USD", bid=100.5, ask=99.0),
+        "BTC/ETH": make_price_snapshot("BTC/ETH", bid=0.0505, ask=0.0495),
         "ETH/USD": make_price_snapshot("ETH/USD", bid=1995.0, ask=2000.0),
     }
 
@@ -309,10 +309,10 @@ def test_find_routes_respects_max_route_length():
 
     prices = {
         "BTC/USD": make_price_snapshot("BTC/USD", bid=101.0, ask=100.0),
-        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.55, ask=0.5),
+        "ETH/BTC": make_price_snapshot("ETH/BTC", bid=0.011, ask=0.010),
         "XRP/ETH": make_price_snapshot("XRP/ETH", bid=0.002, ask=0.0018),
         "XRP/USD": make_price_snapshot("XRP/USD", bid=0.55, ask=0.56),
-        "ETH/USD": make_price_snapshot("ETH/USD", bid=0.55, ask=0.56),
+        "ETH/USD": make_price_snapshot("ETH/USD", bid=1.08, ask=1.09),
     }
 
     opportunities, stats = calculator.find_profitable_routes(
@@ -459,6 +459,38 @@ def test_market_filter_respects_asset_filter():
     assert stats.retained == 1
     assert stats.skipped_by_reason.get("asset_filter") == 2
 
+
+def test_market_filter_respects_min_daily_volume():
+    markets = {
+        "ETH/USD": {
+            "active": True,
+            "base": "ETH",
+            "quote": "USD",
+            "info": {"quoteVolume": "500000"},
+        },
+        "LTC/USD": {
+            "active": True,
+            "base": "LTC",
+            "quote": "USD",
+            "quoteVolume": 2_000_000,
+        },
+        "DOGE/USD": {
+            "active": True,
+            "base": "DOGE",
+            "quote": "USD",
+        },
+    }
+
+    filtered, stats = filter_markets_for_triangular_routes(
+        markets,
+        starting_currencies=["USD"],
+        min_daily_volume=1_000_000,
+    )
+
+    assert "LTC/USD" in filtered
+    assert "ETH/USD" not in filtered
+    assert "DOGE/USD" in filtered  # Missing volume should not exclude the market.
+    assert stats.skipped_by_reason.get("low_volume") == 1
 
 def test_generate_routes_respects_asset_filter():
     markets = {
