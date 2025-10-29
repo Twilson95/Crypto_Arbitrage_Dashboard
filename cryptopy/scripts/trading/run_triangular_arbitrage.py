@@ -28,6 +28,7 @@ from cryptopy.src.trading.triangular_arbitrage import (
     ExchangeConnection,
     ExchangeRequestTimeout,
     InsufficientLiquidityError,
+    OrderBookSnapshot,
     PriceSnapshot,
     PrecisionAdapter,
     SlippageSimulation,
@@ -64,6 +65,10 @@ SLIPPAGE_USAGE_FRACTION_DEFAULT = 0.10
 PARTIAL_FILL_MODE_DEFAULT = "staggered"
 STAGGERED_LEG_DELAY_DEFAULT = 0.025
 STAGGERED_SLIPPAGE_ASSUMPTION_DEFAULT = 0.01
+PRE_TRADE_SLIPPAGE_ENABLED_DEFAULT = False
+PRE_TRADE_SLIPPAGE_DEPTH_DEFAULT = 10
+MIN_DAILY_VOLUME_DEFAULT = 0.0
+REFRESH_TRADING_FEES_DEFAULT = True
 ENABLE_BENCHMARKING_DEFAULT = False
 BENCHMARK_INTERVAL_DEFAULT = 1.0
 ASSET_FILTER_DEFAULT: Sequence[str] = ("USD",
@@ -107,6 +112,10 @@ MARKET_FILTER_REASON_DESCRIPTIONS = {
     "asset_filter": (
         "Base or quote currency falls outside the configured asset filter, so the market was "
         "excluded from discovery."
+    ),
+    "low_volume": (
+        "Reported 24h volume fell below the configured minimum, suggesting insufficient liquidity for "
+        "reliable execution."
     ),
 }
 
@@ -479,11 +488,38 @@ def _split_currency_parts(value: str) -> Tuple[str, Optional[str]]:
     return main, suffix or None
 
 
+def _extract_daily_volume(metadata: Dict[str, object]) -> Optional[float]:
+    """Extract the reported 24-hour volume from market metadata when available."""
+
+    candidates: List[object] = []
+    for key in ("quoteVolume", "baseVolume", "volume"):
+        if key in metadata:
+            candidates.append(metadata.get(key))
+
+    info = metadata.get("info")
+    if isinstance(info, dict):
+        for key in ("quoteVolume", "baseVolume", "volume"):
+            if key in info:
+                candidates.append(info.get(key))
+
+    for raw_value in candidates:
+        if raw_value in (None, ""):
+            continue
+        try:
+            numeric = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if numeric > 0:
+            return numeric
+    return None
+
+
 def filter_markets_for_triangular_routes(
     markets: Dict[str, Dict[str, object]],
     *,
     starting_currencies: Optional[Sequence[str]] = None,
     asset_filter: Optional[Sequence[str]] = None,
+    min_daily_volume: float = MIN_DAILY_VOLUME_DEFAULT,
 ) -> Tuple[Dict[str, Dict[str, object]], MarketFilterStats]:
     """Remove inactive or derivative markets that cannot seed triangular routes."""
 
@@ -528,6 +564,12 @@ def filter_markets_for_triangular_routes(
         if allowed_assets is not None:
             if base_main.upper() not in allowed_assets or quote_main.upper() not in allowed_assets:
                 skipped["asset_filter"] += 1
+                continue
+
+        if min_daily_volume > 0.0:
+            volume = _extract_daily_volume(metadata)
+            if volume is not None and volume < min_daily_volume:
+                skipped["low_volume"] += 1
                 continue
 
         settle_value = metadata.get("settle")
@@ -839,6 +881,8 @@ async def evaluate_and_execute(
     evaluation_interval: float,
     enable_execution: bool,
     price_max_age: float,
+    pre_trade_slippage: bool,
+    pre_trade_slippage_depth: int,
     slippage_action: str,
     max_slippage_percentage: Optional[float],
     slippage_order_book_depth: int,
@@ -1027,30 +1071,119 @@ async def evaluate_and_execute(
                 formatted,
             )
         slippage_decision: Optional[SlippageDecision] = None
+        order_books: Optional[Dict[str, OrderBookSnapshot]] = None
+        precision_adapter: Optional[PrecisionAdapter] = None
 
-        if slippage_action != "ignore":
+        need_order_books = pre_trade_slippage or slippage_action != "ignore"
+        if need_order_books:
             precision_adapter = PrecisionAdapter(
                 amount_to_precision=exchange.amount_to_precision,
                 cost_to_precision=exchange.cost_to_precision,
             )
+            fetch_depth = 0
+            if pre_trade_slippage:
+                fetch_depth = max(fetch_depth, max(int(pre_trade_slippage_depth), 1))
+            if slippage_action != "ignore":
+                fetch_depth = max(fetch_depth, max(int(slippage_order_book_depth), 1))
             try:
                 order_books = {}
-                depth = max(int(slippage_order_book_depth), 1)
                 for symbol in raw_best.route.symbols:
                     order_books[symbol] = await asyncio.to_thread(
                         exchange.get_order_book,
                         symbol,
-                        limit=depth,
+                        limit=fetch_depth,
                     )
             except Exception as exc:
+                contexts: List[str] = []
+                if pre_trade_slippage:
+                    contexts.append("pre-trade slippage")
+                if slippage_action != "ignore":
+                    contexts.append("slippage")
+                reason = " and ".join(contexts) if contexts else "slippage"
                 logger.info(
-                    "Skipping opportunity because order book retrieval failed while estimating slippage for %s: %s",
+                    "Skipping opportunity because order book retrieval failed while estimating %s for %s: %s",
+                    reason,
                     " -> ".join(raw_best.route.symbols),
                     exc,
                 )
                 continue
 
+        if pre_trade_slippage:
+            assert order_books is not None  # for type-checkers
+            try:
+                pre_trade_simulation = simulate_opportunity_with_order_books(
+                    raw_best,
+                    order_books,
+                    starting_amount=raw_best.starting_amount,
+                    precision=precision_adapter,
+                )
+            except InsufficientLiquidityError as exc:
+                logger.info(
+                    "Skipping opportunity because pre-trade slippage estimation reported insufficient depth for %s: %s",
+                    " -> ".join(raw_best.route.symbols),
+                    exc,
+                )
+                continue
+            except Exception as exc:
+                logger.info(
+                    "Skipping opportunity because pre-trade slippage estimation failed for %s: %s",
+                    " -> ".join(raw_best.route.symbols),
+                    exc,
+                )
+                continue
+            expected_final = raw_best.final_amount
+            actual_final = pre_trade_simulation.opportunity.final_amount
+            total_slippage = (
+                ((expected_final - actual_final) / expected_final) * 100.0
+                if expected_final
+                else 0.0
+            )
+            max_leg_slippage = max(
+                (leg.slippage_pct for leg in pre_trade_simulation.legs),
+                default=0.0,
+            )
+            max_output_slippage = max(
+                (leg.output_slippage_pct for leg in pre_trade_simulation.legs),
+                default=0.0,
+            )
+            logger.info(
+                "Pre-trade slippage estimate for %s: total %.4f%% (max leg price %.4f%% / output %.4f%%); "
+                "adjusted profit %.6f (%.4f%%)",
+                " -> ".join(raw_best.route.symbols),
+                total_slippage,
+                max_leg_slippage,
+                max_output_slippage,
+                pre_trade_simulation.opportunity.profit,
+                pre_trade_simulation.opportunity.profit_percentage,
+            )
+            best = pre_trade_simulation.opportunity
+
+        if slippage_action != "ignore":
+            if order_books is None or precision_adapter is None:
+                precision_adapter = PrecisionAdapter(
+                    amount_to_precision=exchange.amount_to_precision,
+                    cost_to_precision=exchange.cost_to_precision,
+                )
+                try:
+                    order_books = {}
+                    depth = max(int(slippage_order_book_depth), 1)
+                    for symbol in raw_best.route.symbols:
+                        order_books[symbol] = await asyncio.to_thread(
+                            exchange.get_order_book,
+                            symbol,
+                            limit=depth,
+                        )
+                except Exception as exc:
+                    logger.info(
+                        "Skipping opportunity because order book retrieval failed while estimating slippage for %s: %s",
+                        " -> ".join(raw_best.route.symbols),
+                        exc,
+                    )
+                    continue
+
             def _simulate_scale(scale: float) -> SlippageDecision:
+                assert order_books is not None
+                assert precision_adapter is not None
                 simulation = simulate_opportunity_with_order_books(
                     raw_best,
                     order_books,
@@ -1511,6 +1644,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
         markets,
         starting_currencies=[starting_currency],
         asset_filter=asset_filter or None,
+        min_daily_volume=max(float(args.min_daily_volume), 0.0),
     )
     if market_filter_stats.skipped:
         sorted_reasons = sorted(
@@ -1564,6 +1698,30 @@ async def run_from_args(args: argparse.Namespace) -> None:
             logger.info(f"Logging executed trades to {trade_log_path}")
 
     symbols = sorted({symbol for route in routes for symbol in route.symbols})
+    refreshed_fees: Dict[str, float] = {}
+    if args.refresh_trading_fees:
+        try:
+            refreshed_fees = exchange.refresh_trading_fees(symbols)
+        except Exception as exc:
+            logger.warning(
+                "Failed to refresh taker fees via exchange API; continuing with cached rates: %s",
+                exc,
+            )
+        else:
+            if refreshed_fees:
+                min_refreshed = min(refreshed_fees.values())
+                max_refreshed = max(refreshed_fees.values())
+                avg_refreshed = sum(refreshed_fees.values()) / len(refreshed_fees)
+                logger.info(
+                    "Refreshed taker fees for %d symbol(s): min=%.4f%% max=%.4f%% avg=%.4f%%",
+                    len(refreshed_fees),
+                    min_refreshed * 100.0,
+                    max_refreshed * 100.0,
+                    avg_refreshed * 100.0,
+                )
+            else:
+                logger.debug("Taker fee refresh completed without overrides from the exchange API.")
+
     fee_lookup = {symbol: float(exchange.get_taker_fee(symbol)) for symbol in symbols}
     if fee_lookup:
         min_fee = min(fee_lookup.values())
@@ -1637,6 +1795,8 @@ async def run_from_args(args: argparse.Namespace) -> None:
             evaluation_interval=args.evaluation_interval,
             enable_execution=args.enable_execution,
             price_max_age=price_max_age,
+            pre_trade_slippage=args.enable_pre_trade_slippage,
+            pre_trade_slippage_depth=max(int(args.pre_trade_slippage_depth), 1),
             slippage_action=args.slippage_action,
             max_slippage_percentage=args.max_slippage_percentage,
             slippage_order_book_depth=args.slippage_order_book_depth,
@@ -1713,6 +1873,24 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--min-daily-volume",
+        type=float,
+        default=MIN_DAILY_VOLUME_DEFAULT,
+        help=(
+            "Minimum 24h volume required for markets to participate in route discovery. "
+            "Values are interpreted in the exchange's reported units (typically quote currency)."
+        ),
+    )
+    parser.add_argument(
+        "--refresh-trading-fees",
+        action=argparse.BooleanOptionalAction,
+        default=REFRESH_TRADING_FEES_DEFAULT,
+        help=(
+            "Fetch account-specific taker fees from the exchange before evaluating opportunities. "
+            "Disable to rely solely on cached market metadata."
+        ),
+    )
+    parser.add_argument(
         "--starting-amount",
         type=float,
         default=100.0,
@@ -1766,6 +1944,21 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=20,
         help="Number of order book levels to request when estimating slippage.",
+    )
+    parser.add_argument(
+        "--enable-pre-trade-slippage",
+        action=argparse.BooleanOptionalAction,
+        default=PRE_TRADE_SLIPPAGE_ENABLED_DEFAULT,
+        help=(
+            "Estimate order book slippage before execution and adjust the expected profit "
+            "accordingly before proceeding."
+        ),
+    )
+    parser.add_argument(
+        "--pre-trade-slippage-depth",
+        type=int,
+        default=PRE_TRADE_SLIPPAGE_DEPTH_DEFAULT,
+        help="Order book depth (levels) to request when estimating pre-trade slippage.",
     )
     parser.add_argument(
         "--slippage-scale-min",
