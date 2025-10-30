@@ -83,7 +83,7 @@ class TriangularArbitrageExecutor:
         *,
         dry_run: bool = True,
         trade_log_path: Optional[Union[str, Path]] = None,
-        partial_fill_mode: str = "staggered",
+        partial_fill_mode: str = "wait",
         staggered_leg_delay: float = 0.1,
         staggered_slippage_assumption: Optional[Sequence[float]] = None,
     ) -> None:
@@ -101,7 +101,7 @@ class TriangularArbitrageExecutor:
             processed = [max(0.0, float(value)) for value in staggered_slippage_assumption]
             self._staggered_slippage = tuple(processed)
         else:
-            self._staggered_slippage = (0.01,)
+            self._staggered_slippage = (0.0,)
         self._staggered_runtime_factors: Dict[int, float] = {}
         self._staggered_expected_residuals: Dict[int, Dict[str, Any]] = {}
         self._partial_mode_log_cache: Dict[str, bool] = {}

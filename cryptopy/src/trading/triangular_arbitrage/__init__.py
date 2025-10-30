@@ -20,6 +20,10 @@ from cryptopy.src.trading.triangular_arbitrage.slippage import (
     SlippageSimulation,
     simulate_opportunity_with_order_books,
 )
+from cryptopy.src.trading.triangular_arbitrage.slippage_stream import (
+    OpportunitySlippageUpdate,
+    stream_opportunity_slippage,
+)
 
 __all__ = [
     "ExchangeConnection",
@@ -37,4 +41,6 @@ __all__ = [
     "PrecisionAdapter",
     "SlippageSimulation",
     "simulate_opportunity_with_order_books",
+    "OpportunitySlippageUpdate",
+    "stream_opportunity_slippage",
 ]
