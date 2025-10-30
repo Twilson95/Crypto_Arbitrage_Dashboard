@@ -61,8 +61,31 @@ class OrderBookSnapshot:
 
     @classmethod
     def from_ccxt(cls, symbol: str, order_book: Dict[str, Any]) -> "OrderBookSnapshot":
-        bids = sorted(order_book.get("bids", []), key=lambda level: level[0], reverse=True)
-        asks = sorted(order_book.get("asks", []), key=lambda level: level[0])
+        def _normalise(levels: List[Any]) -> List[Tuple[float, float]]:
+            normalised: List[Tuple[float, float]] = []
+            for level in levels:
+                if level is None:
+                    continue
+                if not isinstance(level, (list, tuple)) or len(level) < 2:
+                    continue
+                price_raw, amount_raw = level[0], level[1]
+                try:
+                    price = float(price_raw)
+                    amount = float(amount_raw)
+                except (TypeError, ValueError):
+                    continue
+                normalised.append((price, amount))
+            return normalised
+
+        bids = sorted(
+            _normalise(order_book.get("bids", [])),
+            key=lambda level: level[0],
+            reverse=True,
+        )
+        asks = sorted(
+            _normalise(order_book.get("asks", [])),
+            key=lambda level: level[0],
+        )
         timestamp = order_book.get("timestamp")
         if timestamp:
             timestamp = float(timestamp) / 1000.0
