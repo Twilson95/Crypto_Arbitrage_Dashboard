@@ -926,6 +926,7 @@ class ExchangeConnection:
         limit: int = 10,
         poll_interval: float = 2.0,
         websocket_timeout: Optional[float] = 10.0,
+        require_websocket: bool = False,
     ) -> AsyncIterator[OrderBookSnapshot]:
         async def _poll_rest() -> AsyncIterator[OrderBookSnapshot]:
             while True:
@@ -947,6 +948,12 @@ class ExchangeConnection:
                 and self.market_data_websocket_client is not None
                 and not websocket_permanently_unavailable
             ):
+                if require_websocket and not hasattr(
+                    self.market_data_websocket_client, "watch_order_book"
+                ):
+                    raise AttributeError(
+                        f"{self.exchange_name} websocket order book not supported for {symbol}"
+                    )
                 try:
                     if websocket_timeout and websocket_timeout > 0:
                         order_book = await asyncio.wait_for(
@@ -956,6 +963,8 @@ class ExchangeConnection:
                     else:
                         order_book = await self.market_data_websocket_client.watch_order_book(symbol, limit)
                 except (CcxtNotSupported, AttributeError):  # type: ignore[misc]
+                    if require_websocket:
+                        raise
                     if not websocket_failed:
                         logger.info(
                             f"{self.exchange_name} websocket order book not supported for {symbol}; falling back to REST polling."
@@ -965,6 +974,8 @@ class ExchangeConnection:
                     websocket_permanently_unavailable = True
                     continue
                 except asyncio.TimeoutError:
+                    if require_websocket:
+                        raise
                     if not websocket_failed:
                         logger.warning(
                             f"{self.exchange_name} websocket order book timed out for {symbol}; falling back to REST polling."
@@ -977,6 +988,8 @@ class ExchangeConnection:
                     websocket_failed = True
                     continue
                 except Exception as exc:  # pragma: no cover - network failure path
+                    if require_websocket:
+                        raise
                     if not websocket_failed:
                         logger.warning(
                             f"{self.exchange_name} websocket order book failed for {symbol}; falling back to REST polling ({exc})."
@@ -992,6 +1005,11 @@ class ExchangeConnection:
                     websocket_failed = False
                     yield OrderBookSnapshot.from_ccxt(symbol, order_book)
                     continue
+
+            if require_websocket:
+                raise RuntimeError(
+                    f"{self.exchange_name} websocket order book unavailable for {symbol}"
+                )
 
             async for snapshot in _poll_rest():
                 yield snapshot

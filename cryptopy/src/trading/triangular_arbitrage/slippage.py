@@ -237,6 +237,9 @@ def simulate_opportunity_with_order_books(
         _ensure_positive(symbol, expected_amount_in, "Trade amount")
         _ensure_positive(symbol, expected_amount_out, "Trade output")
 
+        actual_amount_in_trade: float
+        actual_amount_out_trade: float
+
         if planned_leg.side == "buy":
             current_amount = _quantize_cost(symbol, current_amount)
             current_amount_without_fees = _quantize_cost(
@@ -256,8 +259,8 @@ def simulate_opportunity_with_order_books(
             base_without_fee_flow = quote_without_fees / vwap if vwap > 0 else 0.0
             base_without_fee_flow = _quantize_amount(symbol, base_without_fee_flow)
 
-            actual_amount_in = quote_spent
-            actual_amount_out = base_after_fee
+            actual_amount_in_trade = quote_spent
+            actual_amount_out_trade = base_after_fee
 
             adjusted_trades.append(
                 TriangularTradeLeg(
@@ -298,8 +301,8 @@ def simulate_opportunity_with_order_books(
             quote_without_fee_flow = base_without_fee * vwap
             quote_without_fee_flow = _quantize_cost(symbol, quote_without_fee_flow)
 
-            actual_amount_in = base_sold
-            actual_amount_out = quote_after_fee
+            actual_amount_in_trade = base_sold
+            actual_amount_out_trade = quote_after_fee
 
             adjusted_trades.append(
                 TriangularTradeLeg(
@@ -330,16 +333,16 @@ def simulate_opportunity_with_order_books(
                 vwap_price=vwap,
                 slippage_pct=slippage_pct,
                 expected_amount_in=expected_amount_in,
-                actual_amount_in=actual_amount_in,
+                actual_amount_in=expected_amount_in,
                 input_slippage_pct=(
-                    ((expected_amount_in - actual_amount_in) / expected_amount_in) * 100.0
+                    ((expected_amount_in - actual_amount_in_trade) / expected_amount_in) * 100.0
                     if expected_amount_in
                     else 0.0
                 ),
                 expected_amount_out=expected_amount_out,
-                actual_amount_out=actual_amount_out,
+                actual_amount_out=expected_amount_out,
                 output_slippage_pct=(
-                    ((expected_amount_out - actual_amount_out) / expected_amount_out) * 100.0
+                    ((expected_amount_out - actual_amount_out_trade) / expected_amount_out) * 100.0
                     if expected_amount_out
                     else 0.0
                 ),

@@ -122,6 +122,8 @@ class AdaptiveMockExchange(MockExchange):
             "filled": amount,
             "price": price,
             "average": price,
+            "status": "closed",
+            "remaining": 0.0,
             **kwargs,
         }
         if side == "buy":
@@ -294,8 +296,13 @@ def test_executor_uses_realised_amounts_to_size_orders():
     assert pytest.approx(second_order["amount"], rel=1e-9) == pytest.approx(realised_after_buy, rel=1e-9)
 
     # The final leg should operate on the proceeds of the second leg.
-    expected_usd = second_order["cost"] - second_order["fees"][0]["cost"]
-    assert pytest.approx(third_order["cost"] - third_order["fees"][0]["cost"], rel=1e-9) == pytest.approx(expected_usd, rel=1e-9)
+    expected_eth = second_order["cost"] - second_order["fees"][0]["cost"]
+    assert pytest.approx(third_order["amount"], rel=1e-9) == pytest.approx(
+        expected_eth, rel=1e-9
+    )
+    assert pytest.approx(third_order["filled"], rel=1e-9) == pytest.approx(
+        expected_eth, rel=1e-9
+    )
 
 
 def test_find_routes_respects_max_route_length():
