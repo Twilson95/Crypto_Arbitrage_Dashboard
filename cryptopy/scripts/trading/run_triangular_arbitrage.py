@@ -71,6 +71,7 @@ MIN_DAILY_VOLUME_DEFAULT = 100_000
 REFRESH_TRADING_FEES_DEFAULT = False
 ENABLE_BENCHMARKING_DEFAULT = False
 BENCHMARK_INTERVAL_DEFAULT = 1.0
+MAX_SLIPPAGE_PERCENTAGE = 0.1
 ASSET_FILTER_DEFAULT: Sequence[str] = ("USD",
                                        "USDC","USDT","USDG",
                                        "BTC","ETH","SOL","DOGE","ADA","XRP",
@@ -1936,7 +1937,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-slippage-percentage",
         type=float,
-        default=None,
+        default=MAX_SLIPPAGE_PERCENTAGE,
         help="Maximum acceptable aggregate slippage percentage when evaluating order book depth.",
     )
     parser.add_argument(
