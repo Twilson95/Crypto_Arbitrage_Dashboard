@@ -72,6 +72,7 @@ REFRESH_TRADING_FEES_DEFAULT = False
 ENABLE_BENCHMARKING_DEFAULT = False
 BENCHMARK_INTERVAL_DEFAULT = 1.0
 MAX_SLIPPAGE_PERCENTAGE = 0.1
+PREWARM_KEEPALIVE_INTERVAL_DEFAULT = 480.0
 ASSET_FILTER_DEFAULT: Sequence[str] = ("USD",
                                        "USDC","USDT","USDG",
                                        "BTC","ETH","SOL","DOGE","ADA","XRP",
@@ -1607,6 +1608,9 @@ async def run_from_args(args: argparse.Namespace) -> None:
         if not 0 <= args.slippage_usage_fraction <= 1:
             raise SystemExit("--slippage-usage-fraction must be between 0 and 1 (inclusive).")
 
+    if args.prewarm_keepalive_interval <= 0:
+        raise SystemExit("--prewarm-keepalive-interval must be positive.")
+
     price_refresh_interval = max(args.price_refresh_interval, 0.1)
     price_max_age = max(args.price_max_age, price_refresh_interval)
 
@@ -1621,6 +1625,8 @@ async def run_from_args(args: argparse.Namespace) -> None:
         enable_websocket=not args.disable_websocket,
         make_trades=args.live_trading,
     )
+
+    exchange._PREWARM_KEEPALIVE_INTERVAL = float(args.prewarm_keepalive_interval)
 
     if args.use_testnet and not exchange.sandbox_supported:
         logger.warning(
@@ -1927,7 +1933,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--slippage-action",
         choices=["ignore", "reject", "scale"],
-        default="ignore",
+        default="reject",
         help=(
             "Strategy to apply when order book depth indicates slippage: "
             "'ignore' keeps previous behaviour, 'reject' skips trades over the threshold, "
@@ -1989,6 +1995,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Fraction of the slippage-adjusted trade size to actually execute to reserve depth for other market "
             "participants (e.g. 0.6 to only use 60%% of the depth that satisfies the slippage constraint)."
+        ),
+    )
+    parser.add_argument(
+        "--prewarm-keepalive-interval",
+        type=float,
+        default=PREWARM_KEEPALIVE_INTERVAL_DEFAULT,
+        help=(
+            "Seconds between background trading-connection keepalive pings."
+            " Values below 60 seconds are automatically clamped."
         ),
     )
     parser.add_argument(
