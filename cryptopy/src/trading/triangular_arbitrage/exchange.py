@@ -5,7 +5,7 @@ import asyncio
 import concurrent.futures
 import logging
 import threading
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Sequence
+from typing import Any, AsyncIterator, Callable, Dict, Iterable, List, Optional, Sequence, Set
 
 from cryptopy.src.trading.triangular_arbitrage.models import OrderBookSnapshot
 
@@ -42,6 +42,25 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency missing
 
 SANDBOX_MARKET_DATA_UNAVAILABLE = {
     "kraken",
+}
+
+
+DEFAULT_STABLECOIN_CODES: Set[str] = {
+    "USD",
+    "USDT",
+    "USDC",
+    "USDP",
+    "USDS",
+    "USDK",
+    "USDD",
+    "USDL",
+    "DAI",
+    "TUSD",
+    "GUSD",
+    "FDUSD",
+    "BUSD",
+    "PAX",
+    "USDX",
 }
 
 
@@ -180,6 +199,9 @@ class ExchangeConnection:
             self._default_fee = float(self._default_fee) if self._default_fee is not None else None
         except (TypeError, ValueError):  # pragma: no cover - defensive cast
             self._default_fee = None
+
+        self._stablecoin_fallback_fee: Optional[float] = None
+        self._stablecoin_currencies: Set[str] = set(DEFAULT_STABLECOIN_CODES)
 
         self._trading_fee_cache: Dict[str, float] = {}
         self._fee_source: Dict[str, str] = {}
@@ -839,15 +861,60 @@ class ExchangeConnection:
                         self._fee_source[symbol] = "fetchTradingFee"
                         return rate
 
-        rate = float(self._default_fee or 0.0)
+        rate, source = self._fallback_taker_fee(symbol)
         self._trading_fee_cache[symbol] = rate
-        self._fee_source.setdefault(symbol, "default")
+        self._fee_source[symbol] = source
         return rate
 
     def get_fee_sources(self) -> Dict[str, str]:
         """Return a mapping of symbols to the source of their taker fee."""
 
         return dict(self._fee_source)
+
+    def configure_fallback_taker_fees(
+        self,
+        *,
+        default: Optional[float] = None,
+        stablecoin: Optional[float] = None,
+        stablecoin_currencies: Optional[Iterable[str]] = None,
+    ) -> None:
+        """Override fallback taker fee assumptions used when exchanges omit rates.
+
+        ``default`` sets the general fallback applied to non-stablecoin pairs when
+        the exchange does not provide a symbol-specific fee. ``stablecoin``
+        controls the fallback used when both the base and quote currency are
+        recognised as stablecoins. ``stablecoin_currencies`` extends the set of
+        recognised stablecoins, allowing exchanges with bespoke tickers to opt
+        into the reduced fee tier.
+        """
+
+        default_changed = False
+        stablecoin_changed = False
+
+        if default is not None:
+            self._default_fee = float(default)
+            default_changed = True
+
+        if stablecoin is not None:
+            self._stablecoin_fallback_fee = float(stablecoin)
+            stablecoin_changed = True
+
+        if stablecoin_currencies:
+            for code in stablecoin_currencies:
+                if not code:
+                    continue
+                self._stablecoin_currencies.add(str(code).upper())
+            stablecoin_changed = True
+
+        if not (default_changed or stablecoin_changed):
+            return
+
+        for symbol, source in list(self._fee_source.items()):
+            if source not in {"default", "stablecoin-default"}:
+                continue
+            rate, source_name = self._fallback_taker_fee(symbol)
+            self._trading_fee_cache[symbol] = rate
+            self._fee_source[symbol] = source_name
 
     @staticmethod
     def _coerce_float(value: Any) -> Optional[float]:
@@ -883,6 +950,30 @@ class ExchangeConnection:
                     result["amount"] = coerced
 
         return result
+
+    def _fallback_taker_fee(self, symbol: str) -> tuple[float, str]:
+        if self._stablecoin_fallback_fee is not None and self._is_stablecoin_pair(symbol):
+            return float(self._stablecoin_fallback_fee), "stablecoin-default"
+
+        return float(self._default_fee or 0.0), "default"
+
+    def _is_stablecoin_pair(self, symbol: str) -> bool:
+        market = self._market_cache.get(symbol)
+        base = None
+        quote = None
+
+        if isinstance(market, dict):
+            base = market.get("base")
+            quote = market.get("quote")
+
+        if base is None or quote is None:
+            if "/" in symbol:
+                base, quote = symbol.split("/", 1)
+
+        if base is None or quote is None:
+            return False
+
+        return base.upper() in self._stablecoin_currencies and quote.upper() in self._stablecoin_currencies
 
     def _prime_trading_fee_cache(self) -> None:
         """Attempt to populate the taker fee cache using exchange endpoints."""
