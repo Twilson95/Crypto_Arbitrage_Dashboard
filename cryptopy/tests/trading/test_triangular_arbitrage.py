@@ -689,6 +689,54 @@ def test_refresh_trading_fees_prefers_account_rates(monkeypatch):
     assert sources["CCC/DDD"] == "fetchTradingFee"
 
 
+def test_configure_fallback_taker_fees_updates_cache(monkeypatch):
+    from cryptopy.src.trading.triangular_arbitrage import exchange as exchange_module
+
+    class DummyExchange:
+        def __init__(self, config):
+            self.config = config
+            self.has = {"fetchTradingFees": False, "fetchTradingFee": False}
+            self.fees = {"trading": {"taker": 0.004}}
+            self.markets = {
+                "AAA/BBB": {"base": "AAA", "quote": "BBB"},
+                "USDC/USD": {"base": "USDC", "quote": "USD"},
+            }
+
+        def load_markets(self):
+            return self.markets
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(exchange_module, "ccxt", SimpleNamespace(dummy=DummyExchange))
+    monkeypatch.setattr(exchange_module, "ccxtpro", None)
+    monkeypatch.setattr(exchange_module, "CcxtNotSupported", Exception)
+
+    connection = exchange_module.ExchangeConnection(
+        "dummy",
+        use_testnet=False,
+        enable_websocket=False,
+        make_trades=False,
+    )
+
+    assert connection.get_taker_fee("AAA/BBB") == pytest.approx(0.004)
+
+    connection.configure_fallback_taker_fees(default=0.0035)
+
+    assert connection.get_taker_fee("AAA/BBB") == pytest.approx(0.0035)
+    assert connection.get_fee_sources()["AAA/BBB"] == "default"
+
+    connection.configure_fallback_taker_fees(
+        stablecoin=0.002,
+        stablecoin_currencies=["usd", "usdc"],
+    )
+
+    assert connection.get_taker_fee("USDC/USD") == pytest.approx(0.002)
+    sources = connection.get_fee_sources()
+    assert sources["USDC/USD"] == "stablecoin-default"
+    assert connection.get_taker_fee("AAA/BBB") == pytest.approx(0.0035)
+
+
 def test_exchange_connection_raises_when_credentials_invalid(monkeypatch):
     from cryptopy.src.trading.triangular_arbitrage import exchange as exchange_module
 
