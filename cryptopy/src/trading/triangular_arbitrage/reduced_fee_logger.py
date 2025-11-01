@@ -82,10 +82,6 @@ class ReducedFeeOpportunityLogger:
             return
         estimated_profit = reduced.starting_amount * (estimated_profit_pct / 100.0)
 
-        slippage_payload = dict(slippage_details) if slippage_details else {}
-        slippage_payload.setdefault("estimated_impact_pct", max(slippage_impact_pct, 0.0))
-        slippage_payload.setdefault("applied", slippage_impact_pct > 0 or bool(slippage_details))
-
         record = {
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "context": {
@@ -109,7 +105,9 @@ class ReducedFeeOpportunityLogger:
                 "estimated_profit_pct": estimated_profit_pct,
                 "profit_gain_pct": estimated_profit_pct - adjusted_opportunity.profit_percentage,
             },
-            "slippage": slippage_payload,
+            "slippage": slippage_details or {
+                "estimated_impact_pct": max(slippage_impact_pct, 0.0),
+            },
         }
 
         self._append(record)
@@ -154,7 +152,7 @@ class ReducedFeeOpportunityLogger:
                 "estimated_profit_pct": reduced.profit_percentage,
                 "profit_gain_pct": reduced.profit_percentage - opportunity.profit_percentage,
             },
-            "slippage": {"estimated_impact_pct": 0.0, "applied": False},
+            "slippage": {"estimated_impact_pct": 0.0},
         }
 
         self._append(record)
