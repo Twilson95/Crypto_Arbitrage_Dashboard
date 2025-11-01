@@ -38,7 +38,13 @@ class ReducedFeeLogContext:
 
 
 class ReducedFeeOpportunityLogger:
-    """Re-evaluates opportunities with reduced fees and logs profitable cases."""
+    """Re-evaluates opportunities with reduced fees and logs profitable cases.
+
+    The logger always records the live slippage outcome alongside the replayed
+    reduced-fee result. When slippage simulation rejects an opportunity, the
+    impact carried in ``slippage_details`` is persisted; otherwise a zero-impact
+    placeholder is stored to make the assumption explicit in the log output.
+    """
 
     def __init__(
         self,
