@@ -1798,7 +1798,6 @@ async def run_from_args(args: argparse.Namespace) -> None:
         slippage_buffer=args.slippage_buffer,
     )
     reduced_fee_logger = ReducedFeeOpportunityLogger(exchange)
-    logger.info("Logging reduced-fee opportunities to %s", reduced_fee_logger.log_path)
     executor: Optional[TriangularArbitrageExecutor] = None
     staggered_slippage = (
         args.staggered_slippage_assumption

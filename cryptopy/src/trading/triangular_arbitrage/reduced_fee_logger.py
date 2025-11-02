@@ -53,10 +53,7 @@ class ReducedFeeOpportunityLogger:
         reduced_taker_fee: float = 0.0024,
         log_path: Path | str = "reduced_fee_opportunities.jsonl",
     ) -> None:
-        log_path_obj = Path(log_path).expanduser()
-        if not log_path_obj.is_absolute():
-            log_path_obj = Path.cwd() / log_path_obj
-        self._log_path = log_path_obj
+        self._log_path = Path(log_path)
         self._reduced_taker_fee = float(reduced_taker_fee)
         self._calculator = TriangularArbitrageCalculator(
             _ReducedFeeExchangeProxy(exchange, self._reduced_taker_fee)
@@ -85,10 +82,6 @@ class ReducedFeeOpportunityLogger:
             return
         estimated_profit = reduced.starting_amount * (estimated_profit_pct / 100.0)
 
-        slippage_payload = dict(slippage_details) if slippage_details else {}
-        slippage_payload.setdefault("estimated_impact_pct", max(slippage_impact_pct, 0.0))
-        slippage_payload.setdefault("applied", slippage_impact_pct > 0 or bool(slippage_details))
-
         record = {
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "context": {
@@ -112,16 +105,12 @@ class ReducedFeeOpportunityLogger:
                 "estimated_profit_pct": estimated_profit_pct,
                 "profit_gain_pct": estimated_profit_pct - adjusted_opportunity.profit_percentage,
             },
-            "slippage": slippage_payload,
+            "slippage": slippage_details or {
+                "estimated_impact_pct": max(slippage_impact_pct, 0.0),
+            },
         }
 
         self._append(record)
-
-    @property
-    def log_path(self) -> Path:
-        """Absolute path where reduced-fee opportunities are persisted."""
-
-        return self._log_path
 
     def log_from_stats(
         self,
@@ -163,7 +152,7 @@ class ReducedFeeOpportunityLogger:
                 "estimated_profit_pct": reduced.profit_percentage,
                 "profit_gain_pct": reduced.profit_percentage - opportunity.profit_percentage,
             },
-            "slippage": {"estimated_impact_pct": 0.0, "applied": False},
+            "slippage": {"estimated_impact_pct": 0.0},
         }
 
         self._append(record)
