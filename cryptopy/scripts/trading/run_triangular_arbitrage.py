@@ -37,6 +37,10 @@ from cryptopy.src.trading.triangular_arbitrage import (
     TriangularRoute,
     simulate_opportunity_with_order_books,
 )
+from cryptopy.src.trading.triangular_arbitrage.reduced_fee_logger import (
+    ReducedFeeLogContext,
+    ReducedFeeOpportunityLogger,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -894,6 +898,7 @@ async def evaluate_and_execute(
     slippage_usage_fraction: float,
     trigger_queue: "asyncio.Queue[str]",
     stop_event: asyncio.Event,
+    reduced_fee_logger: Optional[ReducedFeeOpportunityLogger] = None,
 ) -> None:
     """Evaluate cached prices and execute profitable opportunities."""
 
@@ -989,6 +994,13 @@ async def evaluate_and_execute(
                 logger.info("; ".join(message_parts))
             continue
 
+        evaluation_context = ReducedFeeLogContext(
+            reason=reason_summary,
+            evaluation_started=evaluation_started_wall_clock,
+            candidate_routes=candidate_count,
+            evaluable_routes=evaluable_route_count,
+        )
+
         try:
             opportunities, stats = calculator.find_profitable_routes(
                 candidate_routes,
@@ -1021,6 +1033,13 @@ async def evaluate_and_execute(
                 f"{stats.evaluation_errors} route(s) encountered errors, "
                 f"{stats.filtered_by_length} route(s) exceeded the length limit."
             )
+            if reduced_fee_logger and stats.best_opportunity:
+                reduced_fee_logger.log_from_stats(
+                    fresh_prices,
+                    stats.best_opportunity,
+                    min_profit_percentage=min_profit_percentage,
+                    context=evaluation_context,
+                )
             if stats.evaluation_error_reasons:
                 sorted_reasons = sorted(
                     stats.evaluation_error_reasons.items(), key=lambda item: item[1], reverse=True
@@ -1044,8 +1063,11 @@ async def evaluate_and_execute(
 
         selected_opportunity: Optional[TriangularOpportunity] = None
         selected_raw: Optional[TriangularOpportunity] = None
+        selected_slippage_details: Optional[Dict[str, float]] = None
+        selected_slippage_impact_pct: float = 0.0
 
         for index, raw_best in enumerate(opportunities):
+            candidate_slippage_details: Optional[Dict[str, float]] = None
             if index == 0:
                 logger.info(
                     f"Best opportunity: route={' -> '.join(raw_best.route.symbols)} "
@@ -1175,6 +1197,13 @@ async def evaluate_and_execute(
                     pre_trade_simulation.opportunity.profit,
                     pre_trade_simulation.opportunity.profit_percentage,
                 )
+                candidate_slippage_details = {
+                    "source": "pre_trade",
+                    "total_pct": total_slippage,
+                    "max_leg_price_pct": max_leg_slippage,
+                    "max_leg_output_pct": max_output_slippage,
+                    "adjusted_profit_pct": pre_trade_simulation.opportunity.profit_percentage,
+                }
                 best = pre_trade_simulation.opportunity
 
             if slippage_action != "ignore":
@@ -1497,9 +1526,24 @@ async def evaluate_and_execute(
                             for leg in slippage_decision.simulation.legs
                         )
                         logger.info("Per-leg slippage estimates: %s", leg_details)
+                    details = candidate_slippage_details or {}
+                    if "total_pct" in details and "pre_trade_total_pct" not in details:
+                        details["pre_trade_total_pct"] = details["total_pct"]
+                    details.update(
+                        {
+                            "source": "slippage_action",
+                            "total_pct": slippage_decision.total_slippage_pct,
+                            "max_leg_price_pct": slippage_decision.max_leg_slippage_pct,
+                            "max_leg_output_pct": slippage_decision.max_leg_output_slippage_pct,
+                            "scale": slippage_decision.scale,
+                        }
+                    )
+                    candidate_slippage_details = details
 
             selected_opportunity = best
             selected_raw = raw_best
+            selected_slippage_details = candidate_slippage_details
+            selected_slippage_impact_pct = raw_best.profit_percentage - best.profit_percentage
             break
 
         if selected_opportunity is None or selected_raw is None:
@@ -1511,6 +1555,8 @@ async def evaluate_and_execute(
 
         best = selected_opportunity
         raw_best = selected_raw
+        slippage_impact_pct = selected_slippage_impact_pct
+        slippage_details_for_logging = selected_slippage_details
 
         planning_ready_at = perf_counter()
         planning_latency = planning_ready_at - evaluation_started_at
@@ -1527,6 +1573,16 @@ async def evaluate_and_execute(
                 best.profit_percentage,
                 min_profit_percentage,
             )
+            if reduced_fee_logger and raw_best is not None:
+                reduced_fee_logger.log_from_opportunity(
+                    fresh_prices,
+                    raw_best,
+                    best,
+                    min_profit_percentage=min_profit_percentage,
+                    context=evaluation_context,
+                    slippage_impact_pct=slippage_impact_pct,
+                    slippage_details=slippage_details_for_logging,
+                )
             continue
 
         profit_signature = (round(best.final_amount, 8), round(best.profit_percentage, 4))
@@ -1741,6 +1797,8 @@ async def run_from_args(args: argparse.Namespace) -> None:
         exchange,
         slippage_buffer=args.slippage_buffer,
     )
+    reduced_fee_logger = ReducedFeeOpportunityLogger(exchange)
+    logger.info("Logging reduced-fee opportunities to %s", reduced_fee_logger.log_path)
     executor: Optional[TriangularArbitrageExecutor] = None
     staggered_slippage = (
         args.staggered_slippage_assumption
@@ -1869,6 +1927,7 @@ async def run_from_args(args: argparse.Namespace) -> None:
             slippage_usage_fraction=args.slippage_usage_fraction,
             trigger_queue=trigger_queue,
             stop_event=stop_event,
+            reduced_fee_logger=reduced_fee_logger,
         ),
         name="arbitrage-evaluator",
     )
